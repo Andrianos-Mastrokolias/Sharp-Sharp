@@ -1,0 +1,48 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+  background: #111;
+}
+
+canvas {
+  display: block;
+}
+
+.hud {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  color: white;
+  background: rgba(0, 0, 0, 0.65);
+  padding: 18px 22px;
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.hud h1 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  color: #f1d04f;
+}
+
+.hud p {
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+
+#speed {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 14px;
+}
+
+.instructions {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #dddddd;
+}
