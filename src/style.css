@@ -162,3 +162,7 @@ canvas {
 
   color: #ffcf4a;
 }
+
+.game-over.delivered h1 {
+  color: #3ddc84;
+}

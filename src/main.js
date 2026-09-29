@@ -38,6 +38,10 @@ import {
   SkyManager
 } from './graphics/SkyManager.js';
 
+import {
+  LevelManager
+} from './world/LevelManager.js';
+
 
 // ==================================================
 // SCENE
@@ -1473,6 +1477,78 @@ applyLevelVisuals(
 
 
 // ==================================================
+// LEVEL MANAGER (spawn, route, destination)
+// ==================================================
+
+const deliveredOverlay =
+  document.createElement(
+    'div'
+  );
+
+
+deliveredOverlay.className =
+  'game-over delivered';
+
+
+deliveredOverlay.style.display =
+  'none';
+
+
+document.body.appendChild(
+  deliveredOverlay
+);
+
+
+const levelManager =
+  new LevelManager({
+
+    scene,
+
+    vehicle,
+
+    taxi,
+
+    onDelivered:
+      (event) => {
+
+        deliveredOverlay.innerHTML = `
+
+          <h1>
+            DELIVERED!
+          </h1>
+
+          <p>
+            Time: ${
+              event.time.toFixed(1)
+            } s
+          </p>
+
+          <p>
+            Cargo: ${
+              event.cargo.remaining
+            } / ${
+              event.cargo.total
+            }
+          </p>
+
+          <p>
+            Press R to replay
+          </p>
+        `;
+
+
+        deliveredOverlay.style.display =
+          'flex';
+      }
+  });
+
+
+levelManager.load(
+  1
+);
+
+
+// ==================================================
 // GAME FUNCTIONS
 // ==================================================
 
@@ -1518,6 +1594,13 @@ function restartGame() {
 
 
   vehicle.reset();
+
+
+  levelManager.reset();
+
+
+  deliveredOverlay.style.display =
+    'none';
 
 
   vehicle.setEnabled(
@@ -1612,6 +1695,15 @@ window.addEventListener(
       vehicle.setLevel(
         1
       );
+
+
+      levelManager.load(
+        1
+      );
+
+
+      deliveredOverlay.style.display =
+        'none';
     }
 
 
@@ -1628,6 +1720,15 @@ window.addEventListener(
       vehicle.setLevel(
         2
       );
+
+
+      levelManager.load(
+        2
+      );
+
+
+      deliveredOverlay.style.display =
+        'none';
     }
 
 
@@ -1644,6 +1745,15 @@ window.addEventListener(
       vehicle.setLevel(
         3
       );
+
+
+      levelManager.load(
+        3
+      );
+
+
+      deliveredOverlay.style.display =
+        'none';
     }
   }
 );
@@ -1918,6 +2028,21 @@ function animate() {
 
 
   // ----------------------------------------------
+  // LEVEL OBJECTIVE
+  // ----------------------------------------------
+
+  if (
+    !gameOver
+  ) {
+
+    levelManager.update(
+      dt,
+      elapsedTime
+    );
+  }
+
+
+  // ----------------------------------------------
   // CARGO
   // ----------------------------------------------
 
@@ -1985,9 +2110,28 @@ function animate() {
     getCargoState();
 
 
+  const objective =
+    levelManager.getState();
+
+
   levelLabel.textContent =
     getLevelName(
       currentLevel
+    ) +
+
+    (
+      objective.status ===
+      'driving'
+        ? ` — ${
+            Math.round(
+              objective
+                .distanceToDestination
+            )
+          } m to destination (stop in the zone)`
+        : objective.status ===
+          'delivered'
+          ? ' — Delivered!'
+          : ''
     );
 
 
