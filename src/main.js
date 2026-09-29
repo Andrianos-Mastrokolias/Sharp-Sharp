@@ -14,34 +14,47 @@ import {
   VehicleController
 } from './vehicle/VehicleController.js';
 
+import {
+  CameraSystem
+} from './cameras/CameraSystem.js';
 
-// --------------------------------------------------
-// 1. Scene
-// --------------------------------------------------
+import {
+  LightingManager
+} from './graphics/LightingManager.js';
+
+import {
+  EffectsManager
+} from './graphics/EffectsManager.js';
+
+import {
+  DustSystem
+} from './graphics/DustSystem.js';
+
+import {
+  MaterialLibrary
+} from './graphics/MaterialLibrary.js';
+
+import {
+  SkyManager
+} from './graphics/SkyManager.js';
+
+
+// ==================================================
+// SCENE
+// ==================================================
 
 const scene =
   new THREE.Scene();
 
-scene.background =
-  new THREE.Color(
-    0x87b9d9
-  );
 
-scene.fog =
-  new THREE.Fog(
-    0x87b9d9,
-    80,
-    250
-  );
-
-
-// --------------------------------------------------
-// 2. Camera
-// --------------------------------------------------
+// ==================================================
+// CAMERA
+// ==================================================
 
 const camera =
   new THREE.PerspectiveCamera(
-    70,
+
+    68,
 
     window.innerWidth /
     window.innerHeight,
@@ -52,88 +65,107 @@ const camera =
   );
 
 
-// --------------------------------------------------
-// 3. Renderer
-// --------------------------------------------------
+// ==================================================
+// RENDERER
+// ==================================================
 
 const renderer =
   new THREE.WebGLRenderer({
-    antialias: true
+
+    antialias:
+      true,
+
+    powerPreference:
+      'high-performance'
   });
 
+
 renderer.setSize(
+
   window.innerWidth,
+
   window.innerHeight
 );
 
+
 renderer.setPixelRatio(
+
   Math.min(
     window.devicePixelRatio,
     2
   )
 );
 
-renderer.shadowMap.enabled =
-  true;
-
-renderer.shadowMap.type =
-  THREE.PCFSoftShadowMap;
 
 document.body.appendChild(
   renderer.domElement
 );
 
 
-// --------------------------------------------------
-// 4. Lighting
-// --------------------------------------------------
+// ==================================================
+// GRAPHICS SYSTEMS
+// ==================================================
 
-scene.add(
-  new THREE.HemisphereLight(
-    0xffffff,
-    0x667788,
-    2
-  )
-);
+const lighting =
+  new LightingManager({
+
+    scene,
+
+    renderer
+  });
 
 
-const sun =
-  new THREE.DirectionalLight(
-    0xffffff,
-    2.5
+const effects =
+  new EffectsManager({
+
+    scene
+  });
+
+
+const materials =
+  new MaterialLibrary(
+    renderer
   );
 
-sun.position.set(
-  -30,
-  60,
-  25
-);
 
-sun.castShadow = true;
+const skyManager =
+  new SkyManager({
 
-sun.shadow.mapSize.set(
-  1024,
-  1024
-);
+    scene,
 
-sun.shadow.camera.left =
-  -100;
-
-sun.shadow.camera.right =
-  100;
-
-sun.shadow.camera.top =
-  100;
-
-sun.shadow.camera.bottom =
-  -100;
-
-scene.add(sun);
+    renderer
+  });
 
 
-// --------------------------------------------------
-// 5. Helpers
-// --------------------------------------------------
+let currentLevel =
+  1;
+
+
+// ==================================================
+// GEOMETRY HELPERS
+// ==================================================
+
+function prepareAO(
+  geometry
+) {
+
+  if (
+    geometry.attributes.uv &&
+    !geometry.attributes.uv1
+  ) {
+
+    geometry.setAttribute(
+
+      'uv1',
+
+      geometry.attributes.uv
+    );
+  }
+
+
+  return geometry;
+}
+
 
 function createBox(
   width,
@@ -141,8 +173,10 @@ function createBox(
   depth,
   color
 ) {
+
   const mesh =
     new THREE.Mesh(
+
       new THREE.BoxGeometry(
         width,
         height,
@@ -150,87 +184,237 @@ function createBox(
       ),
 
       new THREE.MeshStandardMaterial({
-        color
+
+        color,
+
+        roughness:
+          0.82,
+
+        metalness:
+          0.02
       })
     );
 
-  mesh.castShadow = true;
 
-  mesh.receiveShadow = true;
+  mesh.castShadow =
+    true;
+
+
+  mesh.receiveShadow =
+    true;
+
 
   return mesh;
 }
 
 
-// --------------------------------------------------
-// 6. World
-// --------------------------------------------------
+function createTexturedBox(
+  width,
+  height,
+  depth,
+  material
+) {
 
-const collidableObjects = [];
+  const geometry =
+    prepareAO(
+
+      new THREE.BoxGeometry(
+        width,
+        height,
+        depth
+      )
+    );
 
 
-// Ground
+  const mesh =
+    new THREE.Mesh(
+
+      geometry,
+
+      material
+    );
+
+
+  mesh.castShadow =
+    true;
+
+
+  mesh.receiveShadow =
+    true;
+
+
+  return mesh;
+}
+
+
+// ==================================================
+// COLLISIONS
+// ==================================================
+
+const collidableObjects =
+  [];
+
+
+// ==================================================
+// GROUND
+// ==================================================
+
 const ground =
-  createBox(
+  createTexturedBox(
+
     400,
+
     0.2,
+
     400,
-    0x7b9368
+
+    materials
+      .createGrassMaterial()
   );
+
 
 ground.position.y =
   -0.2;
 
-scene.add(ground);
+
+scene.add(
+  ground
+);
 
 
-// Road
+// ==================================================
+// ROAD
+// ==================================================
+
 const road =
-  createBox(
+  createTexturedBox(
+
     18,
+
     0.05,
+
     400,
-    0x30343b
+
+    materials
+      .createRoadMaterial()
   );
+
 
 road.position.y =
   -0.05;
 
-scene.add(road);
+
+scene.add(
+  road
+);
 
 
-// Road markings
+// ==================================================
+// KERBS
+// ==================================================
+
+for (
+  const side
+  of [-1, 1]
+) {
+
+  const kerb =
+    createTexturedBox(
+
+      0.32,
+
+      0.22,
+
+      400,
+
+      materials
+        .createRoughConcreteMaterial(
+          1,
+          80
+        )
+    );
+
+
+  kerb.position.set(
+
+    side *
+    8.75,
+
+    0.04,
+
+    0
+  );
+
+
+  scene.add(
+    kerb
+  );
+}
+
+
+// ==================================================
+// ROAD MARKINGS
+// ==================================================
+
+const lineMaterial =
+  new THREE.MeshStandardMaterial({
+
+    color:
+      0xf1efdc,
+
+    roughness:
+      0.9
+  });
+
+
 for (
   let z = -190;
   z < 200;
   z += 12
 ) {
+
   const line =
-    createBox(
-      0.18,
-      0.02,
-      5,
-      0xf4e9bf
+    new THREE.Mesh(
+
+      new THREE.BoxGeometry(
+        0.15,
+        0.025,
+        5
+      ),
+
+      lineMaterial
     );
+
 
   line.position.set(
     0,
-    0.01,
+    0.015,
     z
   );
 
-  scene.add(line);
+
+  line.receiveShadow =
+    true;
+
+
+  scene.add(
+    line
+  );
 }
 
 
-// Speed bump
+// ==================================================
+// SPEED BUMP
+// ==================================================
+
 const speedBump =
   createBox(
     14,
     0.35,
     3,
-    0xe6b800
+    0xe1b300
   );
+
 
 speedBump.position.set(
   0,
@@ -238,14 +422,22 @@ speedBump.position.set(
   25
 );
 
-scene.add(speedBump);
+
+speedBump.material.roughness =
+  0.9;
 
 
-// --------------------------------------------------
-// Potholes
-// --------------------------------------------------
+scene.add(
+  speedBump
+);
+
+
+// ==================================================
+// POTHOLES
+// ==================================================
 
 const potholes = [
+
   {
     x: 0,
     z: 5,
@@ -273,129 +465,848 @@ for (
   const pothole
   of potholes
 ) {
+
   const visual =
     new THREE.Mesh(
+
       new THREE.CircleGeometry(
         pothole.radius,
-        32
+        40
       ),
 
       new THREE.MeshStandardMaterial({
-        color: 0x171717
+
+        color:
+          0x121212,
+
+        roughness:
+          1
       })
     );
+
 
   visual.rotation.x =
     -Math.PI / 2;
 
+
   visual.position.set(
     pothole.x,
-    0.015,
+    0.018,
     pothole.z
   );
 
-  scene.add(visual);
+
+  visual.receiveShadow =
+    true;
+
+
+  scene.add(
+    visual
+  );
 }
 
 
-// --------------------------------------------------
-// Buildings
-// --------------------------------------------------
+// ==================================================
+// WINDOW MATERIAL
+// ==================================================
+
+const windowMaterial =
+  new THREE.MeshPhysicalMaterial({
+
+    color:
+      0x243843,
+
+    roughness:
+      0.13,
+
+    metalness:
+      0.2,
+
+    clearcoat:
+      0.65,
+
+    clearcoatRoughness:
+      0.14,
+
+    envMapIntensity:
+      1.8
+  });
+
+
+// ==================================================
+// WINDOW FRAME MATERIAL
+// ==================================================
+
+const frameMaterial =
+  new THREE.MeshStandardMaterial({
+
+    color:
+      0x25292b,
+
+    roughness:
+      0.5,
+
+    metalness:
+      0.3
+  });
+
+
+// ==================================================
+// SHOP GLASS
+// ==================================================
+
+const shopGlassMaterial =
+  new THREE.MeshPhysicalMaterial({
+
+    color:
+      0x364a51,
+
+    roughness:
+      0.15,
+
+    metalness:
+      0.15,
+
+    transparent:
+      true,
+
+    opacity:
+      0.82,
+
+    envMapIntensity:
+      1.5
+  });
+
+
+// ==================================================
+// BUILDINGS
+// ==================================================
+
+let buildingIndex =
+  0;
+
 
 for (
   let z = -180;
   z <= 180;
   z += 30
 ) {
+
   for (
     const side
     of [-1, 1]
   ) {
+
+    // ----------------------------------------------
+    // SIDEWALK
+    // ----------------------------------------------
+
     const sidewalk =
-      createBox(
+      createTexturedBox(
+
         7,
+
         0.3,
+
         28,
-        0xb8b8b0
+
+        materials
+          .createPavementMaterial()
       );
+
 
     sidewalk.position.set(
-      side * 12.5,
+
+      side *
+      12.5,
+
       0.05,
+
       z
     );
 
-    scene.add(sidewalk);
 
+    scene.add(
+      sidewalk
+    );
+
+
+    // ----------------------------------------------
+    // BUILDING SIZE
+    // ----------------------------------------------
 
     const height =
-      8 +
+
+      9 +
+
       (
+        buildingIndex %
+        5
+      ) *
+
+      3.2;
+
+
+    const width =
+
+      8.5 +
+
+      (
+        buildingIndex %
+        3
+      ) *
+
+      1.15;
+
+
+    const depth =
+
+      18 +
+
+      (
+        buildingIndex %
+        4
+      ) *
+
+      1.8;
+
+
+    const xOffset =
+
+      side *
+
+      (
+        21 +
+
         (
-          Math.abs(z) +
-          side +
-          5
-        ) % 5
-      ) * 3;
-
-
-    const building =
-      createBox(
-        10,
-        height,
-        22,
-        0x9aa8b1
+          buildingIndex %
+          3
+        ) *
+        0.75
       );
 
+
+    const repeatY =
+      Math.max(
+
+        6,
+
+        height /
+        1.45
+      );
+
+
+    // ----------------------------------------------
+    // BUILDING MATERIAL
+    // ----------------------------------------------
+
+    const useBrick =
+
+      buildingIndex %
+      3 ===
+      1;
+
+
+    let buildingMaterial;
+
+
+    if (
+      useBrick
+    ) {
+
+      buildingMaterial =
+        materials
+          .createBrickBuildingMaterial(
+            repeatY
+          );
+    }
+
+    else {
+
+      const tintOptions = [
+
+        0xffffff,
+
+        0xd9d5ca,
+
+        0xc3c9c7,
+
+        0xe0d6c7
+      ];
+
+
+      buildingMaterial =
+        materials
+          .createConcreteBuildingMaterial(
+
+            repeatY,
+
+            tintOptions[
+              buildingIndex %
+              tintOptions.length
+            ]
+          );
+    }
+
+
+    // ----------------------------------------------
+    // BUILDING
+    // ----------------------------------------------
+
+    const building =
+      createTexturedBox(
+
+        width,
+
+        height,
+
+        depth,
+
+        buildingMaterial
+      );
+
+
     building.position.set(
-      side * 22,
-      height / 2,
+
+      xOffset,
+
+      height /
+      2,
+
       z
     );
 
-    scene.add(building);
+
+    scene.add(
+      building
+    );
+
 
     collidableObjects.push(
       building
+    );
+
+
+    // ----------------------------------------------
+    // ROOF
+    // ----------------------------------------------
+
+    const roof =
+      createTexturedBox(
+
+        width +
+        0.35,
+
+        0.32,
+
+        depth +
+        0.35,
+
+        materials
+          .createRoughConcreteMaterial(
+            4,
+            6
+          )
+      );
+
+
+    roof.position.set(
+
+      xOffset,
+
+      height +
+      0.15,
+
+      z
+    );
+
+
+    scene.add(
+      roof
+    );
+
+
+    // ----------------------------------------------
+    // ROOFTOP SERVICE STRUCTURE
+    // ----------------------------------------------
+
+    if (
+      buildingIndex %
+      2 ===
+      0
+    ) {
+
+      const serviceBox =
+        createTexturedBox(
+
+          2.4,
+
+          1.3,
+
+          3,
+
+          materials
+            .createRoughConcreteMaterial(
+              2,
+              2
+            )
+        );
+
+
+      serviceBox.position.set(
+
+        xOffset,
+
+        height +
+        0.95,
+
+        z +
+        2
+      );
+
+
+      scene.add(
+        serviceBox
+      );
+    }
+
+
+    // ----------------------------------------------
+    // WINDOWS
+    // ----------------------------------------------
+
+    const rows =
+      Math.max(
+
+        2,
+
+        Math.floor(
+          (
+            height -
+            3
+          ) /
+          2.8
+        )
+      );
+
+
+    for (
+      let row = 0;
+      row < rows;
+      row++
+    ) {
+
+      const y =
+
+        3.2 +
+
+        row *
+        2.75;
+
+
+      for (
+        let offset = -3.2;
+        offset <= 3.2;
+        offset += 2.15
+      ) {
+
+        const frontX =
+
+          side *
+
+          (
+            Math.abs(
+              xOffset
+            ) -
+
+            width /
+            2 -
+
+            0.025
+          );
+
+
+        // Frame.
+
+        const frame =
+          new THREE.Mesh(
+
+            new THREE.PlaneGeometry(
+              1.5,
+              1.5
+            ),
+
+            frameMaterial
+          );
+
+
+        frame.position.set(
+
+          frontX,
+
+          y,
+
+          z +
+          offset
+        );
+
+
+        frame.rotation.y =
+
+          side ===
+          -1
+
+            ? Math.PI /
+              2
+
+            : -Math.PI /
+              2;
+
+
+        scene.add(
+          frame
+        );
+
+
+        // Window glass.
+
+        const glass =
+          new THREE.Mesh(
+
+            new THREE.PlaneGeometry(
+              1.22,
+              1.22
+            ),
+
+            windowMaterial
+          );
+
+
+        glass.position.copy(
+          frame.position
+        );
+
+
+        glass.position.x +=
+
+          side ===
+          -1
+
+            ? 0.012
+
+            : -0.012;
+
+
+        glass.rotation.y =
+          frame.rotation.y;
+
+
+        scene.add(
+          glass
+        );
+      }
+    }
+
+
+    // ----------------------------------------------
+    // SHOPFRONTS
+    // ----------------------------------------------
+
+    if (
+      buildingIndex %
+      3 !==
+      2
+    ) {
+
+      const frontX =
+
+        side *
+
+        (
+          Math.abs(
+            xOffset
+          ) -
+
+          width /
+          2 -
+
+          0.04
+        );
+
+
+      const shop =
+        new THREE.Mesh(
+
+          new THREE.PlaneGeometry(
+            4.6,
+            2.1
+          ),
+
+          shopGlassMaterial
+        );
+
+
+      shop.position.set(
+
+        frontX,
+
+        1.25,
+
+        z
+      );
+
+
+      shop.rotation.y =
+
+        side ===
+        -1
+
+          ? Math.PI /
+            2
+
+          : -Math.PI /
+            2;
+
+
+      scene.add(
+        shop
+      );
+
+
+      // Awning.
+
+      const awning =
+        createBox(
+
+          1,
+
+          0.15,
+
+          4.9,
+
+          buildingIndex %
+          2 ===
+          0
+
+            ? 0xb63a2d
+
+            : 0x29577b
+        );
+
+
+      awning.position.set(
+
+        side *
+
+        (
+          Math.abs(
+            xOffset
+          ) -
+
+          width /
+          2 -
+
+          0.35
+        ),
+
+        2.45,
+
+        z
+      );
+
+
+      scene.add(
+        awning
+      );
+    }
+
+
+    buildingIndex++;
+  }
+}
+
+
+// ==================================================
+// STREET LIGHTS
+// ==================================================
+
+const poleMaterial =
+  new THREE.MeshStandardMaterial({
+
+    color:
+      0x42484b,
+
+    roughness:
+      0.4,
+
+    metalness:
+      0.65
+  });
+
+
+for (
+  let z = -160;
+  z <= 160;
+  z += 40
+) {
+
+  for (
+    const side
+    of [-1, 1]
+  ) {
+
+    const pole =
+      new THREE.Mesh(
+
+        new THREE.CylinderGeometry(
+          0.08,
+          0.1,
+          6,
+          10
+        ),
+
+        poleMaterial
+      );
+
+
+    pole.position.set(
+
+      side *
+      9.6,
+
+      3,
+
+      z
+    );
+
+
+    pole.castShadow =
+      true;
+
+
+    scene.add(
+      pole
+    );
+
+
+    const arm =
+      new THREE.Mesh(
+
+        new THREE.BoxGeometry(
+          1.2,
+          0.08,
+          0.08
+        ),
+
+        poleMaterial
+      );
+
+
+    arm.position.set(
+
+      side *
+      9.05,
+
+      5.75,
+
+      z
+    );
+
+
+    scene.add(
+      arm
+    );
+
+
+    const lamp =
+      new THREE.Mesh(
+
+        new THREE.BoxGeometry(
+          0.45,
+          0.12,
+          0.3
+        ),
+
+        new THREE.MeshStandardMaterial({
+
+          color:
+            0xd9d9d1,
+
+          emissive:
+            0xffd98a,
+
+          emissiveIntensity:
+            0.12
+        })
+      );
+
+
+    lamp.position.set(
+
+      side *
+      8.55,
+
+      5.7,
+
+      z
+    );
+
+
+    scene.add(
+      lamp
     );
   }
 }
 
 
-// --------------------------------------------------
-// 7. Taxi
-// --------------------------------------------------
+// ==================================================
+// TAXI
+// ==================================================
 
 const {
+
   taxi,
+
   chassis,
+
   wheels,
+
   frontWheelPivots,
-  cargoItems
+
+  cargoItems,
+
+  toggleHeadlights,
+
+  getHeadlightsEnabled,
+
+  updateVisualEffects
+
 } =
   createTaxi(
     createBox
   );
 
 
-scene.add(taxi);
+scene.add(
+  taxi
+);
 
 
-// --------------------------------------------------
-// 8. Game state
-// --------------------------------------------------
+// ==================================================
+// GAME STATE
+// ==================================================
 
-let gameOver = false;
-
-
-// Fail if only 1 cargo
-// item remains.
-const minimumCargo = 2;
+let gameOver =
+  false;
 
 
-// --------------------------------------------------
-// 9. Game-over overlay
-// --------------------------------------------------
+const minimumCargo =
+  2;
+
+
+// ==================================================
+// GAME OVER UI
+// ==================================================
 
 const gameOverOverlay =
   document.createElement(
@@ -408,7 +1319,10 @@ gameOverOverlay.className =
 
 
 gameOverOverlay.innerHTML = `
-  <h1>GAME OVER</h1>
+
+  <h1>
+    GAME OVER
+  </h1>
 
   <p>
     Too much cargo was lost.
@@ -429,12 +1343,13 @@ document.body.appendChild(
 );
 
 
-// --------------------------------------------------
-// 10. Cargo system
-// --------------------------------------------------
+// ==================================================
+// CARGO
+// ==================================================
 
 const cargoSystem =
   new CargoSystem({
+
     scene,
 
     chassis,
@@ -443,32 +1358,31 @@ const cargoSystem =
 
     cargoItems,
 
-    gravity: -22,
+    gravity:
+      -22,
+
 
     onCargoLost:
       (event) => {
-
-        console.log(
-          `${event.name} lost. ${event.remaining} cargo remaining.`
-        );
-
 
         if (
           event.remaining <
           minimumCargo
         ) {
+
           triggerGameOver();
         }
       }
   });
 
 
-// --------------------------------------------------
-// 11. Vehicle controller
-// --------------------------------------------------
+// ==================================================
+// VEHICLE
+// ==================================================
 
 const vehicle =
   new VehicleController({
+
     taxi,
 
     chassis,
@@ -484,32 +1398,109 @@ const vehicle =
     potholes
   });
 
-  vehicle.setLevel(1);
+
+vehicle.setLevel(
+  1
+);
 
 
-// --------------------------------------------------
-// Clean cargo API
-// --------------------------------------------------
+// ==================================================
+// CAMERA
+// ==================================================
 
-function getCargoState() {
-  return cargoSystem.getState();
+const cameraSystem =
+  new CameraSystem({
+
+    camera,
+
+    taxi,
+
+    renderer
+  });
+
+
+// ==================================================
+// DUST
+// ==================================================
+
+const dustSystem =
+  new DustSystem({
+
+    scene,
+
+    taxi,
+
+    vehicle
+  });
+
+
+// ==================================================
+// LEVEL VISUALS
+// ==================================================
+
+function applyLevelVisuals(
+  level
+) {
+
+  currentLevel =
+    level;
+
+
+  lighting.setLevel(
+    level
+  );
+
+
+  effects.setLevel(
+    level
+  );
+
+
+  dustSystem.setLevel(
+    level
+  );
+
+
+  skyManager.setLevel(
+    level
+  );
 }
 
 
-// --------------------------------------------------
-// 12. Game-over functions
-// --------------------------------------------------
+applyLevelVisuals(
+  1
+);
+
+
+// ==================================================
+// GAME FUNCTIONS
+// ==================================================
+
+function getCargoState() {
+
+  return cargoSystem
+    .getState();
+}
+
 
 function triggerGameOver() {
-  if (gameOver) {
+
+  if (
+    gameOver
+  ) {
+
     return;
   }
 
-  gameOver = true;
+
+  gameOver =
+    true;
+
 
   vehicle.setEnabled(
     false
   );
+
 
   gameOverOverlay.style.display =
     'flex';
@@ -517,30 +1508,44 @@ function triggerGameOver() {
 
 
 function restartGame() {
-  gameOver = false;
+
+  gameOver =
+    false;
+
 
   gameOverOverlay.style.display =
     'none';
 
+
   vehicle.reset();
+
 
   vehicle.setEnabled(
     true
   );
+
+
+  dustSystem.reset();
 }
 
 
-// --------------------------------------------------
-// 13. Keyboard input
-// --------------------------------------------------
+// ==================================================
+// INPUT
+// ==================================================
 
-const keys = {};
+const keys =
+  {};
 
 
 window.addEventListener(
+
   'keydown',
+
   (event) => {
-    keys[event.code] =
+
+    keys[
+      event.code
+    ] =
       true;
 
 
@@ -555,6 +1560,7 @@ window.addEventListener(
         event.code
       )
     ) {
+
       event.preventDefault();
     }
 
@@ -563,174 +1569,123 @@ window.addEventListener(
       event.code ===
       'KeyR'
     ) {
+
       restartGame();
     }
 
+
     if (
-  event.code === 'KeyH' &&
-  vehicle.getLevel() === 3
-) {
-  vehicle.triggerLevel3Hazard(
-    1,
-    1
-  );
-}
+      event.code ===
+      'KeyC' &&
+      !event.repeat
+    ) {
+
+      cameraSystem
+        .nextMode();
+    }
+
+
+    if (
+      event.code ===
+      'KeyL' &&
+      !event.repeat
+    ) {
+
+      toggleHeadlights();
+    }
+
+
+    // ----------------------------------------------
+    // DEVELOPMENT LEVEL SWITCH
+    // ----------------------------------------------
+
+    if (
+      event.code ===
+      'Digit1'
+    ) {
+
+      applyLevelVisuals(
+        1
+      );
+
+
+      vehicle.setLevel(
+        1
+      );
+    }
+
+
+    if (
+      event.code ===
+      'Digit2'
+    ) {
+
+      applyLevelVisuals(
+        2
+      );
+
+
+      vehicle.setLevel(
+        2
+      );
+    }
+
+
+    if (
+      event.code ===
+      'Digit3'
+    ) {
+
+      applyLevelVisuals(
+        3
+      );
+
+
+      vehicle.setLevel(
+        3
+      );
+    }
   }
 );
 
 
 window.addEventListener(
+
   'keyup',
+
   (event) => {
-    keys[event.code] =
+
+    keys[
+      event.code
+    ] =
       false;
   }
 );
 
 
 window.addEventListener(
+
   'blur',
+
   () => {
+
     for (
       const key
       in keys
     ) {
-      keys[key] = false;
+
+      keys[
+        key
+      ] =
+        false;
     }
   }
-
-
 );
 
 
-// --------------------------------------------------
-// 14. Mouse camera
-// --------------------------------------------------
-
-let cameraAngle = 0;
-
-let cameraDistance = 11;
-
-let dragging = false;
-
-let lastMouseX = 0;
-
-
-renderer.domElement
-  .addEventListener(
-    'pointerdown',
-    (event) => {
-      dragging = true;
-
-      lastMouseX =
-        event.clientX;
-
-      renderer.domElement
-        .setPointerCapture(
-          event.pointerId
-        );
-    }
-  );
-
-
-renderer.domElement
-  .addEventListener(
-    'pointermove',
-    (event) => {
-      if (!dragging) {
-        return;
-      }
-
-      cameraAngle +=
-        (
-          event.clientX -
-          lastMouseX
-        ) *
-        0.005;
-
-      lastMouseX =
-        event.clientX;
-    }
-  );
-
-
-renderer.domElement
-  .addEventListener(
-    'pointerup',
-    () => {
-      dragging = false;
-    }
-  );
-
-
-renderer.domElement
-  .addEventListener(
-    'wheel',
-    (event) => {
-      cameraDistance =
-        THREE.MathUtils.clamp(
-          cameraDistance +
-          event.deltaY *
-          0.01,
-
-          6,
-          20
-        );
-    }
-  );
-
-
-// --------------------------------------------------
-// 15. Camera update
-// --------------------------------------------------
-
-function updateCamera(dt) {
-  const angle =
-    taxi.rotation.y +
-    cameraAngle;
-
-
-  const desiredPosition =
-    new THREE.Vector3(
-      taxi.position.x +
-      Math.sin(angle) *
-      cameraDistance,
-
-      taxi.position.y +
-      cameraDistance *
-      0.45,
-
-      taxi.position.z +
-      Math.cos(angle) *
-      cameraDistance
-    );
-
-
-  camera.position.lerp(
-    desiredPosition,
-
-    1 -
-    Math.exp(
-      -6 *
-      dt
-    )
-  );
-
-
-  camera.lookAt(
-    taxi.position.x,
-
-    taxi.position.y +
-    1.5,
-
-    taxi.position.z
-  );
-}
-
-
-// --------------------------------------------------
-// 16. HUD
-// --------------------------------------------------
+// ==================================================
+// HUD
+// ==================================================
 
 const hud =
   document.createElement(
@@ -738,19 +1693,25 @@ const hud =
   );
 
 
-hud.className = 'hud';
+hud.className =
+  'hud';
 
 
 hud.innerHTML = `
-  <h1>SHARP-SHARP</h1>
 
-  <p>
-    Level 1 — Cargo Physics
-  </p>
+  <h1>
+    SHARP-SHARP
+  </h1>
+
+  <p id="level-label"></p>
 
   <div id="speed"></div>
 
   <div id="physics"></div>
+
+  <div id="camera-mode"></div>
+
+  <div id="headlights"></div>
 
   <div id="cargo"></div>
 
@@ -759,12 +1720,33 @@ hud.innerHTML = `
   <div id="cargo-status"></div>
 
   <div class="instructions">
-    W / S — Accelerate / Brake / Reverse<br>
-    A / D — Steer<br>
-    Space — Handbrake<br>
-    Mouse drag — Rotate camera<br>
-    Mouse wheel — Zoom<br>
+
+    W / S — Accelerate / Brake / Reverse
+    <br>
+
+    A / D — Steer
+    <br>
+
+    Space — Handbrake
+    <br>
+
+    C — Change camera
+    <br>
+
+    L — Toggle headlights
+    <br>
+
+    1 / 2 / 3 — Development level test
+    <br>
+
+    Mouse drag — Look around in chase view
+    <br>
+
+    Mouse wheel — Chase camera zoom
+    <br>
+
     R — Restart
+
   </div>
 `;
 
@@ -772,6 +1754,16 @@ hud.innerHTML = `
 document.body.appendChild(
   hud
 );
+
+
+// ==================================================
+// HUD REFERENCES
+// ==================================================
+
+const levelLabel =
+  document.getElementById(
+    'level-label'
+  );
 
 
 const speedDisplay =
@@ -783,6 +1775,18 @@ const speedDisplay =
 const physicsDisplay =
   document.getElementById(
     'physics'
+  );
+
+
+const cameraModeDisplay =
+  document.getElementById(
+    'camera-mode'
+  );
+
+
+const headlightsDisplay =
+  document.getElementById(
+    'headlights'
   );
 
 
@@ -804,15 +1808,94 @@ const cargoStatusDisplay =
   );
 
 
-// --------------------------------------------------
-// 17. Animation
-// --------------------------------------------------
+// ==================================================
+// LABEL HELPERS
+// ==================================================
+
+function formatCameraName(
+  mode
+) {
+
+  if (
+    mode ===
+    'CHASE'
+  ) {
+
+    return 'Chase';
+  }
+
+
+  if (
+    mode ===
+    'BUMPER'
+  ) {
+
+    return 'Bumper';
+  }
+
+
+  if (
+    mode ===
+    'INTERIOR'
+  ) {
+
+    return 'Interior';
+  }
+
+
+  return mode;
+}
+
+
+function getLevelName(
+  level
+) {
+
+  if (
+    level ===
+    1
+  ) {
+
+    return 'Level 1 — Rank to CBD';
+  }
+
+
+  if (
+    level ===
+    2
+  ) {
+
+    return 'Level 2 — Highway';
+  }
+
+
+  if (
+    level ===
+    3
+  ) {
+
+    return 'Level 3 — Load Shedding';
+  }
+
+
+  return 'Sharp-Sharp';
+}
+
+
+// ==================================================
+// CLOCK
+// ==================================================
 
 const clock =
   new THREE.Clock();
 
 
+// ==================================================
+// ANIMATION LOOP
+// ==================================================
+
 function animate() {
+
   const dt =
     Math.min(
       clock.getDelta(),
@@ -820,16 +1903,28 @@ function animate() {
     );
 
 
+  const elapsedTime =
+    clock.getElapsedTime();
+
+
+  // ----------------------------------------------
+  // VEHICLE
+  // ----------------------------------------------
+
   vehicle.update(
     dt,
     keys
   );
 
 
-  // Detached cargo should
-  // continue falling after
-  // game over.
-  if (gameOver) {
+  // ----------------------------------------------
+  // CARGO
+  // ----------------------------------------------
+
+  if (
+    gameOver
+  ) {
+
     cargoSystem
       .updateDetached(
         dt
@@ -837,16 +1932,67 @@ function animate() {
   }
 
 
-  updateCamera(
+  // ----------------------------------------------
+  // CAMERA
+  // ----------------------------------------------
+
+  cameraSystem.update(
     dt
   );
 
+
+  // ----------------------------------------------
+  // HEADLIGHT SHADER
+  // ----------------------------------------------
+
+  updateVisualEffects(
+    elapsedTime
+  );
+
+
+  // ----------------------------------------------
+  // HEAT HAZE
+  // ----------------------------------------------
+
+  effects.update(
+    elapsedTime
+  );
+
+
+  // ----------------------------------------------
+  // DUST
+  // ----------------------------------------------
+
+  dustSystem.update(
+    dt
+  );
+
+
+  // ----------------------------------------------
+  // SKY
+  // ----------------------------------------------
+
+  skyManager.update(
+    elapsedTime
+  );
+
+
+  // ----------------------------------------------
+  // HUD
+  // ----------------------------------------------
 
   const cargoState =
     getCargoState();
 
 
+  levelLabel.textContent =
+    getLevelName(
+      currentLevel
+    );
+
+
   speedDisplay.textContent =
+
     `Speed: ${
       Math.round(
         Math.abs(
@@ -858,6 +2004,7 @@ function animate() {
 
 
   physicsDisplay.textContent =
+
     `Height: ${
       taxi.position.y.toFixed(
         2
@@ -869,7 +2016,26 @@ function animate() {
     }`;
 
 
+  cameraModeDisplay.textContent =
+
+    `Camera: ${
+      formatCameraName(
+        cameraSystem.getMode()
+      )
+    }`;
+
+
+  headlightsDisplay.textContent =
+
+    `Headlights: ${
+      getHeadlightsEnabled()
+        ? 'ON'
+        : 'OFF'
+    }`;
+
+
   cargoDisplay.textContent =
+
     `Cargo: ${
       cargoState.remaining
     } / ${
@@ -882,6 +2048,7 @@ function animate() {
 
 
   strapDisplay.textContent =
+
     `Straps: ${
       Math.round(
         cargoState.straps
@@ -890,10 +2057,15 @@ function animate() {
 
 
   cargoStatusDisplay.textContent =
+
     `Load status: ${
       cargoState.status
     }`;
 
+
+  // ----------------------------------------------
+  // RENDER
+  // ----------------------------------------------
 
   renderer.render(
     scene,
@@ -910,23 +2082,30 @@ function animate() {
 animate();
 
 
-// --------------------------------------------------
-// 18. Resize
-// --------------------------------------------------
+// ==================================================
+// RESIZE
+// ==================================================
 
 window.addEventListener(
+
   'resize',
+
   () => {
+
     camera.aspect =
+
       window.innerWidth /
       window.innerHeight;
 
 
-    camera.updateProjectionMatrix();
+    camera
+      .updateProjectionMatrix();
 
 
     renderer.setSize(
+
       window.innerWidth,
+
       window.innerHeight
     );
   }
