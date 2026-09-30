@@ -12,13 +12,10 @@ import * as THREE from 'three';
 // VehicleController.reset()).
 // ==================================================
 
-// TODO(setBounds): VehicleController hard-clamps the taxi to
-// these extents internally. Once the vehicle exposes
-// setBounds(), give each level its own `boundaries` (Level 2
-// wants a much longer highway) - load() already forwards
-// config.boundaries to vehicle.setBounds() when it exists, and
-// warnIfRouteOutOfBounds() will flag any route that outgrows
-// them. Until then every level shares these numbers.
+// Sent to vehicle.setBounds() on load. Level 2 is still squeezed
+// into the old +-30 / +-190 box; give a level its own numbers
+// here when it needs more room - warnIfRouteOutOfBounds() will
+// flag any route that outgrows them.
 const VEHICLE_BOUNDS = {
   minX: -30,
   maxX: 30,
@@ -26,12 +23,11 @@ const VEHICLE_BOUNDS = {
   maxZ: 190
 };
 
-// A flyover is only entered near its toe, so the taxi is never
-// snapped onto a deck from the ground beneath it.
+// A raised section only lifts the taxi if it is already near the
+// deck surface (or at the ramp toe), so driving on the ground
+// underneath does not snap it up onto the deck.
 const ELEVATION_ENTRY_MAX = 0.3;
-
-// Keeps the taxi between the flyover rails while on it.
-const DECK_EDGE_MARGIN = 0.9;
+const ELEVATION_ENTRY_TOLERANCE = 0.6;
 
 
 export const LEVELS = {
@@ -110,17 +106,23 @@ export const LEVELS = {
       }
     ],
 
-    // Raised sections. The vehicle's ground height is
-    // hardcoded (bump + potholes), so LevelManager lifts the
-    // taxi itself - see applyElevation(). The deck runs
-    // between zEntry and zExit (z decreases as you drive
-    // forward); the first and last `rampLength` are ramps.
+    // Raised sections, fed to the vehicle through
+    // setGroundHeightProvider() (see getGroundHeight()). The
+    // deck runs between zEntry and zExit (z decreases as you
+    // drive forward); the first and last `rampLength` are
+    // ramps.
+    //
+    // deckThickness is also the gap between the taxi's origin
+    // and the pillar tops. The taxi's lowest point is 0.36 below
+    // its origin at full suspension (0.02 GLB offset - 0.38
+    // maxSuspensionMovement), so 0.9 leaves ~0.54 m clear.
     elevated: [
       {
         id: 'flyover',
         xMin: 4.5,
         xMax: 9,
         height: 2.5,
+        deckThickness: 0.9,
         rampLength: 30,
         zEntry: 10,
         zExit: -110
@@ -171,10 +173,6 @@ export class LevelManager {
 
     this.elapsed = 0;
 
-    // Elevation bookkeeping (see applyElevation)
-    this.activeElevation = null;
-    this.appliedElevation = 0;
-
     this.group = new THREE.Group();
     this.scene.add(this.group);
 
@@ -218,13 +216,23 @@ export class LevelManager {
 
     if (!this.config) {
       this.status = 'none';
+      this.vehicle.setGroundHeightProvider(null);
       return false;
     }
 
     this.warnIfRouteOutOfBounds();
 
-    // Forwarded once the vehicle owner adds the API
-    this.vehicle.setBounds?.(this.config.boundaries);
+    this.vehicle.setBounds(this.config.boundaries);
+
+    // R respawns at this level's spawn too
+    this.vehicle.setSpawn(this.config.spawn);
+
+    this.vehicle.setGroundHeightProvider(
+      this.config.elevated?.length
+        ? (x, z, baseHeight) =>
+            this.getGroundHeight(x, z, baseHeight)
+        : null
+    );
 
     this.buildMarkers();
     this.buildElevated();
@@ -261,13 +269,10 @@ export class LevelManager {
   }
 
 
-  // Puts the taxi back on the spawn point. Call after
-  // vehicle.reset(), which hardcodes its own spawn.
+  // Puts the taxi back on the level's spawn point.
   reset() {
 
     this.elapsed = 0;
-    this.activeElevation = null;
-    this.appliedElevation = 0;
 
     if (!this.config) {
       this.status = 'none';
@@ -276,10 +281,7 @@ export class LevelManager {
 
     this.status = 'driving';
 
-    const { spawn } = this.config;
-
-    this.taxi.position.set(spawn.x, 0, spawn.z);
-    this.taxi.rotation.set(0, spawn.heading, 0);
+    this.vehicle.reset(this.config.spawn);
 
     this.setZoneDelivered(false);
   }
@@ -290,10 +292,6 @@ export class LevelManager {
   // --------------------------------------------------
 
   update(dt, time = 0) {
-
-    // Must run every frame (even once delivered): the vehicle
-    // re-snaps the taxi to ground height each update.
-    this.applyElevation();
 
     if (this.status !== 'driving') {
       return;
@@ -339,73 +337,35 @@ export class LevelManager {
   }
 
 
-  // The vehicle sets taxi.position.y from its own hardcoded
-  // ground height every update, so this runs right after it
-  // and adds the section height on top.
-  //  - grounded: the vehicle just reset y, add the full height
-  //  - airborne: y is integrated by the vehicle and already
-  //    holds last frame's lift, so only add the change
-  // TODO: replace with a ground-height hook on the vehicle
-  // (owner's call) - then this and appliedElevation go away.
-  applyElevation() {
+  // Ground-height provider for vehicle.setGroundHeightProvider().
+  // Returns the full height: the vehicle's own bump/pothole
+  // height (baseHeight) plus any flyover lift at (x, z).
+  getGroundHeight(x, z, baseHeight) {
 
-    const sections = this.config?.elevated;
+    let lift = 0;
 
-    if (!sections?.length) {
-      return;
-    }
+    for (const s of this.config?.elevated ?? []) {
 
-    const pos = this.taxi.position;
-
-    let target = 0;
-
-    if (this.activeElevation) {
-
-      const s = this.activeElevation;
-
-      if (pos.z >= s.zEntry || pos.z <= s.zExit) {
-        this.activeElevation = null;
-      } else {
-        target = LevelManager.elevationProfile(s, pos.z);
+      if (x < s.xMin || x > s.xMax) {
+        continue;
       }
-    } else {
 
-      for (const s of sections) {
+      const h = LevelManager.elevationProfile(s, z);
 
-        const h = LevelManager.elevationProfile(s, pos.z);
-
-        if (
-          h > 0 &&
-          h <= ELEVATION_ENTRY_MAX &&
-          pos.x >= s.xMin &&
-          pos.x <= s.xMax
-        ) {
-          this.activeElevation = s;
-          target = h;
-          break;
-        }
+      // Lift only from the ramp toe, or when already up on the
+      // section - not from the ground underneath it.
+      if (
+        h > 0 &&
+        (
+          h <= ELEVATION_ENTRY_MAX ||
+          this.taxi.position.y >= h - ELEVATION_ENTRY_TOLERANCE
+        )
+      ) {
+        lift = Math.max(lift, h);
       }
     }
 
-    // The rails: stay on the deck while on it
-    if (this.activeElevation) {
-
-      const s = this.activeElevation;
-
-      pos.x = THREE.MathUtils.clamp(
-        pos.x,
-        s.xMin + DECK_EDGE_MARGIN,
-        s.xMax - DECK_EDGE_MARGIN
-      );
-    }
-
-    if (this.vehicle.isGrounded()) {
-      pos.y += target;
-    } else {
-      pos.y += target - this.appliedElevation;
-    }
-
-    this.appliedElevation = target;
+    return baseHeight + lift;
   }
 
 
@@ -466,7 +426,7 @@ export class LevelManager {
       speed: Math.abs(this.vehicle.getSpeed()),
       highSpeedTime: this.vehicle.getHighSpeedTime(),
       highSpeedPressure: this.vehicle.getLevel2Pressure(),
-      elevation: this.appliedElevation,
+      elevation: this.taxi.position.y,
 
       distanceToDestination:
         Math.hypot(
@@ -539,7 +499,7 @@ export class LevelManager {
 
       const width = s.xMax - s.xMin;
       const cx = (s.xMin + s.xMax) / 2;
-      const thickness = 0.4;
+      const thickness = s.deckThickness;
       const L = s.rampLength;
       const H = s.height;
       const total = s.zEntry - s.zExit;
