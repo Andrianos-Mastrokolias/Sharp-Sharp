@@ -65,6 +65,30 @@ this.level3HazardCooldown = 0;
 this.previousPosition =
   new THREE.Vector3();
 
+  // --------------------------------------------------
+// Spawn configuration
+// --------------------------------------------------
+
+this.spawn = {
+  x: 0,
+  z: 60,
+  heading: 0
+};
+
+
+// --------------------------------------------------
+// World bounds
+// --------------------------------------------------
+
+this.bounds = {
+  minX: -30,
+  maxX: 30,
+  minZ: -190,
+  maxZ: 190
+};
+
+this.groundHeightProvider = null;
+
     // --------------------------------------------------
     // Level state
     // --------------------------------------------------
@@ -184,6 +208,47 @@ level3HazardCooldown: 0.6
   getLevel() {
     return this.currentLevel;
   }
+
+  setSpawn({
+  x = this.spawn.x,
+  z = this.spawn.z,
+  heading = this.spawn.heading
+} = {}) {
+  this.spawn = {
+    x,
+    z,
+    heading
+  };
+}
+
+
+setBounds({
+  minX = this.bounds.minX,
+  maxX = this.bounds.maxX,
+  minZ = this.bounds.minZ,
+  maxZ = this.bounds.maxZ
+} = {}) {
+  this.bounds = {
+    minX,
+    maxX,
+    minZ,
+    maxZ
+  };
+}
+
+setGroundHeightProvider(provider) {
+  if (
+    provider !== null &&
+    typeof provider !== 'function'
+  ) {
+    throw new TypeError(
+      'Ground height provider must be a function or null.'
+    );
+  }
+
+  this.groundHeightProvider =
+    provider;
+}
 
 
   getHighSpeedTime() {
@@ -327,72 +392,85 @@ triggerLevel3Hazard(
   // Reset
   // --------------------------------------------------
 
-  reset() {
-    this.taxi.position.set(
-      0,
-      0,
-      60
+  reset(spawn = this.spawn) {
+  const {
+    x = this.spawn.x,
+    z = this.spawn.z,
+    heading = this.spawn.heading
+  } = spawn;
+
+
+  this.taxi.position.set(
+    x,
+    0,
+    z
+  );
+
+
+  this.taxi.rotation.set(
+    0,
+    heading,
+    0
+  );
+
+
+  this.speed = 0;
+
+  this.previousSpeed = 0;
+
+  this.steeringAngle = 0;
+
+  this.verticalVelocity = 0;
+
+  this.grounded = true;
+
+
+  this.previousGroundHeight =
+    this.getGroundHeight(
+      x,
+      z
     );
 
 
-    this.taxi.rotation.set(
-      0,
-      0,
-      0
-    );
+  this.suspensionOffset = 0;
+
+  this.suspensionVelocity = 0;
+
+  this.bodyRoll = 0;
+
+  this.wasInPothole = false;
+
+  this.highSpeedTime = 0;
+
+  this.cornerRoll = 0;
+
+  this.level3HazardCooldown = 0;
 
 
-    this.speed = 0;
-
-    this.previousSpeed = 0;
-
-    this.steeringAngle = 0;
-
-    this.verticalVelocity = 0;
-
-    this.grounded = true;
-
-    this.previousGroundHeight = 0;
-
-    this.suspensionOffset = 0;
-
-    this.suspensionVelocity = 0;
-
-    this.bodyRoll = 0;
-
-    this.wasInPothole = false;
-
-    this.highSpeedTime = 0;
-
-    this.cornerRoll = 0;
-
-    this.level3HazardCooldown = 0;
+  this.chassis.position.set(
+    0,
+    0,
+    0
+  );
 
 
-    this.chassis.position.set(
-      0,
-      0,
-      0
-    );
+  this.chassis.rotation.set(
+    0,
+    0,
+    0
+  );
 
 
-    this.chassis.rotation.set(
-      0,
-      0,
-      0
-    );
-
-
-    for (
-      const pivot
-      of this.frontWheelPivots
-    ) {
-      pivot.rotation.y = 0;
-    }
-
-
-    this.cargoSystem.reset();
+  for (
+    const pivot
+    of this.frontWheelPivots
+  ) {
+    pivot.rotation.y = 0;
   }
+
+
+  this.cargoSystem.reset();
+}
 
   // --------------------------------------------------
   // Ground height
@@ -494,6 +572,26 @@ triggerLevel3Hazard(
         height -= dip;
       }
     }
+
+    if (
+  this.groundHeightProvider
+) {
+  const levelHeight =
+    this.groundHeightProvider(
+      x,
+      z,
+      height
+    );
+
+  if (
+    Number.isFinite(
+      levelHeight
+    )
+  ) {
+    height =
+      levelHeight;
+  }
+}
 
 
     return height;
@@ -1459,21 +1557,18 @@ this.bodyRoll =
     // --------------------------------------------------
 
     this.taxi.position.x =
-      THREE.MathUtils.clamp(
-        this.taxi.position.x,
+  THREE.MathUtils.clamp(
+    this.taxi.position.x,
+    this.bounds.minX,
+    this.bounds.maxX
+  );
 
-        -30,
-        30
-      );
-
-
-    this.taxi.position.z =
-      THREE.MathUtils.clamp(
-        this.taxi.position.z,
-
-        -190,
-        190
-      );
+this.taxi.position.z =
+  THREE.MathUtils.clamp(
+    this.taxi.position.z,
+    this.bounds.minZ,
+    this.bounds.maxZ
+  );
 
     // --------------------------------------------------
     // Wheel steering

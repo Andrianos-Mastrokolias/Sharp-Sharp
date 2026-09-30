@@ -1403,9 +1403,13 @@ const vehicle =
   });
 
 
-vehicle.setLevel(
-  1
+vehicle.setLevel(1);
+
+vehicle.setGroundHeightProvider(
+  null
 );
+
+vehicle.reset();
 
 
 // ==================================================
