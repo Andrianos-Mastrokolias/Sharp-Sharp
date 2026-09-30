@@ -144,6 +144,56 @@ export const LEVELS = {
     // VEHICLE_BOUNDS. This route is squeezed into the road
     // (x +-9) and z +-170 purely because of that clamp.
     boundaries: VEHICLE_BOUNDS
+  },
+
+
+  3: {
+    name: 'Load Shedding',
+
+    // Night visuals (fog, sun, HDRI) come from the graphics
+    // managers via applyLevelVisuals(3).
+
+    // Drives the road the other way round (+Z), so heading is PI.
+    spawn: {
+      x: 0,
+      z: -170,
+      heading: Math.PI
+    },
+
+    // A back road: wanders across the carriageway rather than
+    // running straight. Guide only - nothing enforces it.
+    route: [
+      { x: 0, z: -170 },
+      { x: 0, z: -130 },
+      { x: 5, z: -100 },
+      { x: 5, z: -70 },
+      { x: -5, z: -30 },
+      { x: -5, z: 10 },
+      { x: 3, z: 50 },
+      { x: 3, z: 90 },
+      { x: 0, z: 125 },
+      { x: 0, z: 165 }
+    ],
+
+    // Unlit potholes on the route. They are registered with the
+    // vehicle's shared pothole array (real dips, cargo stress)
+    // and drawn near-black, so at night they only show up in
+    // the headlight beam. Killing the lights hides them but is
+    // the stealthy option - see headlightsOffTime in getState().
+    hazards: [
+      { type: 'pothole', x: 5, z: -85, radius: 1.8, depth: 0.4 },
+      { type: 'pothole', x: -5, z: -10, radius: 1.7, depth: 0.45 },
+      { type: 'pothole', x: 3, z: 70, radius: 2.0, depth: 0.4 }
+    ],
+
+    destination: {
+      x: 0,
+      z: 165,
+      radius: 8,
+      maxDeliverSpeed: 4
+    },
+
+    boundaries: VEHICLE_BOUNDS
   }
 };
 
@@ -155,8 +205,19 @@ export class LevelManager {
     vehicle,
     taxi,
     collidables = null,
+    potholes = null,
+    getHeadlightsEnabled = null,
     onDelivered = null
   }) {
+
+    // The array main.js hands to VehicleController for its ground
+    // dips - same idea as collidables above.
+    this.potholes = potholes;
+    this.registeredPotholes = [];
+
+    // () => boolean, from the taxi (L key)
+    this.getHeadlightsEnabled = getHeadlightsEnabled;
+    this.headlightsOffTime = 0;
 
     // The same array main.js hands to VehicleController; it
     // box-tests every entry each frame, so pushing a mesh here
@@ -189,6 +250,14 @@ export class LevelManager {
         depthWrite: false
       });
 
+    // Near-black, like the road potholes in main.js: only the
+    // headlight beam picks it out at night.
+    this.hazardMaterial =
+      new THREE.MeshStandardMaterial({
+        color: 0x0b0b0c,
+        roughness: 1
+      });
+
     this.concreteMaterial =
       new THREE.MeshStandardMaterial({
         color: 0x8d9096,
@@ -210,7 +279,7 @@ export class LevelManager {
   // --------------------------------------------------
 
   // Returns false when the level has no definition yet
-  // (level 3), leaving the free-roam road as is.
+  // (none today), leaving the free-roam road as is.
   load(levelId) {
 
     this.clearMarkers();
@@ -240,6 +309,7 @@ export class LevelManager {
 
     this.buildMarkers();
     this.buildElevated();
+    this.buildHazards();
     this.reset();
 
     return true;
@@ -277,6 +347,7 @@ export class LevelManager {
   reset() {
 
     this.elapsed = 0;
+    this.headlightsOffTime = 0;
 
     if (!this.config) {
       this.status = 'none';
@@ -302,6 +373,10 @@ export class LevelManager {
     }
 
     this.elapsed += dt;
+
+    if (!this.headlightsOn()) {
+      this.headlightsOffTime += dt;
+    }
 
     // Gentle pulse so the zone reads from a distance
     this.zoneMaterial.opacity =
@@ -435,6 +510,11 @@ export class LevelManager {
       highSpeedTime: this.vehicle.getHighSpeedTime(),
       highSpeedPressure: this.vehicle.getLevel2Pressure(),
       elevation: this.taxi.position.y,
+
+      // Level 3 tradeoff: dark = hazards hidden, but (once
+      // pursuit exists) also harder to spot.
+      headlightsOn: this.headlightsOn(),
+      headlightsOffTime: this.headlightsOffTime,
 
       distanceToDestination:
         Math.hypot(
@@ -577,6 +657,49 @@ export class LevelManager {
   }
 
 
+  // Defaults to true when no headlight source was given.
+  headlightsOn() {
+    return this.getHeadlightsEnabled
+      ? Boolean(this.getHeadlightsEnabled())
+      : true;
+  }
+
+
+  // Hidden hazards: a dark disc for the eye plus a real entry
+  // in the vehicle's pothole list for the physics.
+  buildHazards() {
+
+    for (const h of this.config.hazards ?? []) {
+
+      if (h.type !== 'pothole') {
+        continue;
+      }
+
+      const disc = new THREE.Mesh(
+        new THREE.CircleGeometry(h.radius, 40),
+        this.hazardMaterial
+      );
+
+      disc.rotation.x = -Math.PI / 2;
+      disc.position.set(h.x, 0.02, h.z);
+      disc.receiveShadow = true;
+      this.group.add(disc);
+
+      if (this.potholes) {
+        const entry = {
+          x: h.x,
+          z: h.z,
+          radius: h.radius,
+          depth: h.depth
+        };
+
+        this.potholes.push(entry);
+        this.registeredPotholes.push(entry);
+      }
+    }
+  }
+
+
   setZoneDelivered(delivered) {
 
     const color = delivered ? 0x3ddc84 : 0xffcf4a;
@@ -611,6 +734,18 @@ export class LevelManager {
     }
 
     this.registered = [];
+
+    if (this.potholes) {
+      for (const entry of this.registeredPotholes) {
+        const i = this.potholes.indexOf(entry);
+
+        if (i !== -1) {
+          this.potholes.splice(i, 1);
+        }
+      }
+    }
+
+    this.registeredPotholes = [];
 
     for (const child of [...this.group.children]) {
       this.group.remove(child);

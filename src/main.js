@@ -1515,6 +1515,10 @@ const levelManager =
     collidables:
       collidableObjects,
 
+    potholes,
+
+    getHeadlightsEnabled,
+
     onDelivered:
       (event) => {
 
