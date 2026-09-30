@@ -89,74 +89,92 @@ this.bounds = {
 
 this.groundHeightProvider = null;
 
-    // --------------------------------------------------
-    // Level state
-    // --------------------------------------------------
+// -------------------------------------------------- 
+// Level state
+// // --------------------------------------------------
 
-    this.currentLevel = 1;
+this.currentLevel = 1;
 
-    this.highSpeedTime = 0;
+this.highSpeedTime = 0;
 
-    // --------------------------------------------------
-    // Collision boxes
-    // --------------------------------------------------
+// --------------------------------------------------
+// Collision boxes
+// --------------------------------------------------
 
-    this.taxiBox =
-      new THREE.Box3();
+this.taxiBox =
+  new THREE.Box3();
 
-    this.obstacleBox =
-      new THREE.Box3();
+this.obstacleBox =
+  new THREE.Box3();
 
-    // --------------------------------------------------
-    // Settings
-    // --------------------------------------------------
+// Physical taxi collision volume.
+// Does not include cargo, headlights,
+// beam cones or other visual effects.
+this.localTaxiCollisionBox =
+  new THREE.Box3(
+    new THREE.Vector3(
+      -1.35,
+      0,
+      -2.3
+    ),
 
-    this.settings = {
-      maxForwardSpeed: 28,
+    new THREE.Vector3(
+      1.35,
+      2.8,
+      2.3
+    )
+  );
 
-      maxReverseSpeed: 10,
+// --------------------------------------------------
+// Settings
+// --------------------------------------------------
 
-      acceleration: 13,
+this.settings = {
+  maxForwardSpeed: 28,
 
-      reverseAcceleration: 8,
+  maxReverseSpeed: 10,
 
-      brakingForce: 24,
+  acceleration: 13,
 
-      rollingResistance: 4.5,
+  reverseAcceleration: 8,
 
-      airResistance: 0.012,
+  brakingForce: 24,
 
-      maxSteeringAngle:
-        THREE.MathUtils.degToRad(
-          30
-        ),
+  rollingResistance: 4.5,
 
-      steeringSpeed: 3.5,
+  airResistance: 0.012,
 
-      steeringReturnSpeed: 5,
+  maxSteeringAngle:
+    THREE.MathUtils.degToRad(
+      30
+    ),
 
-      wheelRadius: 0.45,
+  steeringSpeed: 3.5,
 
-      gravity: -22,
+  steeringReturnSpeed: 5,
 
-      suspensionStrength: 38,
+  wheelRadius: 0.45,
 
-      suspensionDamping: 6,
+  gravity: -22,
 
-      maxSuspensionMovement:
-        0.38,
+  suspensionStrength: 38,
 
-      // ----------------------------------------
-      // Level 2
-      // ----------------------------------------
+  suspensionDamping: 6,
 
-      level2SpeedThreshold: 20,
+  maxSuspensionMovement:
+    0.38,
 
-      level2GraceTime: 3,
+// ----------------------------------------
+// Level 2
+// ----------------------------------------
 
-      level2StressRate: 1.8,
+  level2SpeedThreshold: 20,
 
-      // ----------------------------------------
+  level2GraceTime: 3,
+
+  level2StressRate: 1.8,
+
+// ----------------------------------------
 // Suspension / wheel polish
 // ----------------------------------------
 
@@ -440,6 +458,8 @@ triggerLevel3Hazard(
 
   this.wasInPothole = false;
 
+  this.wasOnSpeedBump = false;
+
   this.highSpeedTime = 0;
 
   this.cornerRoll = 0;
@@ -597,6 +617,25 @@ triggerLevel3Hazard(
     return height;
   }
 
+isOnSpeedBump(
+  x,
+  z
+) {
+  const bumpCenterZ = 25;
+
+  const bumpDepth = 3;
+
+  return (
+    Math.abs(x) < 7 &&
+    Math.abs(
+      z -
+      bumpCenterZ
+    ) <
+    bumpDepth / 2
+  );
+}  
+
+
   // --------------------------------------------------
   // Pothole detection
   // --------------------------------------------------
@@ -650,8 +689,17 @@ triggerLevel3Hazard(
   checkCollisions(
     previousPosition
   ) {
-    this.taxiBox.setFromObject(
-      this.taxi
+    this.taxi.updateWorldMatrix(
+    true,
+    false
+  );
+
+  this.taxiBox
+    .copy(
+      this.localTaxiCollisionBox
+    )
+    .applyMatrix4(
+      this.taxi.matrixWorld
     );
 
 
@@ -1204,6 +1252,17 @@ triggerLevel3Hazard(
     this.wasInPothole =
       insidePothole;
 
+const onSpeedBump =
+  this.isOnSpeedBump(
+    this.taxi.position.x,
+    this.taxi.position.z
+  );
+
+
+const leavingSpeedBump =
+  this.wasOnSpeedBump &&
+  !onSpeedBump;
+
     // --------------------------------------------------
     // Road suspension
     // --------------------------------------------------
@@ -1235,16 +1294,8 @@ triggerLevel3Hazard(
           groundHeight;
       }
 
-
-      const leavingBump =
-        this.previousGroundHeight >
-          0 &&
-        groundHeight <
-          this.previousGroundHeight;
-
-
       if (
-        leavingBump &&
+        leavingSpeedBump &&
         Math.abs(
           this.speed
         ) >
@@ -1360,6 +1411,8 @@ triggerLevel3Hazard(
       }
     }
 
+    this.wasOnSpeedBump =
+    onSpeedBump;
 
     this.previousGroundHeight =
       groundHeight;
