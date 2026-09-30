@@ -98,8 +98,8 @@ export const LEVELS = {
         waypoints: [
           { x: 0, z: 170 },
           { x: 0, z: 40 },
-          { x: 6.75, z: 15 },
-          { x: 6.75, z: -105 },
+          { x: 6.2, z: 15 },
+          { x: 6.2, z: -105 },
           { x: 0, z: -135 },
           { x: 0, z: -165 }
         ]
@@ -119,8 +119,12 @@ export const LEVELS = {
     elevated: [
       {
         id: 'flyover',
-        xMin: 4.5,
-        xMax: 9,
+        // Inner edge stays clear of the ground lane (x 0); the
+        // outer edge stops short of the lamp poles at x 9.6.
+        // Width matters: the solid rails leave (width - 0.5 -
+        // 2.7 taxi box) of slack to aim for the ramp toe.
+        xMin: 3,
+        xMax: 9.4,
         height: 2.5,
         deckThickness: 0.9,
         rampLength: 30,
@@ -353,7 +357,9 @@ export class LevelManager {
       const h = LevelManager.elevationProfile(s, z);
 
       // Lift only from the ramp toe, or when already up on the
-      // section - not from the ground underneath it.
+      // section. Anything else (e.g. the ground beneath the
+      // deck) gets no lift; sideways entry past the toe is
+      // stopped by the solid rails, not handled here.
       if (
         h > 0 &&
         (
@@ -365,7 +371,9 @@ export class LevelManager {
       }
     }
 
-    return baseHeight + lift;
+    // On the flyover the surface is the deck, so the ground's
+    // own bump/pothole dips (baseHeight) do not apply to it.
+    return lift > 0 ? lift : baseHeight;
   }
 
 
@@ -533,17 +541,22 @@ export class LevelManager {
       add(width, thickness, slopeLength,
         cx, H / 2 - thickness / 2, s.zExit + L / 2, -slope);
 
-      // Rails
+      // Rails run the full length of ramp + deck on both sides,
+      // and are solid (see registerCollidable). That is what
+      // keeps the taxi on the structure: without them the only
+      // lift rule (ramp toe / already up) lets a sideways
+      // entry pass through the ramp unlifted, and lets the
+      // taxi drive off the edge and fall.
       for (const x of [s.xMin + 0.12, s.xMax - 0.12]) {
 
-        add(0.25, 0.9, slopeLength,
-          x, H / 2 + 0.45, s.zEntry - L / 2, slope);
+        this.registerCollidable(add(0.25, 0.9, slopeLength,
+          x, H / 2 + 0.45, s.zEntry - L / 2, slope));
 
-        add(0.25, 0.9, deckLength,
-          x, H + 0.45, (s.zEntry + s.zExit) / 2);
+        this.registerCollidable(add(0.25, 0.9, deckLength,
+          x, H + 0.45, (s.zEntry + s.zExit) / 2));
 
-        add(0.25, 0.9, slopeLength,
-          x, H / 2 + 0.45, s.zExit + L / 2, -slope);
+        this.registerCollidable(add(0.25, 0.9, slopeLength,
+          x, H / 2 + 0.45, s.zExit + L / 2, -slope));
       }
 
       // Pillars under the deck
