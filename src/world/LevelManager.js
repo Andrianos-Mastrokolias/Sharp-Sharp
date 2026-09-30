@@ -12,6 +12,28 @@ import * as THREE from 'three';
 // VehicleController.reset()).
 // ==================================================
 
+// TODO(setBounds): VehicleController hard-clamps the taxi to
+// these extents internally. Once the vehicle exposes
+// setBounds(), give each level its own `boundaries` (Level 2
+// wants a much longer highway) - load() already forwards
+// config.boundaries to vehicle.setBounds() when it exists, and
+// warnIfRouteOutOfBounds() will flag any route that outgrows
+// them. Until then every level shares these numbers.
+const VEHICLE_BOUNDS = {
+  minX: -30,
+  maxX: 30,
+  minZ: -190,
+  maxZ: 190
+};
+
+// A flyover is only entered near its toe, so the taxi is never
+// snapped onto a deck from the ground beneath it.
+const ELEVATION_ENTRY_MAX = 0.3;
+
+// Keeps the taxi between the flyover rails while on it.
+const DECK_EDGE_MARGIN = 0.9;
+
+
 export const LEVELS = {
 
   1: {
@@ -40,12 +62,82 @@ export const LEVELS = {
     },
 
     // The vehicle also hard-clamps to x +-30, z +-190
-    boundaries: {
-      minX: -30,
-      maxX: 30,
-      minZ: -190,
-      maxZ: 190
-    }
+    boundaries: VEHICLE_BOUNDS
+  },
+
+
+  2: {
+    name: 'The Highway',
+
+    // Midday visuals/speed tuning are applied elsewhere
+    // (applyLevelVisuals / vehicle.setLevel).
+
+    spawn: {
+      x: 0,
+      z: 170,
+      heading: 0
+    },
+
+    // Default guide route (the ground lane).
+    route: [
+      { x: 0, z: 170 },
+      { x: 0, z: -165 }
+    ],
+
+    // Route choice: both end at the same destination.
+    //  ground  - straight on; the speed bump (z 25) and
+    //            potholes (z 5, -20, -50) are in the way.
+    //  flyover - break right before z 40, climb the ramp and
+    //            cruise over the hazards, rejoin after z -110.
+    routes: [
+      {
+        id: 'ground',
+        waypoints: [
+          { x: 0, z: 170 },
+          { x: 0, z: -165 }
+        ]
+      },
+      {
+        id: 'flyover',
+        waypoints: [
+          { x: 0, z: 170 },
+          { x: 0, z: 40 },
+          { x: 6.75, z: 15 },
+          { x: 6.75, z: -105 },
+          { x: 0, z: -135 },
+          { x: 0, z: -165 }
+        ]
+      }
+    ],
+
+    // Raised sections. The vehicle's ground height is
+    // hardcoded (bump + potholes), so LevelManager lifts the
+    // taxi itself - see applyElevation(). The deck runs
+    // between zEntry and zExit (z decreases as you drive
+    // forward); the first and last `rampLength` are ramps.
+    elevated: [
+      {
+        id: 'flyover',
+        xMin: 4.5,
+        xMax: 9,
+        height: 2.5,
+        rampLength: 30,
+        zEntry: 10,
+        zExit: -110
+      }
+    ],
+
+    destination: {
+      x: 0,
+      z: -165,
+      radius: 8,
+      maxDeliverSpeed: 4
+    },
+
+    // TODO(setBounds): shared with every level for now - see
+    // VEHICLE_BOUNDS. This route is squeezed into the road
+    // (x +-9) and z +-170 purely because of that clamp.
+    boundaries: VEHICLE_BOUNDS
   }
 };
 
@@ -56,8 +148,15 @@ export class LevelManager {
     scene,
     vehicle,
     taxi,
+    collidables = null,
     onDelivered = null
   }) {
+
+    // The same array main.js hands to VehicleController; it
+    // box-tests every entry each frame, so pushing a mesh here
+    // makes it block the taxi like a building.
+    this.collidables = collidables;
+    this.registered = [];
 
     this.scene = scene;
     this.vehicle = vehicle;
@@ -72,6 +171,10 @@ export class LevelManager {
 
     this.elapsed = 0;
 
+    // Elevation bookkeeping (see applyElevation)
+    this.activeElevation = null;
+    this.appliedElevation = 0;
+
     this.group = new THREE.Group();
     this.scene.add(this.group);
 
@@ -82,6 +185,12 @@ export class LevelManager {
         opacity: 0.45,
         side: THREE.DoubleSide,
         depthWrite: false
+      });
+
+    this.concreteMaterial =
+      new THREE.MeshStandardMaterial({
+        color: 0x8d9096,
+        roughness: 0.9
       });
 
     this.beamMaterial =
@@ -99,7 +208,7 @@ export class LevelManager {
   // --------------------------------------------------
 
   // Returns false when the level has no definition yet
-  // (levels 2 and 3), leaving the free-roam road as is.
+  // (level 3), leaving the free-roam road as is.
   load(levelId) {
 
     this.clearMarkers();
@@ -112,10 +221,43 @@ export class LevelManager {
       return false;
     }
 
+    this.warnIfRouteOutOfBounds();
+
+    // Forwarded once the vehicle owner adds the API
+    this.vehicle.setBounds?.(this.config.boundaries);
+
     this.buildMarkers();
+    this.buildElevated();
     this.reset();
 
     return true;
+  }
+
+
+  // Dev aid: a route that leaves the vehicle clamp can never be
+  // driven, so say so instead of failing silently.
+  warnIfRouteOutOfBounds() {
+
+    const { boundaries } = this.config;
+
+    const points = [
+      this.config.spawn,
+      this.config.destination,
+      ...(this.config.route ?? []),
+      ...(this.config.routes ?? []).flatMap(r => r.waypoints)
+    ];
+
+    for (const p of points) {
+      if (
+        p.x < boundaries.minX || p.x > boundaries.maxX ||
+        p.z < boundaries.minZ || p.z > boundaries.maxZ
+      ) {
+        console.warn(
+          `Level ${this.levelId}: point (${p.x}, ${p.z}) ` +
+          'is outside the vehicle bounds'
+        );
+      }
+    }
   }
 
 
@@ -124,6 +266,8 @@ export class LevelManager {
   reset() {
 
     this.elapsed = 0;
+    this.activeElevation = null;
+    this.appliedElevation = 0;
 
     if (!this.config) {
       this.status = 'none';
@@ -147,6 +291,10 @@ export class LevelManager {
 
   update(dt, time = 0) {
 
+    // Must run every frame (even once delivered): the vehicle
+    // re-snaps the taxi to ground height each update.
+    this.applyElevation();
+
     if (this.status !== 'driving') {
       return;
     }
@@ -160,6 +308,104 @@ export class LevelManager {
     if (this.isInDeliveryZone()) {
       this.deliver();
     }
+  }
+
+
+  // --------------------------------------------------
+  // Elevation (ramps / flyovers)
+  // --------------------------------------------------
+
+  // Height of one elevated section at z (0 outside it).
+  static elevationProfile(section, z) {
+
+    const { height, rampLength, zEntry, zExit } = section;
+
+    const travelled = zEntry - z;
+    const total = zEntry - zExit;
+
+    if (travelled <= 0 || travelled >= total) {
+      return 0;
+    }
+
+    if (travelled < rampLength) {
+      return height * (travelled / rampLength);
+    }
+
+    if (travelled > total - rampLength) {
+      return height * ((total - travelled) / rampLength);
+    }
+
+    return height;
+  }
+
+
+  // The vehicle sets taxi.position.y from its own hardcoded
+  // ground height every update, so this runs right after it
+  // and adds the section height on top.
+  //  - grounded: the vehicle just reset y, add the full height
+  //  - airborne: y is integrated by the vehicle and already
+  //    holds last frame's lift, so only add the change
+  // TODO: replace with a ground-height hook on the vehicle
+  // (owner's call) - then this and appliedElevation go away.
+  applyElevation() {
+
+    const sections = this.config?.elevated;
+
+    if (!sections?.length) {
+      return;
+    }
+
+    const pos = this.taxi.position;
+
+    let target = 0;
+
+    if (this.activeElevation) {
+
+      const s = this.activeElevation;
+
+      if (pos.z >= s.zEntry || pos.z <= s.zExit) {
+        this.activeElevation = null;
+      } else {
+        target = LevelManager.elevationProfile(s, pos.z);
+      }
+    } else {
+
+      for (const s of sections) {
+
+        const h = LevelManager.elevationProfile(s, pos.z);
+
+        if (
+          h > 0 &&
+          h <= ELEVATION_ENTRY_MAX &&
+          pos.x >= s.xMin &&
+          pos.x <= s.xMax
+        ) {
+          this.activeElevation = s;
+          target = h;
+          break;
+        }
+      }
+    }
+
+    // The rails: stay on the deck while on it
+    if (this.activeElevation) {
+
+      const s = this.activeElevation;
+
+      pos.x = THREE.MathUtils.clamp(
+        pos.x,
+        s.xMin + DECK_EDGE_MARGIN,
+        s.xMax - DECK_EDGE_MARGIN
+      );
+    }
+
+    if (this.vehicle.isGrounded()) {
+      pos.y += target;
+    } else {
+      pos.y += target - this.appliedElevation;
+    }
+
+    this.appliedElevation = target;
   }
 
 
@@ -214,6 +460,14 @@ export class LevelManager {
       name: this.config.name,
       status: this.status,
       time: this.elapsed,
+
+      // Read-only pass-through of the vehicle's own tracking
+      // (CargoSystem consumes it there, not here).
+      speed: Math.abs(this.vehicle.getSpeed()),
+      highSpeedTime: this.vehicle.getHighSpeedTime(),
+      highSpeedPressure: this.vehicle.getLevel2Pressure(),
+      elevation: this.appliedElevation,
+
       distanceToDestination:
         Math.hypot(
           this.taxi.position.x - destination.x,
@@ -276,6 +530,80 @@ export class LevelManager {
   }
 
 
+  // Ramps, deck, rails and pillars for each elevated section.
+  // Meshes are added flat to the group so clearMarkers() can
+  // dispose them.
+  buildElevated() {
+
+    for (const s of this.config.elevated ?? []) {
+
+      const width = s.xMax - s.xMin;
+      const cx = (s.xMin + s.xMax) / 2;
+      const thickness = 0.4;
+      const L = s.rampLength;
+      const H = s.height;
+      const total = s.zEntry - s.zExit;
+      const deckLength = total - 2 * L;
+      const slope = Math.atan2(H, L);
+      const slopeLength = Math.hypot(L, H);
+
+      const add = (w, h, d, x, y, z, rotX = 0) => {
+
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(w, h, d),
+          this.concreteMaterial
+        );
+
+        mesh.position.set(x, y, z);
+        mesh.rotation.x = rotX;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        this.group.add(mesh);
+
+        return mesh;
+      };
+
+      // Ramp up (rises towards -Z), deck, ramp down
+      add(width, thickness, slopeLength,
+        cx, H / 2 - thickness / 2, s.zEntry - L / 2, slope);
+
+      add(width, thickness, deckLength,
+        cx, H - thickness / 2, (s.zEntry + s.zExit) / 2);
+
+      add(width, thickness, slopeLength,
+        cx, H / 2 - thickness / 2, s.zExit + L / 2, -slope);
+
+      // Rails
+      for (const x of [s.xMin + 0.12, s.xMax - 0.12]) {
+
+        add(0.25, 0.9, slopeLength,
+          x, H / 2 + 0.45, s.zEntry - L / 2, slope);
+
+        add(0.25, 0.9, deckLength,
+          x, H + 0.45, (s.zEntry + s.zExit) / 2);
+
+        add(0.25, 0.9, slopeLength,
+          x, H / 2 + 0.45, s.zExit + L / 2, -slope);
+      }
+
+      // Pillars under the deck
+      for (
+        let z = s.zEntry - L;
+        z >= s.zExit + L;
+        z -= 20
+      ) {
+        const pillar =
+          add(1, H - thickness, 1, cx, (H - thickness) / 2, z);
+
+        // Only the pillars block. Ramps/deck/rails are driven
+        // on, and the pillar tops (H - thickness) sit below the
+        // taxi while it is on the deck, so it passes over them.
+        this.registerCollidable(pillar);
+      }
+    }
+  }
+
+
   setZoneDelivered(delivered) {
 
     const color = delivered ? 0x3ddc84 : 0xffcf4a;
@@ -285,7 +613,31 @@ export class LevelManager {
   }
 
 
+  registerCollidable(mesh) {
+
+    if (!this.collidables) {
+      return;
+    }
+
+    this.collidables.push(mesh);
+    this.registered.push(mesh);
+  }
+
+
   clearMarkers() {
+
+    // Unregister in place: the vehicle holds this array
+    if (this.collidables) {
+      for (const mesh of this.registered) {
+        const i = this.collidables.indexOf(mesh);
+
+        if (i !== -1) {
+          this.collidables.splice(i, 1);
+        }
+      }
+    }
+
+    this.registered = [];
 
     for (const child of [...this.group.children]) {
       this.group.remove(child);

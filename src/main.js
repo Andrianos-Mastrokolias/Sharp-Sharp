@@ -1508,6 +1508,9 @@ const levelManager =
 
     taxi,
 
+    collidables:
+      collidableObjects,
+
     onDelivered:
       (event) => {
 
