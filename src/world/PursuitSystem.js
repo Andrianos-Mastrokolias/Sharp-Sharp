@@ -36,6 +36,15 @@ const SHARP_TURN_SPEED_SCALE = 0.4;
 const PRESSURE_RANGE = 60;      // distance at which pressure hits 0
 const ELEVATED_Y = 1;           // taxi above this is "on the flyover"
 const LIGHT_FLASH_RATE = 7;     // Hz
+const LIGHT_BAR_ON = 2.5;       // lens emissiveIntensity when lit
+
+// Following distance (centre to centre) the pursuer holds behind
+// the taxi. Must stay below captureDistance, or it could never
+// count as "in capture range". MIN_SEPARATION is the hard floor:
+// the pursuer is pushed back out to it if the taxi brakes hard.
+export const STANDOFF_DISTANCE = 3.5;
+export const MIN_SEPARATION = 3.0;
+const STANDOFF_MARGIN = 0.25;   // standoff <= captureDistance - this
 
 const DEFAULT_CONFIG = {
 
@@ -60,68 +69,219 @@ const DEFAULT_CONFIG = {
   captureDistance: 4,
   captureTime: 2,
 
+  // Catch-up: further behind than catchUpDistance the speed cap is
+  // scaled up, reaching catchUpMultiplier at twice that distance and
+  // easing back to 1.0 at catchUpDistance. Close in it is never
+  // faster than speedFraction.
+  catchUpDistance: 25,
+  catchUpMultiplier: 1.15,
+
   // Level 2: cannot follow onto the flyover
   ignoreElevated: false,
   lane: null                   // { minX, maxX } or null = road
 };
 
 
-// Placeholder look. The 3D model team swaps this one function
-// for a real model; it must return a THREE.Object3D that faces
-// -Z at rotation.y = 0 and may carry userData.flash(on) for the
-// light bar. Everything it creates is disposed by disposeObject().
+// Stylised low-poly SAPS bakkie (Isuzu D-Max style double cab with
+// a canopy). Code-built only: no external models or images.
+// Faces -Z at rotation.y = 0, ~2.0 m wide, 5.3 m long, 1.9 m tall.
+// Returns a THREE.Object3D carrying userData.flash(on) for the roof
+// light bar. Everything it creates (geometries, materials and the
+// lettering texture) is released by disposeObject().
 export function createPursuerMesh() {
 
   const root = new THREE.Group();
 
-  const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0x1d2a44,
-    roughness: 0.6
+  const whiteMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf1f3f5, roughness: 0.45
+  });
+  const blueMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0b3d91, roughness: 0.5
+  });
+  const yellowMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf2b705, roughness: 0.5
+  });
+  const glassMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0d141b, roughness: 0.15, metalness: 0.3
+  });
+  const blackMaterial = new THREE.MeshStandardMaterial({
+    color: 0x141414, roughness: 0.9
+  });
+  const bumperMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2a2d31, roughness: 0.7
+  });
+  const headlightMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1c0 });
+  const taillightMaterial = new THREE.MeshBasicMaterial({ color: 0xd01212 });
+
+  // Light bar lenses: flash() only swaps emissiveIntensity
+  const redLensMaterial = new THREE.MeshStandardMaterial({
+    color: 0x7a0a0a, emissive: 0xff1a1a, emissiveIntensity: 0
+  });
+  const blueLensMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0a2a7a, emissive: 0x2a5cff, emissiveIntensity: 0
   });
 
-  const roofMaterial = new THREE.MeshStandardMaterial({
-    color: 0xe8e8ec,
-    roughness: 0.5
+  const add = (geometry, material, x, y, z, name) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    if (name) { mesh.name = name; }
+    root.add(mesh);
+    return mesh;
+  };
+
+  const box = (w, h, d, material, x, y, z, name) =>
+    add(new THREE.BoxGeometry(w, h, d), material, x, y, z, name);
+
+  // Lower body (y 0.45 - 1.1) and bumpers; front bumper at -Z
+  box(2.0, 0.65, 5.2, whiteMaterial, 0, 0.775, 0);
+  box(1.9, 0.2, 0.14, bumperMaterial, 0, 0.55, -2.58);
+  box(1.9, 0.2, 0.14, bumperMaterial, 0, 0.55, 2.58);
+  box(1.0, 0.18, 0.04, blackMaterial, 0, 0.9, -2.61);   // grille
+
+  // Cab: side profile extruded across the width, with a sloped
+  // windscreen at the front. Shape (u, v) = (-z, y); rotateY(90deg)
+  // maps u -> -z and the extrusion depth -> x.
+  const WINDSCREEN_FOOT_Z = -1.25;
+  const WINDSCREEN_TOP_Z = -0.55;
+  const BODY_TOP_Y = 1.1;
+  const CAB_ROOF_Y = 1.74;
+
+  const profile = new THREE.Shape();
+  profile.moveTo(-WINDSCREEN_FOOT_Z, BODY_TOP_Y);
+  profile.lineTo(-WINDSCREEN_TOP_Z, CAB_ROOF_Y);
+  profile.lineTo(-0.75, CAB_ROOF_Y);
+  profile.lineTo(-0.85, BODY_TOP_Y);
+  profile.closePath();
+
+  const cabGeometry = new THREE.ExtrudeGeometry(profile, {
+    depth: 1.9, bevelEnabled: false
   });
+  cabGeometry.rotateY(Math.PI / 2);
+  cabGeometry.translate(-0.95, 0, 0);
+  add(cabGeometry, whiteMaterial, 0, 0, 0);
 
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(2.1, 0.8, 4.6),
-    bodyMaterial
+  // Windscreen: plane lying on the slope, pushed just outside it
+  const rise = CAB_ROOF_Y - BODY_TOP_Y;
+  const run = WINDSCREEN_TOP_Z - WINDSCREEN_FOOT_Z;
+  const slopeLength = Math.hypot(rise, run);
+  const normalY = run / slopeLength;     // outward normal: up and forward
+  const normalZ = -rise / slopeLength;
+
+  const windscreen = add(
+    new THREE.PlaneGeometry(1.62, slopeLength * 0.82),
+    glassMaterial,
+    0,
+    (BODY_TOP_Y + CAB_ROOF_Y) / 2 + normalY * 0.012,
+    (WINDSCREEN_FOOT_Z + WINDSCREEN_TOP_Z) / 2 + normalZ * 0.012
   );
-  body.position.y = 0.7;
+  windscreen.rotation.x = Math.atan2(-normalY, normalZ);
+  windscreen.castShadow = false;
 
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(1.8, 0.6, 2.4),
-    roofMaterial
-  );
-  roof.position.set(0, 1.4, 0.2);
+  // Canopy over the load bed
+  box(1.92, 0.75, 1.72, whiteMaterial, 0, 1.475, 1.76);
 
-  const redMaterial = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
-  const blueMaterial = new THREE.MeshBasicMaterial({ color: 0x2a5cff });
+  // Side windows (cab front door, cab rear door, canopy) and the
+  // POLICE lettering, mirrored onto both sides
+  const windowGeometry = new THREE.PlaneGeometry(1, 1);
+  const lettering = createLetteringTexture();
+  const letteringGeometry = new THREE.PlaneGeometry(1.1, 0.2);
+  const letteringMaterial = lettering
+    ? new THREE.MeshBasicMaterial({
+        map: lettering, transparent: true, depthWrite: false
+      })
+    : null;
 
-  const red = new THREE.Mesh(
-    new THREE.BoxGeometry(0.7, 0.25, 0.4),
-    redMaterial
-  );
-  red.position.set(-0.45, 1.85, 0.2);
+  const sideWindow = (side, z, y, w, h, x) => {
+    const m = add(windowGeometry, glassMaterial, side * x, y, z);
+    m.scale.set(w, h, 1);
+    m.rotation.y = side * Math.PI / 2;
+    m.castShadow = false;
+  };
 
-  const blue = new THREE.Mesh(
-    new THREE.BoxGeometry(0.7, 0.25, 0.4),
-    blueMaterial
-  );
-  blue.position.set(0.45, 1.85, 0.2);
+  for (const side of [1, -1]) {
+    sideWindow(side, -0.25, 1.46, 0.5, 0.4, 0.955);   // front door
+    sideWindow(side, 0.38, 1.46, 0.5, 0.4, 0.955);    // rear door
+    sideWindow(side, 1.7, 1.55, 1.0, 0.35, 0.965);    // canopy
 
-  for (const m of [body, roof, red, blue]) {
-    m.castShadow = true;
-    root.add(m);
+    // Livery: blue band over a thin yellow band along the body
+    box(0.012, 0.15, 5.2, blueMaterial, side * 1.006, 0.62, 0);
+    box(0.012, 0.07, 5.2, yellowMaterial, side * 1.006, 0.76, 0);
+
+    if (letteringMaterial) {
+      const m = add(
+        letteringGeometry, letteringMaterial, side * 1.014, 0.93, -0.45
+      );
+      m.rotation.y = side * Math.PI / 2;
+      m.castShadow = false;
+    }
   }
 
+  // Wheels: black cylinders on the X axis, front axle at -Z
+  const wheelGeometry = new THREE.CylinderGeometry(0.38, 0.38, 0.24, 12);
+  wheelGeometry.rotateZ(Math.PI / 2);
+
+  for (const x of [-0.9, 0.9]) {
+    for (const z of [-1.65, 1.65]) {
+      add(wheelGeometry, blackMaterial, x, 0.38, z);
+    }
+  }
+
+  // Lights: headlights at the front (-Z), red tail-lights at the back
+  const headlightGeometry = new THREE.BoxGeometry(0.38, 0.16, 0.04);
+  const taillightGeometry = new THREE.BoxGeometry(0.22, 0.3, 0.04);
+
+  for (const x of [-0.7, 0.7]) {
+    add(headlightGeometry, headlightMaterial, x, 0.95, -2.61, 'headlight');
+    add(taillightGeometry, taillightMaterial, x * 1.2, 0.95, 2.61, 'taillight');
+  }
+
+  // Roof light bar: red on the left, blue on the right
+  const barGeometry = new THREE.BoxGeometry(1.0, 0.05, 0.22);
+  const lensGeometry = new THREE.BoxGeometry(0.44, 0.1, 0.2);
+
+  add(barGeometry, blackMaterial, 0, CAB_ROOF_Y + 0.025, 0.05);
+  add(lensGeometry, redLensMaterial, -0.25, CAB_ROOF_Y + 0.1, 0.05);
+  add(lensGeometry, blueLensMaterial, 0.25, CAB_ROOF_Y + 0.1, 0.05);
+
   root.userData.flash = (on) => {
-    red.visible = on;
-    blue.visible = !on;
+    redLensMaterial.emissiveIntensity = on ? LIGHT_BAR_ON : 0;
+    blueLensMaterial.emissiveIntensity = on ? 0 : LIGHT_BAR_ON;
   };
 
   return root;
+}
+
+
+// "POLICE" on a transparent canvas. Needs a DOM; returns null
+// under plain Node (headless tests), where the lettering is skipped.
+function createLetteringTexture() {
+
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 96;
+
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    return null;
+  }
+
+  ctx.font = 'bold 84px Arial, Helvetica, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#0b3d91';
+  ctx.fillText('POLICE', canvas.width / 2, canvas.height / 2 + 4);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+
+  return texture;
 }
 
 
@@ -133,6 +293,7 @@ function disposeObject(root) {
     const mats = Array.isArray(o.material) ? o.material : [o.material];
 
     for (const m of mats) {
+      m?.map?.dispose();
       m?.dispose();
     }
   });
@@ -178,6 +339,7 @@ export class PursuitSystem {
     this.flashTime = 0;
     this.spawned = false;
     this.captured = false;
+    this.reachable = true;
     this.distance = Infinity;
     this.pressure = 0;
   }
@@ -348,6 +510,8 @@ export class PursuitSystem {
       !(this.config.ignoreElevated &&
         this.taxi.position.y > ELEVATED_Y);
 
+    this.reachable = reachable;
+
     const dark = !this.headlightsOn();
 
     const detection =
@@ -462,7 +626,13 @@ export class PursuitSystem {
       this.loseTimer += dt;
     }
 
-    this.drive(dt, this.lastKnownX, this.lastKnownZ, topSpeed);
+    // Hold the standoff only while the taxi is actually in view; a
+    // stale last-known point is driven to properly.
+    this.drive(
+      dt, this.lastKnownX, this.lastKnownZ,
+      topSpeed * this.catchUpFactor(),
+      seen ? this.standoff() : 0
+    );
 
     if (this.loseTimer >= this.config.loseTime) {
       this.captureTimer = 0;
@@ -487,6 +657,58 @@ export class PursuitSystem {
   }
 
 
+  // Following distance, kept below captureDistance
+  standoff() {
+    return Math.min(
+      STANDOFF_DISTANCE,
+      this.config.captureDistance - STANDOFF_MARGIN
+    );
+  }
+
+
+  // 1.0 within catchUpDistance, rising to catchUpMultiplier at
+  // twice that distance (smoothstep, so no sudden speed change).
+  catchUpFactor() {
+
+    const { catchUpDistance, catchUpMultiplier } = this.config;
+
+    const t = Math.min(Math.max(
+      (this.distance - catchUpDistance) / catchUpDistance, 0), 1);
+
+    return 1 + (catchUpMultiplier - 1) * t * t * (3 - 2 * t);
+  }
+
+
+  // Hard floor on taxi separation: pushes the pursuer straight
+  // back out and sheds the speed it would have used to ram the
+  // taxi. Never collidable, so this is the only "contact".
+  keepSeparation() {
+
+    if (!this.reachable) {
+      return;
+    }
+
+    const min = Math.min(MIN_SEPARATION, this.standoff());
+
+    const dx = this.x - this.taxi.position.x;
+    const dz = this.z - this.taxi.position.z;
+    const dist = Math.hypot(dx, dz);
+
+    if (dist >= min) {
+      return;
+    }
+
+    // Exactly on top of the taxi: back out along the heading
+    const nx = dist > 1e-6 ? dx / dist : Math.sin(this.heading);
+    const nz = dist > 1e-6 ? dz / dist : Math.cos(this.heading);
+
+    this.x = this.taxi.position.x + nx * min;
+    this.z = this.taxi.position.z + nz * min;
+
+    this.speed = Math.min(this.speed, Math.abs(this.vehicle.getSpeed()));
+  }
+
+
   setState(state) {
     this.state = state;
     this.stateTime = 0;
@@ -494,8 +716,9 @@ export class PursuitSystem {
 
 
   // Steers towards (tx, tz) and moves, capped at maxSpeed.
-  // Slows on arrival and in sharp turns; stays on the road.
-  drive(dt, tx, tz, maxSpeed) {
+  // Slows on arrival (standoff metres short of the target) and in
+  // sharp turns; keeps clear of the taxi and stays on the road.
+  drive(dt, tx, tz, maxSpeed, standoff = 0) {
 
     const dx = tx - this.x;
     const dz = tz - this.z;
@@ -514,7 +737,9 @@ export class PursuitSystem {
       const maxTurn = TURN_RATE * dt;
       this.heading += Math.min(Math.max(diff, -maxTurn), maxTurn);
 
-      target = Math.min(maxSpeed, dist * ARRIVE_GAIN);
+      target = Math.min(
+        maxSpeed, Math.max(dist - standoff, 0) * ARRIVE_GAIN
+      );
 
       if (dist < ARRIVE_RADIUS && this.state === 'searching') {
         target = 0;
@@ -534,6 +759,7 @@ export class PursuitSystem {
     this.x -= Math.sin(this.heading) * this.speed * dt;
     this.z -= Math.cos(this.heading) * this.speed * dt;
 
+    this.keepSeparation();
     this.clampToRoad();
     this.syncMesh();
   }

@@ -2,6 +2,9 @@
 import * as THREE from 'three';
 import assert from 'node:assert/strict';
 import { LevelManager, LEVELS } from '../src/world/LevelManager.js';
+import {
+  createPursuerMesh, STANDOFF_DISTANCE, MIN_SEPARATION
+} from '../src/world/PursuitSystem.js';
 
 const MAX_SPEED = 28;
 const DT = 1 / 60;
@@ -89,7 +92,8 @@ test('L1: chasing -> lost -> searching -> chasing; speed cap from vehicle', () =
     sawSearching ||= e.lm.pursuit.state === 'searching';
   }
   assert.ok(sawLost && sawSearching, 'went through lost and searching');
-  assert.ok(maxSpeed <= 0.95 * MAX_SPEED + 1e-6, `speed cap (${maxSpeed})`);
+  // L1 speedFraction 0.95, times the far-away catch-up boost
+  assert.ok(maxSpeed <= 0.95 * 1.15 * MAX_SPEED + 1e-6, `speed cap (${maxSpeed})`);
   assert.ok(maxSpeed > 5, 'actually moved');
 
   // Re-detect: taxi comes back within detection radius
@@ -247,6 +251,134 @@ test('reload cycles 1->2->3->1 leave exactly one pursuer, no leaks', () => {
 
   THREE.BufferGeometry.prototype.dispose = origGeo;
   THREE.Material.prototype.dispose = origMat;
+});
+
+// Drives the taxi along -Z (or any z velocity) while stepping the level.
+function run(e, seconds, taxiVz, onFrame) {
+  e.setSpeed(Math.abs(taxiVz));
+  for (let t = 0; t < seconds; t += DT) {
+    e.taxi.position.z += taxiVz * DT;
+    e.lm.update(DT, t);
+    onFrame?.(t);
+  }
+}
+
+const gap = e => Math.hypot(
+  e.taxi.position.x - e.lm.pursuit.x,
+  e.taxi.position.z - e.lm.pursuit.z);
+
+test('standoff: settles behind a stopped taxi, in capture range, never closer than min', () => {
+  assert.ok(STANDOFF_DISTANCE < LEVELS[1].pursuit.captureDistance);
+  assert.ok(MIN_SEPARATION <= STANDOFF_DISTANCE);
+  const e = make();
+  e.lm.load(1);
+  e.taxi.position.set(0, 0, -80);
+  step(e.lm, DT * 2);
+  let minGap = Infinity;
+  run(e, 8, 0, () => { minGap = Math.min(minGap, gap(e)); });
+  assert.ok(minGap >= MIN_SEPARATION - 1e-9, `min gap ${minGap}`);
+  assert.ok(Math.abs(gap(e) - STANDOFF_DISTANCE) < 0.3, `settled at ${gap(e)}`);
+  assert.ok(gap(e) <= LEVELS[1].pursuit.captureDistance);
+});
+
+test('separation never drops below minimum when the taxi brakes hard; capture once; stops', () => {
+  const e = make();
+  e.lm.load(1);
+  e.taxi.position.set(0, 0, -80);
+  step(e.lm, DT * 2);
+  let minGap = Infinity;
+  const watch = () => { minGap = Math.min(minGap, gap(e)); };
+  run(e, 2.5, -10, watch);         // pursuer boosts in on a slower taxi
+  run(e, 14, 0, watch);            // taxi stops dead (well short of the L1 zone)
+  assert.ok(minGap >= MIN_SEPARATION - 1e-9, `min gap ${minGap}`);
+  assert.equal(e.captured.length, 1, 'capture fired exactly once');
+  assert.equal(e.lm.pursuit.speed, 0);
+  const { x, z } = e.lm.pursuit;
+  run(e, 3, 0);
+  assert.equal(e.captured.length, 1, 'still once');
+  assert.equal(e.lm.pursuit.x, x);
+  assert.equal(e.lm.pursuit.z, z);
+});
+
+test('separation holds when the taxi reverses into the pursuer', () => {
+  const e = make();
+  e.lm.load(1);
+  e.taxi.position.set(0, 0, -80);
+  step(e.lm, DT * 2);
+  run(e, 3, 0);
+  assert.ok(gap(e) < 4, 'pursuer is right behind the taxi');
+  let minGap = Infinity;
+  run(e, 0.8, 6, () => { minGap = Math.min(minGap, gap(e)); });
+  assert.equal(e.captured.length, 0, 'still chasing, so separation is enforced');
+  assert.ok(minGap >= MIN_SEPARATION - 1e-9, `min gap ${minGap}`);
+});
+
+test('catch-up: boosted when far behind, never above speedFraction up close', () => {
+  const far = make();
+  far.lm.load(1);
+  far.taxi.position.set(0, 0, -80);
+  step(far.lm, DT * 2);
+  far.lm.pursuit.z = far.taxi.position.z + 60;
+  let farMax = 0;
+  run(far, 6, 0, () => { farMax = Math.max(farMax, far.lm.pursuit.speed); });
+  assert.ok(farMax > 0.95 * MAX_SPEED + 0.5, `boosted (${farMax})`);
+  assert.ok(farMax <= 0.95 * 1.15 * MAX_SPEED + 1e-6, `cap (${farMax})`);
+
+  const near = make();
+  near.lm.load(1);
+  near.taxi.position.set(0, 0, -80);
+  step(near.lm, DT * 2);
+  near.lm.pursuit.z = near.taxi.position.z + 24;
+  let nearMax = 0;
+  run(near, 5, 0, () => { nearMax = Math.max(nearMax, near.lm.pursuit.speed); });
+  assert.ok(nearMax <= 0.95 * MAX_SPEED + 1e-6, `no boost up close (${nearMax})`);
+});
+
+test('mesh: faces -Z, bakkie-sized, lights, flashing swaps emissive only', () => {
+  const mesh = createPursuerMesh();
+  const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
+  assert.ok(size.x > 1.9 && size.x < 2.2, `width ${size.x}`);
+  assert.ok(Math.abs(size.z - 5.3) < 0.1, `length ${size.z}`);
+  assert.ok(size.y > 1.8 && size.y < 2.0, `height ${size.y}`);
+  const zs = n => { const v = []; mesh.traverse(o => o.name === n && v.push(o.position.z)); return v; };
+  assert.equal(zs('headlight').length, 2);
+  assert.equal(zs('taillight').length, 2);
+  assert.ok(zs('headlight').every(z => z < 0), 'headlights at -Z (front)');
+  assert.ok(zs('taillight').every(z => z > 0), 'tail-lights at +Z (rear)');
+
+  const mats = new Set();
+  mesh.traverse(o => o.material && mats.add(o.material));
+  const lenses = [...mats].filter(m => m.emissive && m.emissiveIntensity !== undefined &&
+    m.emissive.getHex() !== 0 && m.color.getHex() !== 0xf1f3f5);
+  assert.equal(lenses.length, 2);
+  mesh.userData.flash(true);
+  const a = lenses.map(m => m.emissiveIntensity);
+  mesh.userData.flash(false);
+  const b = lenses.map(m => m.emissiveIntensity);
+  assert.notDeepEqual(a, b);
+  assert.equal(new Set([...mats]).size, mats.size);
+});
+
+test('mesh: lettering texture is created and disposed with the pursuer', () => {
+  const ctx = new Proxy({}, { get: () => () => {}, set: () => true });
+  globalThis.document = {
+    createElement: () => ({ width: 0, height: 0, getContext: () => ctx })
+  };
+  let texDisposed = 0;
+  const orig = THREE.Texture.prototype.dispose;
+  THREE.Texture.prototype.dispose = function () { texDisposed++; return orig.call(this); };
+  try {
+    const e = make();
+    e.lm.load(1);
+    let planes = 0;
+    e.lm.pursuit.mesh.traverse(o => { if (o.material?.map) planes++; });
+    assert.equal(planes, 2, 'POLICE on both doors');
+    e.lm.load(2);
+    assert.ok(texDisposed >= 1, 'texture disposed on reload');
+  } finally {
+    THREE.Texture.prototype.dispose = orig;
+    delete globalThis.document;
+  }
 });
 
 test('capture does not touch collidables', () => {
