@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PursuitSystem } from './PursuitSystem.js';
 
 // ==================================================
 // LEVEL DEFINITIONS
@@ -30,6 +31,51 @@ const ELEVATION_ENTRY_MAX = 0.3;
 const ELEVATION_ENTRY_TOLERANCE = 0.6;
 
 
+// ==================================================
+// PURSUIT TUNING (hand-tunable)
+// --------------------------------------------------
+// Speeds are fractions of the vehicle's maxForwardSpeed;
+// distances in metres, times in seconds. Shared behaviour
+// (turn rate, acceleration...) is at the top of
+// PursuitSystem.js.
+// ==================================================
+
+// Level 1: appears near the end of the run
+const L1_PURSUIT_TRIGGER_PROGRESS = 0.66;  // along spawn -> destination
+const L1_PURSUIT_SPAWN_DISTANCE = 30;      // behind the taxi
+const L1_PURSUIT_SPEED = 0.95;
+const L1_PURSUIT_LOSE_RANGE = 120;
+const L1_PURSUIT_LOSE_TIME = 5;
+const L1_PURSUIT_CAPTURE_DISTANCE = 4.5;
+const L1_PURSUIT_CAPTURE_TIME = 2.5;
+
+// Level 2: on the ground lane from the start, slightly slower.
+// It cannot follow onto the flyover - that is how you shake it.
+const L2_PURSUIT_START_DELAY = 3;
+const L2_PURSUIT_SPAWN_DISTANCE = 30;      // behind the spawn
+const L2_PURSUIT_SPEED = 0.85;
+const L2_PURSUIT_DETECTION_RADIUS = 80;
+const L2_PURSUIT_LOSE_RANGE = 120;
+const L2_PURSUIT_LOSE_TIME = 3;
+const L2_PURSUIT_CAPTURE_DISTANCE = 4.5;
+const L2_PURSUIT_CAPTURE_TIME = 2.5;
+const L2_PURSUIT_LANE_MIN_X = -9;
+const L2_PURSUIT_LANE_MAX_X = 2;           // flyover starts at x 3
+
+// Level 3: detection range is the stealth tradeoff against
+// the unlit potholes (lights on = seen from far away).
+const L3_PURSUIT_START_DELAY = 4;
+const L3_PURSUIT_SPAWN_DISTANCE = 30;      // behind the spawn
+const L3_PURSUIT_SPEED = 0.9;
+const L3_PURSUIT_DETECTION_LIGHTS_ON = 70;
+const L3_PURSUIT_DETECTION_LIGHTS_OFF = 15;
+const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 110;
+const L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF = 30;
+const L3_PURSUIT_LOSE_TIME = 4;
+const L3_PURSUIT_CAPTURE_DISTANCE = 4.5;
+const L3_PURSUIT_CAPTURE_TIME = 2.5;
+
+
 export const LEVELS = {
 
   1: {
@@ -55,6 +101,20 @@ export const LEVELS = {
 
       // Taxi must be (nearly) stopped inside the zone
       maxDeliverSpeed: 4
+    },
+
+    // Pursuit begins near the end: a pursuer appears behind the
+    // taxi once it is two thirds along the route.
+    pursuit: {
+      mode: 'trigger',
+      triggerProgress: L1_PURSUIT_TRIGGER_PROGRESS,
+      spawnDistance: L1_PURSUIT_SPAWN_DISTANCE,
+      speedFraction: L1_PURSUIT_SPEED,
+      detectionRadius: L1_PURSUIT_LOSE_RANGE,
+      loseRange: L1_PURSUIT_LOSE_RANGE,
+      loseTime: L1_PURSUIT_LOSE_TIME,
+      captureDistance: L1_PURSUIT_CAPTURE_DISTANCE,
+      captureTime: L1_PURSUIT_CAPTURE_TIME
     },
 
     // The vehicle also hard-clamps to x +-30, z +-190
@@ -140,6 +200,24 @@ export const LEVELS = {
       maxDeliverSpeed: 4
     },
 
+    // Ground-lane pursuer; taking the flyover shakes it.
+    pursuit: {
+      mode: 'immediate',
+      startDelay: L2_PURSUIT_START_DELAY,
+      spawnDistance: L2_PURSUIT_SPAWN_DISTANCE,
+      speedFraction: L2_PURSUIT_SPEED,
+      detectionRadius: L2_PURSUIT_DETECTION_RADIUS,
+      loseRange: L2_PURSUIT_LOSE_RANGE,
+      loseTime: L2_PURSUIT_LOSE_TIME,
+      captureDistance: L2_PURSUIT_CAPTURE_DISTANCE,
+      captureTime: L2_PURSUIT_CAPTURE_TIME,
+      ignoreElevated: true,
+      lane: {
+        minX: L2_PURSUIT_LANE_MIN_X,
+        maxX: L2_PURSUIT_LANE_MAX_X
+      }
+    },
+
     // TODO(setBounds): shared with every level for now - see
     // VEHICLE_BOUNDS. This route is squeezed into the road
     // (x +-9) and z +-170 purely because of that clamp.
@@ -193,6 +271,21 @@ export const LEVELS = {
       maxDeliverSpeed: 4
     },
 
+    // Seen from far with the lights on, nearly invisible without
+    pursuit: {
+      mode: 'immediate',
+      startDelay: L3_PURSUIT_START_DELAY,
+      spawnDistance: L3_PURSUIT_SPAWN_DISTANCE,
+      speedFraction: L3_PURSUIT_SPEED,
+      detectionRadius: L3_PURSUIT_DETECTION_LIGHTS_ON,
+      detectionRadiusDark: L3_PURSUIT_DETECTION_LIGHTS_OFF,
+      loseRange: L3_PURSUIT_LOSE_RANGE_LIGHTS_ON,
+      loseRangeDark: L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF,
+      loseTime: L3_PURSUIT_LOSE_TIME,
+      captureDistance: L3_PURSUIT_CAPTURE_DISTANCE,
+      captureTime: L3_PURSUIT_CAPTURE_TIME
+    },
+
     boundaries: VEHICLE_BOUNDS
   }
 };
@@ -207,7 +300,8 @@ export class LevelManager {
     collidables = null,
     potholes = null,
     getHeadlightsEnabled = null,
-    onDelivered = null
+    onDelivered = null,
+    onCaptured = null
   }) {
 
     // The array main.js hands to VehicleController for its ground
@@ -229,17 +323,26 @@ export class LevelManager {
     this.vehicle = vehicle;
     this.taxi = taxi;
     this.onDelivered = onDelivered;
+    this.onCaptured = onCaptured;
 
     this.levelId = null;
     this.config = null;
 
-    // 'none' | 'driving' | 'delivered'
+    // 'none' | 'driving' | 'delivered' | 'captured'
     this.status = 'none';
 
     this.elapsed = 0;
 
     this.group = new THREE.Group();
     this.scene.add(this.group);
+
+    // Not a collidable: capture is distance based
+    this.pursuit = new PursuitSystem({
+      parent: this.group,
+      taxi,
+      vehicle,
+      headlightsOn: () => this.headlightsOn()
+    });
 
     this.zoneMaterial =
       new THREE.MeshBasicMaterial({
@@ -310,6 +413,7 @@ export class LevelManager {
     this.buildMarkers();
     this.buildElevated();
     this.buildHazards();
+    this.pursuit.configure(this.config);
     this.reset();
 
     return true;
@@ -357,6 +461,7 @@ export class LevelManager {
     this.status = 'driving';
 
     this.vehicle.reset(this.config.spawn);
+    this.pursuit.reset();
 
     this.setZoneDelivered(false);
   }
@@ -384,6 +489,13 @@ export class LevelManager {
 
     if (this.isInDeliveryZone()) {
       this.deliver();
+      return;
+    }
+
+    this.pursuit.update(dt);
+
+    if (this.pursuit.captured) {
+      this.capture();
     }
   }
 
@@ -483,6 +595,22 @@ export class LevelManager {
   }
 
 
+  // Fires once: update() stops running once status leaves
+  // 'driving'.
+  capture() {
+
+    this.status = 'captured';
+
+    if (this.onCaptured) {
+      this.onCaptured({
+        level: this.levelId,
+        time: this.elapsed,
+        cargo: this.vehicle.cargoSystem.getState()
+      });
+    }
+  }
+
+
   // --------------------------------------------------
   // State for HUD
   // --------------------------------------------------
@@ -511,10 +639,14 @@ export class LevelManager {
       highSpeedPressure: this.vehicle.getLevel2Pressure(),
       elevation: this.taxi.position.y,
 
-      // Level 3 tradeoff: dark = hazards hidden, but (once
-      // pursuit exists) also harder to spot.
+      // Level 3 tradeoff: dark = hazards hidden, and also
+      // harder for the pursuer to spot.
       headlightsOn: this.headlightsOn(),
       headlightsOffTime: this.headlightsOffTime,
+
+      // { state, distance (null while no pursuer is out),
+      //   pressure 0-1 }
+      pursuit: this.pursuit.getState(),
 
       distanceToDestination:
         Math.hypot(
@@ -746,6 +878,9 @@ export class LevelManager {
     }
 
     this.registeredPotholes = [];
+
+    // Removes the pursuer mesh and disposes its geometry/materials
+    this.pursuit.dispose();
 
     for (const child of [...this.group.children]) {
       this.group.remove(child);
