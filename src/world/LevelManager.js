@@ -47,7 +47,7 @@ const L1_PURSUIT_SPEED = 1.05;
 const L1_PURSUIT_LOSE_RANGE = 120;
 const L1_PURSUIT_LOSE_TIME = 5;
 const L1_PURSUIT_CAPTURE_DISTANCE = 7.0;
-const L1_PURSUIT_CAPTURE_TIME = 2.5;
+const L1_PURSUIT_CAPTURE_TIME = 1.5;
 
 // Level 2: on the ground lane from the start, at the taxi's top speed.
 // It cannot follow onto the flyover - that is how you shake it.
@@ -58,7 +58,7 @@ const L2_PURSUIT_DETECTION_RADIUS = 80;
 const L2_PURSUIT_LOSE_RANGE = 120;
 const L2_PURSUIT_LOSE_TIME = 3;
 const L2_PURSUIT_CAPTURE_DISTANCE = 7.0;
-const L2_PURSUIT_CAPTURE_TIME = 2.5;
+const L2_PURSUIT_CAPTURE_TIME = 1.5;
 const L2_PURSUIT_LANE_MIN_X = -9;
 const L2_PURSUIT_LANE_MAX_X = 2;           // flyover starts at x 3
 
@@ -73,7 +73,7 @@ const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 110;
 const L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF = 30;
 const L3_PURSUIT_LOSE_TIME = 4;
 const L3_PURSUIT_CAPTURE_DISTANCE = 7.0;
-const L3_PURSUIT_CAPTURE_TIME = 2.5;
+const L3_PURSUIT_CAPTURE_TIME = 1.5;
 
 
 export const LEVELS = {

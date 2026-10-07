@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import assert from 'node:assert/strict';
 import { LevelManager, LEVELS } from '../src/world/LevelManager.js';
 import {
-  createPursuerMesh, STANDOFF_DISTANCE, MIN_SEPARATION
+  createPursuerMesh, STANDOFF_DISTANCE, MIN_SEPARATION, CRUISE_GAP,
+  SLOW_SPEED_THRESHOLD, STUMBLE_SURGE_TIME
 } from '../src/world/PursuitSystem.js';
 
 const MAX_SPEED = 28;
@@ -128,7 +129,7 @@ test('capture needs continuous contact', () => {
   for (let i = 0; i < 6; i++) {
     e.lm.pursuit.x = 0; e.lm.pursuit.z = e.taxi.position.z + 2;
     e.lm.pursuit.speed = 0;
-    step(e.lm, 1.5);
+    step(e.lm, 1.0);   // < captureTime (1.5 s since the 2.5 s -> 1.5 s change)
     e.lm.pursuit.z = e.taxi.position.z + 30; // break contact
     step(e.lm, DT * 3);
   }
@@ -305,6 +306,8 @@ test('separation holds when the taxi reverses into the pursuer', () => {
   e.lm.load(1);
   e.taxi.position.set(0, 0, -80);
   step(e.lm, DT * 2);
+  // captureTime raised so this test keeps probing separation, not capture
+  e.lm.pursuit.config.captureTime = 100;
   run(e, 3, 0);
   assert.ok(gap(e) < 7, 'pursuer is right behind the taxi');
   let minGap = Infinity;
@@ -332,6 +335,146 @@ test('catch-up: boosted when far behind, never above speedFraction up close', ()
   let nearMax = 0;
   run(near, 5, 0, () => { nearMax = Math.max(nearMax, near.lm.pursuit.speed); });
   assert.ok(nearMax <= 1.05 * MAX_SPEED + 1e-6, `no boost up close (${nearMax})`);
+});
+
+
+// ---- Subway Surfers style chase ------------------------------------
+
+// Starts a level-1 chase with the taxi already at `speed` and the
+// pursuer sitting `gapNow` metres behind it.
+function chase(speed, gapNow = CRUISE_GAP) {
+  const e = make();
+  e.lm.load(1);
+  e.taxi.position.set(0, 0, -80);
+  step(e.lm, DT * 2);
+  e.taxi.position.set(0, 0, 170);       // room to drive ~340 m down the road
+  e.lm.pursuit.z = 170 + gapNow;
+  e.lm.pursuit.x = 0;
+  e.lm.pursuit.heading = 0;
+  e.lm.pursuit.speed = speed;
+  e.setSpeed(speed);
+  return e;
+}
+
+// Probing the gap, not capture: stop capture from ending the run
+const noCapture = e => { e.lm.pursuit.config.captureTime = 1e9; return e; };
+
+for (const v of [5, 15, 28]) {
+  test(`chase: gap holds at ${v < SLOW_SPEED_THRESHOLD ? 'the standoff' : 'CRUISE_GAP'} with the taxi at ${v} m/s`, () => {
+    assert.equal(CRUISE_GAP, 8.5);
+    const e = noCapture(chase(v, v < SLOW_SPEED_THRESHOLD ? STANDOFF_DISTANCE : CRUISE_GAP));
+    let lo = Infinity, hi = 0;
+    run(e, 10, -v, () => { const g = gap(e); lo = Math.min(lo, g); hi = Math.max(hi, g); });
+    // 5 m/s is below SLOW_SPEED_THRESHOLD, so it is held at the
+    // standoff (spec b); 15 and 28 m/s hold CRUISE_GAP.
+    const want = v < SLOW_SPEED_THRESHOLD ? STANDOFF_DISTANCE : CRUISE_GAP;
+    assert.ok(lo > want - 0.1 && hi < want + 0.1, `gap ${lo}..${hi}`);
+  });
+}
+
+test('chase: a taxi at 5 m/s is caught (slowed: held inside capture range)', () => {
+  const e = chase(5);
+  run(e, 4, -5);
+  assert.equal(e.captured.length, 1);
+});
+
+test('chase: constant speed taxi is never captured (long run, all speeds)', () => {
+  for (const v of [13, 20, 28]) {
+    const e = chase(v);
+    run(e, 11, -v);
+    assert.equal(e.captured.length, 0, `v ${v}`);
+    assert.equal(e.lm.pursuit.captureTimer, 0);
+  }
+});
+
+test('chase: closes to the standoff when the taxi decelerates below the threshold', () => {
+  const e = noCapture(chase(20));
+  let v = 20;
+  for (let t = 0; t < 6; t += DT) {
+    v = Math.max(v - 4 * DT, 3);      // gentle: no stumble
+    e.setSpeed(v);
+    e.taxi.position.z -= v * DT;
+    e.lm.update(DT, t);
+  }
+  assert.ok(v < SLOW_SPEED_THRESHOLD);
+  assert.ok(Math.abs(gap(e) - STANDOFF_DISTANCE) < 0.3, `gap ${gap(e)}`);
+});
+
+test('chase: gap opens back to CRUISE_GAP and capture timer resets when the taxi speeds up', () => {
+  const e = chase(5, STANDOFF_DISTANCE);
+  run(e, 0.8, -5);
+  assert.ok(e.lm.pursuit.captureTimer > 0, 'in capture range while slow');
+  run(e, 6, -25);
+  assert.ok(Math.abs(gap(e) - CRUISE_GAP) < 0.3, `gap ${gap(e)}`);
+  assert.equal(e.lm.pursuit.captureTimer, 0);
+  assert.equal(e.captured.length, 0);
+});
+
+test('chase: a stumble (speed drop > 8 m/s in 0.4 s) makes the pursuer surge', () => {
+  const e = noCapture(chase(25));
+  run(e, 3, -25);
+  assert.ok(gap(e) > CRUISE_GAP - 0.3);
+  // Collision: 25 -> 15 m/s in 0.1 s. Still above the slow threshold.
+  e.setSpeed(15);
+  const surged = [];
+  run(e, 1.0, -15, () => surged.push(gap(e)));
+  assert.ok(15 >= SLOW_SPEED_THRESHOLD);
+  assert.ok(Math.min(...surged) < CRUISE_GAP - 1.5, `surged to ${Math.min(...surged)}`);
+  assert.ok(Math.abs(Math.min(...surged) - STANDOFF_DISTANCE) < 0.4);
+  // Surge ends after STUMBLE_SURGE_TIME: gap reopens
+  run(e, STUMBLE_SURGE_TIME + 4, -15);
+  assert.ok(Math.abs(gap(e) - CRUISE_GAP) < 0.3, `gap ${gap(e)}`);
+});
+
+test('chase: a slow gradual slowdown above the threshold is not a stumble', () => {
+  const e = chase(28);
+  let v = 28;
+  for (let t = 0; t < 5; t += DT) {
+    v = Math.max(v - 2 * DT, 14);      // 2 m/s^2: < 8 m/s per 0.4 s
+    e.setSpeed(v);
+    e.taxi.position.z -= v * DT;
+    e.lm.update(DT, t);
+  }
+  assert.ok(Math.abs(gap(e) - CRUISE_GAP) < 0.3, `gap ${gap(e)}`);
+});
+
+test('chase: an unrecovered stumble ends in capture (surge time > captureTime)', () => {
+  const e = chase(25);
+  run(e, 2, -25);
+  e.setSpeed(15);
+  run(e, 3, -15);
+  assert.equal(e.captured.length, 1);
+});
+
+test('chase: capture fires once, only after captureTime, in capture range', () => {
+  assert.equal(LEVELS[1].pursuit.captureTime, 1.5);
+  assert.equal(LEVELS[2].pursuit.captureTime, 1.5);
+  assert.equal(LEVELS[3].pursuit.captureTime, 1.5);
+  const e = chase(3, STANDOFF_DISTANCE);
+  e.taxi.position.z = 0; e.lm.pursuit.z = STANDOFF_DISTANCE;
+  run(e, 1.4, -3);
+  assert.equal(e.captured.length, 0, 'not before captureTime');
+  run(e, 0.3, -3);
+  assert.equal(e.captured.length, 1);
+  run(e, 3, -3);
+  assert.equal(e.captured.length, 1, 'still once');
+});
+
+test('chase: separation never drops below MIN_SEPARATION through brake, stumble and surge', () => {
+  const e = chase(28);
+  let minGap = Infinity;
+  const watch = () => { minGap = Math.min(minGap, gap(e)); };
+  run(e, 3, -28, watch);
+  let v = 28;
+  for (let t = 0; t < 3; t += DT) {      // hard brake at 33 m/s^2
+    v = Math.max(v - 33 * DT, 0);
+    e.setSpeed(v);
+    e.taxi.position.z -= v * DT;
+    e.lm.update(DT, t);
+    watch();
+  }
+  run(e, 2, -28, watch);
+  assert.ok(minGap >= MIN_SEPARATION - 1e-9, `min gap ${minGap}`);
 });
 
 test('mesh: faces -Z, bakkie-sized, lights, flashing swaps emissive only', () => {
@@ -372,7 +515,7 @@ test('mesh: lettering texture is created and disposed with the pursuer', () => {
     e.lm.load(1);
     let planes = 0;
     e.lm.pursuit.mesh.traverse(o => { if (o.material?.map) planes++; });
-    assert.equal(planes, 2, 'POLICE on both doors');
+    assert.equal(planes, 3, 'POLICE on both doors and the canopy rear');
     e.lm.load(2);
     assert.ok(texDisposed >= 1, 'texture disposed on reload');
   } finally {

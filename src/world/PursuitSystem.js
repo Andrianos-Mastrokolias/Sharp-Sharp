@@ -35,16 +35,34 @@ const SHARP_TURN_ANGLE = 1;     // rad; slow down beyond this
 const SHARP_TURN_SPEED_SCALE = 0.6;
 const PRESSURE_RANGE = 60;      // distance at which pressure hits 0
 const ELEVATED_Y = 1;           // taxi above this is "on the flyover"
-const LIGHT_FLASH_RATE = 3;     // Hz
+const LIGHT_FLASH_RATE = 3;     // Hz: red/blue cycles per second: red/blue cycles per second
 const LIGHT_BAR_ON = 2.5;       // lens emissiveIntensity when lit
 
-// Following distance (centre to centre) the pursuer holds behind
-// the taxi. Must stay below captureDistance, or it could never
-// count as "in capture range". MIN_SEPARATION is the hard floor:
-// the pursuer is pushed back out to it if the taxi brakes hard.
+// Following distances (centre to centre) behind the taxi.
+//   CRUISE_GAP   - held at ANY taxi speed while the taxi is going
+//                  well: just outside the 7 m capture range, and
+//                  visible between the chase camera (10.5 m back)
+//                  and the taxi.
+//   STANDOFF     - held while the taxi is "slowed" (below
+//                  SLOW_SPEED_THRESHOLD, or a stumble within the
+//                  last STUMBLE_SURGE_TIME). Must stay below
+//                  captureDistance, or it could never count as
+//                  "in capture range".
+// MIN_SEPARATION is the hard floor: the pursuer is pushed back out
+// to it if the taxi brakes hard.
+export const CRUISE_GAP = 8.5;
 export const STANDOFF_DISTANCE = 6.0;
 export const MIN_SEPARATION = 5.5;
 const STANDOFF_MARGIN = 0.25;   // standoff <= captureDistance - this
+
+// Chase behaviour (all overridable per level in LEVELS[n].pursuit)
+export const SLOW_SPEED_THRESHOLD = 12;  // m/s; taxi below this is "slowed"
+export const STUMBLE_SPEED_DROP = 8;     // m/s lost within STUMBLE_WINDOW
+export const STUMBLE_WINDOW = 0.4;       // s
+export const STUMBLE_SURGE_TIME = 2;     // s a stumble keeps the gap tight
+const CLOSING_GAIN = 3;                  // (m/s) of speed per metre of gap error
+const APPROACH_BRAKE_FRACTION = 0.8;     // of BRAKING, when closing in a surge
+const SPEED_SAMPLES = 128;               // ring buffer; covers 0.4 s up to 300 fps
 
 const DEFAULT_CONFIG = {
 
@@ -67,7 +85,15 @@ const DEFAULT_CONFIG = {
   loseTime: 4,
 
   captureDistance: 4,
-  captureTime: 2,
+  captureTime: 1.5,
+
+  cruiseGap: CRUISE_GAP,
+  standoffDistance: STANDOFF_DISTANCE,
+  slowSpeedThreshold: SLOW_SPEED_THRESHOLD,
+  stumbleSpeedDrop: STUMBLE_SPEED_DROP,
+  stumbleWindow: STUMBLE_WINDOW,
+  stumbleSurgeTime: STUMBLE_SURGE_TIME,
+  closingGain: CLOSING_GAIN,
 
   // Catch-up: further behind than catchUpDistance the speed cap is
   // scaled up, reaching catchUpMultiplier at twice that distance and
@@ -82,13 +108,17 @@ const DEFAULT_CONFIG = {
 };
 
 
-// Stylised low-poly SAPS bakkie (Isuzu D-Max style double cab with
-// a short canopy). Code-built only: no external models or images.
+// Stylised SAPS bakkie (Isuzu D-Max style double cab with a short
+// canopy). Code-built only: no external models or images.
 // Faces -Z at rotation.y = 0, ~2.0 m wide, 5.3 m long, 1.85 m tall.
-// Side profile, front to back (z): bonnet -2.65..-1.45 (top 1.05),
-// double cab -1.45..0.55 (roof 1.76), canopy 0.58..2.18 (1.6 m, roof
-// just under the cab roof, stepping down at the rear), then the open
-// tailgate end of the load bed.
+//
+// The body is ONE side-profile shape extruded across the width with
+// a small bevel. Profile coordinates are (u, y): u metres back from
+// the front (world z = u - 2.65), y metres up. Roughly: bonnet top
+// 1.05 over the first 1.3 m, windscreen rising to the 1.75 m cab
+// roof by 2.4 m, flat roof to 3.7 m, canopy to 5.1 m at 1.7 m high
+// with a rounded rear edge, and a small rear step. The bevel adds
+// BEVEL_SIZE all round, so the profile is that much inside.
 // Returns a THREE.Object3D carrying userData.flash(on) for the roof
 // light bar. Everything it creates (geometries, materials and the
 // lettering texture) is released by disposeObject().
@@ -96,40 +126,39 @@ export function createPursuerMesh() {
 
   const root = new THREE.Group();
 
-  const whiteMaterial = new THREE.MeshStandardMaterial({
-    color: 0xf1f3f5, roughness: 0.45
-  });
-  const blueMaterial = new THREE.MeshStandardMaterial({
-    color: 0x0b3d91, roughness: 0.5
-  });
-  const yellowMaterial = new THREE.MeshStandardMaterial({
-    color: 0xf2b705, roughness: 0.5
-  });
-  const glassMaterial = new THREE.MeshStandardMaterial({
-    color: 0x0d141b, roughness: 0.15, metalness: 0.3
-  });
-  const blackMaterial = new THREE.MeshStandardMaterial({
-    color: 0x141414, roughness: 0.9
-  });
-  const archMaterial = new THREE.MeshStandardMaterial({
-    color: 0x0a0a0a, roughness: 1
-  });
-  const bumperMaterial = new THREE.MeshStandardMaterial({
-    color: 0x2a2d31, roughness: 0.7
-  });
+  const material = (color, roughness = 0.6, extra = {}) =>
+    new THREE.MeshStandardMaterial({ color, roughness, ...extra });
+
+  // Flat overlays sit a few mm off the body: polygonOffset keeps
+  // them from z-fighting at chase-camera distance
+  const overlay = (color, roughness = 0.5, metalness = 0) =>
+    new THREE.MeshStandardMaterial({
+      color, roughness, metalness, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2
+    });
+
+  const whiteMaterial = material(0xf1f3f5, 0.45);
+  const blueMaterial = overlay(0x0b3d91);
+  const yellowMaterial = overlay(0xf2c500);
+  const glassMaterial = overlay(0x0d141b, 0.15, 0.3);
+  const frameMaterial = overlay(0x050607, 0.8);
+  const blackMaterial = material(0x141414, 0.9);
+  const darkMaterial = overlay(0x0a0a0a, 1);
+  const metalMaterial = material(0x2a2d31, 0.5, { metalness: 0.4 });
+  const rimMaterial = material(0x8a9096, 0.5, { metalness: 0.5 });
+  const plateMaterial = overlay(0xf4f4ec, 0.6);
   const headlightMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1c0 });
+  const indicatorMaterial = new THREE.MeshBasicMaterial({ color: 0xff9a1a });
   const taillightMaterial = new THREE.MeshBasicMaterial({ color: 0xd01212 });
 
   // Light bar lenses: flash() only swaps emissiveIntensity
-  const redLensMaterial = new THREE.MeshStandardMaterial({
-    color: 0x7a0a0a, emissive: 0xff1a1a, emissiveIntensity: 0
-  });
-  const blueLensMaterial = new THREE.MeshStandardMaterial({
-    color: 0x0a2a7a, emissive: 0x2a5cff, emissiveIntensity: 0
-  });
+  const redLensMaterial = material(0x7a0a0a, 0.4,
+    { emissive: 0xff1a1a, emissiveIntensity: 0 });
+  const blueLensMaterial = material(0x0a2a7a, 0.4,
+    { emissive: 0x2a5cff, emissiveIntensity: 0 });
 
-  const add = (geometry, material, x, y, z, name) => {
-    const mesh = new THREE.Mesh(geometry, material);
+  const add = (geometry, mat, x, y, z, name) => {
+    const mesh = new THREE.Mesh(geometry, mat);
     mesh.position.set(x, y, z);
     mesh.castShadow = true;
     if (name) { mesh.name = name; }
@@ -137,155 +166,293 @@ export function createPursuerMesh() {
     return mesh;
   };
 
-  const box = (w, h, d, material, x, y, z, name) =>
-    add(new THREE.BoxGeometry(w, h, d), material, x, y, z, name);
+  const box = (w, h, d, mat, x, y, z, name) =>
+    add(new THREE.BoxGeometry(w, h, d), mat, x, y, z, name);
 
-  // Heights (y) and the cab / canopy layout (z)
-  const BODY_BOTTOM_Y = 0.5;
-  const BODY_TOP_Y = 1.05;          // bonnet and load-bed sides
-  const CAB_ROOF_Y = 1.76;
-  const CANOPY_ROOF_Y = 1.72;
-  const CANOPY_REAR_ROOF_Y = 1.6;   // the small step down at the rear
+  const flat = (mesh) => { mesh.castShadow = false; return mesh; };
 
-  const WINDSCREEN_FOOT_Z = -1.45;
-  const WINDSCREEN_TOP_Z = -0.9;
-  const CAB_ROOF_REAR_Z = 0.45;
-  const CAB_REAR_Z = 0.55;
-  const CANOPY_FRONT_Z = 0.58;
-  const CANOPY_STEP_Z = 1.88;
-  const CANOPY_REAR_Z = 2.18;
+  const FRONT_Z = -2.65;
+  const zOf = (u) => u + FRONT_Z;
 
-  // Lower body (bonnet, door sills, load bed) sitting high on the
-  // wheels, a dark underbody below it, and the bumpers; front
-  // bumper at -Z
-  box(2.0, BODY_TOP_Y - BODY_BOTTOM_Y, 5.16, whiteMaterial,
-    0, (BODY_TOP_Y + BODY_BOTTOM_Y) / 2, 0);
-  box(1.7, 0.2, 4.6, blackMaterial, 0, 0.4, 0);
-  box(1.9, 0.2, 0.14, bumperMaterial, 0, 0.58, -2.58);
-  box(2.0, 0.24, 0.14, bumperMaterial, 0, 0.6, 2.58);   // rear bumper
-  box(1.0, 0.18, 0.04, blackMaterial, 0, 0.88, -2.61);  // grille
+  // ---- Body: extruded side profile -----------------------------
+  const BODY_DEPTH = 1.84;      // + 2 * BEVEL_THICKNESS = 2.0 m
+  const BEVEL_THICKNESS = 0.08;
+  const BEVEL_SIZE = 0.03;
+  const SIDE_X = BODY_DEPTH / 2 + BEVEL_THICKNESS;   // flat side face
+  const BOTTOM_Y = 0.55;        // underside: wheels clearly show
+  const BONNET_Y = 1.02;
+  const ROOF_Y = 1.72;          // cab roof (outer 1.75)
+  const CANOPY_Y = 1.67;        // canopy roof (outer 1.70)
 
-  // Cab: side profile extruded across the width, with a sloped
-  // windscreen at the front. Shape (u, v) = (-z, y); rotateY(90deg)
-  // maps u -> -z and the extrusion depth -> x.
-  const CAB_WIDTH = 1.94;
+  const WHEEL_RADIUS = 0.38;
+  const ARCH_RADIUS = 0.46;
+  const FRONT_WHEEL_U = 1.05;
+  const REAR_WHEEL_U = 4.15;
+
+  const archHalfChord = Math.sqrt(
+    ARCH_RADIUS ** 2 - (BOTTOM_Y - WHEEL_RADIUS) ** 2);
+  const archAngle = Math.atan2(BOTTOM_Y - WHEEL_RADIUS, archHalfChord);
 
   const profile = new THREE.Shape();
-  profile.moveTo(-WINDSCREEN_FOOT_Z, BODY_TOP_Y);
-  profile.lineTo(-WINDSCREEN_TOP_Z, CAB_ROOF_Y);
-  profile.lineTo(-CAB_ROOF_REAR_Z, CAB_ROOF_Y);
-  profile.lineTo(-CAB_REAR_Z, BODY_TOP_Y);
+  profile.moveTo(0.15, BOTTOM_Y);
+  profile.lineTo(0.15, 0.9);
+  profile.quadraticCurveTo(0.15, BONNET_Y, 0.32, BONNET_Y);   // nose
+  profile.lineTo(1.3, BONNET_Y);
+  profile.lineTo(2.4, ROOF_Y);                                // windscreen
+  profile.lineTo(3.6, ROOF_Y);
+  profile.quadraticCurveTo(3.7, ROOF_Y, 3.7, ROOF_Y - 0.1);   // cab rear
+  profile.lineTo(3.74, 1.1);
+  profile.lineTo(3.8, BONNET_Y);                              // bed gap
+  profile.lineTo(3.86, CANOPY_Y - 0.06);
+  profile.quadraticCurveTo(3.88, CANOPY_Y, 4.0, CANOPY_Y);    // canopy front
+  profile.lineTo(4.95, CANOPY_Y);
+  profile.quadraticCurveTo(5.12, CANOPY_Y, 5.12, 1.5);        // rounded rear
+  profile.lineTo(5.12, 0.92);
+  profile.lineTo(5.22, 0.88);                                 // rear step
+  profile.lineTo(5.22, BOTTOM_Y);
+  profile.lineTo(REAR_WHEEL_U + archHalfChord, BOTTOM_Y);
+  profile.absarc(REAR_WHEEL_U, WHEEL_RADIUS, ARCH_RADIUS,
+    archAngle, Math.PI - archAngle, false);
+  profile.lineTo(FRONT_WHEEL_U + archHalfChord, BOTTOM_Y);
+  profile.absarc(FRONT_WHEEL_U, WHEEL_RADIUS, ARCH_RADIUS,
+    archAngle, Math.PI - archAngle, false);
   profile.closePath();
 
-  const cabGeometry = new THREE.ExtrudeGeometry(profile, {
-    depth: CAB_WIDTH, bevelEnabled: false
+  const bodyGeometry = new THREE.ExtrudeGeometry(profile, {
+    depth: BODY_DEPTH,
+    curveSegments: 10,
+    bevelEnabled: true,
+    bevelThickness: BEVEL_THICKNESS,
+    bevelSize: BEVEL_SIZE,
+    bevelSegments: 2
   });
-  cabGeometry.rotateY(Math.PI / 2);
-  cabGeometry.translate(-CAB_WIDTH / 2, 0, 0);
-  add(cabGeometry, whiteMaterial, 0, 0, 0);
+  // shape x -> world z, extrusion -> -x; centre across the width
+  bodyGeometry.rotateY(-Math.PI / 2);
+  bodyGeometry.translate(BODY_DEPTH / 2, 0, FRONT_Z);
+  add(bodyGeometry, whiteMaterial, 0, 0, 0, 'body');
 
-  // Windscreen: plane lying on the slope, pushed just outside it
-  const rise = CAB_ROOF_Y - BODY_TOP_Y;
-  const run = WINDSCREEN_TOP_Z - WINDSCREEN_FOOT_Z;
-  const slopeLength = Math.hypot(rise, run);
-  const normalY = run / slopeLength;     // outward normal: up and forward
-  const normalZ = -rise / slopeLength;
+  // Dark underbody, hides the view through the wheel arches
+  box(1.56, 0.3, 4.7, blackMaterial, 0, 0.42, zOf(2.7));
 
-  const windscreen = add(
-    new THREE.PlaneGeometry(1.62, slopeLength * 0.82),
-    glassMaterial,
-    0,
-    (BODY_TOP_Y + CAB_ROOF_Y) / 2 + normalY * 0.012,
-    (WINDSCREEN_FOOT_Z + WINDSCREEN_TOP_Z) / 2 + normalZ * 0.012
-  );
-  windscreen.rotation.x = Math.atan2(-normalY, normalZ);
-  windscreen.castShadow = false;
-
-  // Canopy over the front of the load bed: solid white, roof flush
-  // with the cab roof (just below it), small step down at the rear
-  const canopyMidZ = (CANOPY_FRONT_Z + CANOPY_STEP_Z) / 2;
-  const canopyRearMidZ = (CANOPY_STEP_Z + CANOPY_REAR_Z) / 2;
-
-  box(1.92, CANOPY_ROOF_Y - BODY_TOP_Y,
-    CANOPY_STEP_Z - CANOPY_FRONT_Z, whiteMaterial,
-    0, (CANOPY_ROOF_Y + BODY_TOP_Y) / 2, canopyMidZ);
-  box(1.92, CANOPY_REAR_ROOF_Y - BODY_TOP_Y,
-    CANOPY_REAR_Z - CANOPY_STEP_Z, whiteMaterial,
-    0, (CANOPY_REAR_ROOF_Y + BODY_TOP_Y) / 2, canopyRearMidZ);
-
-  // Side windows (two per side on the cab, one small one on the
-  // canopy) and the POLICE lettering, mirrored onto both sides
-  const windowGeometry = new THREE.PlaneGeometry(1, 1);
+  // ---- Windows (dark insets) -----------------------------------
   const lettering = createLetteringTexture();
-  const letteringGeometry = new THREE.PlaneGeometry(1.1, 0.2);
   const letteringMaterial = lettering
     ? new THREE.MeshBasicMaterial({
-        map: lettering, transparent: true, depthWrite: false
+        map: lettering, transparent: true, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4
       })
     : null;
 
-  const sideWindow = (side, z, y, w, h, x) => {
-    const m = add(windowGeometry, glassMaterial, side * x, y, z);
-    m.scale.set(w, h, 1);
-    m.rotation.y = side * Math.PI / 2;
-    m.castShadow = false;
+  // Polygon given in (u, y), laid on the side face at |x| = off
+  const sidePolygon = (points, mat, side, off) => {
+    const shape = new THREE.Shape();
+    points.forEach(([u, y], i) => {
+      const x = side > 0 ? -zOf(u) : zOf(u);
+      if (i === 0) { shape.moveTo(x, y); } else { shape.lineTo(x, y); }
+    });
+    const geometry = new THREE.ShapeGeometry(shape);
+    geometry.rotateY(side * Math.PI / 2);
+    return flat(add(geometry, mat, side * off, 0, 0));
   };
 
+  const grow = (points, k) => {
+    let cu = 0, cy = 0;
+    for (const [u, y] of points) { cu += u; cy += y; }
+    cu /= points.length; cy /= points.length;
+    return points.map(([u, y]) => [cu + (u - cu) * k, cy + (y - cy) * k]);
+  };
+
+  const sideWindow = (points, side) => {
+    sidePolygon(grow(points, 1.1), frameMaterial, side, SIDE_X + 0.004);
+    sidePolygon(points, glassMaterial, side, SIDE_X + 0.007);
+  };
+
+  const FRONT_DOOR_WINDOW = [
+    [1.9, 1.22], [2.75, 1.22], [2.75, 1.66], [2.42, 1.66], [1.9, 1.33]
+  ];
+  const REAR_DOOR_WINDOW = [
+    [2.87, 1.22], [3.58, 1.22], [3.58, 1.66], [2.87, 1.66]
+  ];
+  const CANOPY_WINDOW = [
+    [4.1, 1.22], [4.78, 1.22], [4.78, 1.52], [4.1, 1.52]
+  ];
+
+  const lettersGeometry = new THREE.PlaneGeometry(0.95, 0.19);
+  const canopyLettersGeometry = new THREE.PlaneGeometry(0.8, 0.15);
+
   for (const side of [1, -1]) {
-    // Front door and rear door windows, B-pillar between them
-    sideWindow(side, -0.5, 1.43, 0.74, 0.44, 0.975);
-    sideWindow(side, 0.2, 1.43, 0.4, 0.44, 0.975);
-    // Canopy: one small window
-    sideWindow(side, 1.1, 1.42, 0.55, 0.3, 0.965);
+    // Double cab: two windows with a pillar between, and ONE small
+    // window on the canopy
+    sideWindow(FRONT_DOOR_WINDOW, side);
+    sideWindow(REAR_DOOR_WINDOW, side);
+    sideWindow(CANOPY_WINDOW, side);
 
-    // Livery: blue band over a thin yellow band along the body
-    box(0.012, 0.15, 5.16, blueMaterial, side * 1.006, 0.6, 0);
-    box(0.012, 0.07, 5.16, yellowMaterial, side * 1.006, 0.73, 0);
+    // Livery: blue band between two yellow ones, along the whole
+    // lower body (above the wheel arches)
+    const stripe = (y0, y1, mat) => sidePolygon(
+      [[0.2, y0], [5.08, y0], [5.08, y1], [0.2, y1]],
+      mat, side, SIDE_X + 0.004);
 
+    stripe(0.875, 0.905, yellowMaterial);
+    stripe(0.905, 0.99, blueMaterial);
+    stripe(0.99, 1.02, yellowMaterial);
+
+    // Door lines and handles
+    for (const u of [1.85, 2.8, 3.66]) {
+      flat(box(0.012, 0.66, 0.012, frameMaterial,
+        side * (SIDE_X + 0.006), 0.88, zOf(u)));
+    }
+    for (const u of [2.58, 3.44]) {
+      flat(box(0.02, 0.05, 0.16, metalMaterial,
+        side * (SIDE_X + 0.012), 1.07, zOf(u)));
+    }
+
+    // POLICE on the door
     if (letteringMaterial) {
-      const m = add(
-        letteringGeometry, letteringMaterial, side * 1.014, 0.93, -0.3
-      );
+      const m = flat(add(lettersGeometry, letteringMaterial,
+        side * (SIDE_X + 0.012), 0.7, zOf(2.32)));
       m.rotation.y = side * Math.PI / 2;
-      m.castShadow = false;
     }
+
+    // Wing mirror
+    box(0.09, 0.15, 0.2, metalMaterial, side * (SIDE_X + 0.03), 1.34,
+      zOf(2.0));
   }
 
-  // Wheels: big black cylinders on the X axis (front axle at -Z),
-  // each in a dark wheel arch cut into the body
-  const WHEEL_RADIUS = 0.38;
+  // Windscreen: a plane lying on the slope, on a dark frame
+  const run = 2.4 - 1.3;
+  const rise = ROOF_Y - BONNET_Y;
+  const slopeLength = Math.hypot(rise, run);
+  const normalY = run / slopeLength;       // outward normal: up and forward
+  const normalZ = -rise / slopeLength;
+  const slopeOffset = BEVEL_SIZE + 0.006;
+  const slopeMidY = (BONNET_Y + ROOF_Y) / 2 + normalY * slopeOffset;
+  const slopeMidZ = zOf((1.3 + 2.4) / 2) + normalZ * slopeOffset;
 
-  const wheelGeometry = new THREE.CylinderGeometry(
-    WHEEL_RADIUS, WHEEL_RADIUS, 0.28, 14);
-  wheelGeometry.rotateZ(Math.PI / 2);
-
-  const archGeometry = new THREE.CylinderGeometry(0.45, 0.45, 0.2, 14);
-  archGeometry.rotateZ(Math.PI / 2);
-
-  for (const side of [-1, 1]) {
-    for (const z of [-1.6, 1.6]) {
-      add(archGeometry, archMaterial, side * 0.93, 0.45, z);
-      add(wheelGeometry, blackMaterial, side * 0.92, WHEEL_RADIUS, z);
-    }
+  const windscreenFrame = add(
+    new THREE.PlaneGeometry(1.7, slopeLength * 0.86),
+    frameMaterial, 0, slopeMidY, slopeMidZ);
+  const windscreen = add(
+    new THREE.PlaneGeometry(1.58, slopeLength * 0.74),
+    glassMaterial,
+    0,
+    slopeMidY + normalY * 0.004,
+    slopeMidZ + normalZ * 0.004
+  );
+  for (const m of [windscreenFrame, windscreen]) {
+    m.rotation.x = Math.atan2(-normalY, normalZ);
+    flat(m);
   }
 
-  // Lights: headlights at the front (-Z), red tail-lights low on the
-  // tailgate corners at the back
-  const headlightGeometry = new THREE.BoxGeometry(0.38, 0.16, 0.04);
-  const taillightGeometry = new THREE.BoxGeometry(0.2, 0.28, 0.04);
+  // ---- Front: grille, headlights, bull bar, bumper --------------
+  const frontZ = zOf(0.15 - BEVEL_SIZE);       // front face of the body
+
+  box(0.84, 0.17, 0.03, blackMaterial, 0, 0.82, frontZ - 0.005);
+  for (const y of [0.77, 0.82, 0.87]) {
+    box(0.8, 0.012, 0.012, rimMaterial, 0, y, frontZ - 0.024);
+  }
 
   for (const x of [-0.7, 0.7]) {
-    add(headlightGeometry, headlightMaterial, x, 0.92, -2.61, 'headlight');
-    add(taillightGeometry, taillightMaterial, x * 1.2, 0.86, 2.6, 'taillight');
+    add(new THREE.BoxGeometry(0.42, 0.16, 0.04), headlightMaterial,
+      x, 0.88, frontZ - 0.004, 'headlight');
+    box(0.14, 0.05, 0.03, indicatorMaterial, x * 1.27, 0.72, frontZ - 0.004);
   }
 
-  // Cab-roof light bar: red on the left, blue on the right
-  const barGeometry = new THREE.BoxGeometry(1.0, 0.04, 0.22);
-  const lensGeometry = new THREE.BoxGeometry(0.44, 0.07, 0.2);
+  box(1.98, 0.22, 0.14, metalMaterial, 0, 0.6, zOf(0.13));     // bumper
 
-  add(barGeometry, blackMaterial, 0, CAB_ROOF_Y + 0.02, -0.2);
-  add(lensGeometry, redLensMaterial, -0.25, CAB_ROOF_Y + 0.055, -0.2);
-  add(lensGeometry, blueLensMaterial, 0.25, CAB_ROOF_Y + 0.055, -0.2);
+  // Bull bar: two uprights, a top hoop and a lower rail
+  const tube = (length, x, y, z, horizontal) => {
+    const g = new THREE.CylinderGeometry(0.022, 0.022, length, 8);
+    if (horizontal) { g.rotateZ(Math.PI / 2); }
+    return add(g, metalMaterial, x, y, z);
+  };
+
+  const BAR_Z = zOf(0.04);
+
+  for (const x of [-0.44, 0.44]) {
+    tube(0.5, x, 0.76, BAR_Z, false);
+  }
+  tube(0.9, 0, 1.0, BAR_Z, true);
+  tube(1.0, 0, 0.58, BAR_Z, true);
+
+  // ---- Rear: bumper, number plate, tail-lights, canopy door -----
+  const rearFaceZ = zOf(5.12 + BEVEL_SIZE);     // canopy rear face
+  const stepZ = zOf(5.22 + BEVEL_SIZE);         // rear step face
+
+  box(1.96, 0.2, 0.12, metalMaterial, 0, 0.6, zOf(5.24));
+  flat(box(0.56, 0.14, 0.012, plateMaterial, 0, 0.8, stepZ + 0.008));
+  flat(box(0.6, 0.18, 0.008, frameMaterial, 0, 0.8, stepZ + 0.004));
+
+  for (const x of [-0.8, 0.8]) {
+    add(new THREE.BoxGeometry(0.2, 0.2, 0.04), taillightMaterial,
+      x, 0.78, stepZ + 0.004, 'taillight');
+  }
+
+  // Canopy rear door: window with its frame, door line, handle
+  flat(box(1.3, 0.36, 0.01, frameMaterial, 0, 1.44, rearFaceZ + 0.004));
+  flat(box(1.2, 0.28, 0.01, glassMaterial, 0, 1.44, rearFaceZ + 0.008));
+
+  for (const [w, h, x, y] of [
+    [1.6, 0.012, 0, 1.02], [1.6, 0.012, 0, 1.64],
+    [0.012, 0.64, -0.8, 1.33], [0.012, 0.64, 0.8, 1.33]
+  ]) {
+    flat(box(w, h, 0.008, frameMaterial, x, y, rearFaceZ + 0.003));
+  }
+  flat(box(0.14, 0.04, 0.02, metalMaterial, 0.6, 1.12, rearFaceZ + 0.01));
+
+  if (letteringMaterial) {
+    flat(add(canopyLettersGeometry, letteringMaterial,
+      -0.1, 1.12, rearFaceZ + 0.012));
+  }
+
+  // ---- Wheels: tyre, steel rim, hub, dark arch ring and lining ---
+  const tyreGeometry = new THREE.CylinderGeometry(
+    WHEEL_RADIUS, WHEEL_RADIUS, 0.28, 20);
+  tyreGeometry.rotateZ(Math.PI / 2);
+
+  const rimGeometry = new THREE.CylinderGeometry(0.24, 0.24, 0.3, 14);
+  rimGeometry.rotateZ(Math.PI / 2);
+
+  const hubGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.32, 8);
+  hubGeometry.rotateZ(Math.PI / 2);
+
+  const RING_START = 0.3;
+  const ringGeometry = new THREE.RingGeometry(
+    ARCH_RADIUS, ARCH_RADIUS + 0.07, 24, 1,
+    RING_START, Math.PI - 2 * RING_START);
+  const liningStart = archAngle - 0.1;
+  const liningGeometry = new THREE.CircleGeometry(
+    ARCH_RADIUS + 0.01, 20, liningStart, Math.PI - 2 * liningStart);
+
+  for (const side of [-1, 1]) {
+    for (const wu of [FRONT_WHEEL_U, REAR_WHEEL_U]) {
+      const z = zOf(wu);
+
+      add(tyreGeometry, blackMaterial, side * 0.92, WHEEL_RADIUS, z);
+      add(rimGeometry, rimMaterial, side * 0.92, WHEEL_RADIUS, z);
+      add(hubGeometry, metalMaterial, side * 0.92, WHEEL_RADIUS, z);
+
+      const ring = flat(add(ringGeometry, darkMaterial,
+        side * (SIDE_X + 0.009), WHEEL_RADIUS, z));
+      ring.rotation.y = side * Math.PI / 2;
+
+      const lining = flat(add(liningGeometry, darkMaterial,
+        side * 0.76, WHEEL_RADIUS, z));
+      lining.rotation.y = side * Math.PI / 2;
+    }
+  }
+
+  // ---- Cab-roof light bar: red on the left, blue on the right ---
+  const BAR_U = 3.0;
+  const barGeometry = new THREE.BoxGeometry(1.3, 0.04, 0.3);
+  const lensGeometry = new THREE.BoxGeometry(0.6, 0.07, 0.26);
+  const capGeometry = new THREE.BoxGeometry(0.06, 0.09, 0.3);
+
+  add(barGeometry, blackMaterial, 0, 1.77, zOf(BAR_U));
+  add(lensGeometry, redLensMaterial, -0.31, 1.815, zOf(BAR_U));
+  add(lensGeometry, blueLensMaterial, 0.31, 1.815, zOf(BAR_U));
+  add(capGeometry, blackMaterial, -0.66, 1.795, zOf(BAR_U));
+  add(capGeometry, blackMaterial, 0.66, 1.795, zOf(BAR_U));
 
   root.userData.flash = (on) => {
     redLensMaterial.emissiveIntensity = on ? LIGHT_BAR_ON : 0;
@@ -314,7 +481,7 @@ function createLetteringTexture() {
     return null;
   }
 
-  ctx.font = 'bold 84px Arial, Helvetica, sans-serif';
+  ctx.font = 'italic bold 84px Arial, Helvetica, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#0b3d91';
@@ -385,6 +552,15 @@ export class PursuitSystem {
     this.reachable = true;
     this.distance = Infinity;
     this.pressure = 0;
+
+    // Taxi speed history for stumble detection (preallocated)
+    this.sampleTime = new Float32Array(SPEED_SAMPLES);
+    this.sampleSpeed = new Float32Array(SPEED_SAMPLES);
+    this.sampleHead = 0;
+    this.sampleCount = 0;
+    this.clock = 0;
+    this.sinceStumble = Infinity;
+    this.slowed = false;
   }
 
 
@@ -441,6 +617,11 @@ export class PursuitSystem {
     this.captured = false;
     this.pressure = 0;
     this.distance = Infinity;
+    this.sampleHead = 0;
+    this.sampleCount = 0;
+    this.clock = 0;
+    this.sinceStumble = Infinity;
+    this.slowed = false;
 
     if (!this.config) {
       this.state = 'none';
@@ -541,6 +722,8 @@ export class PursuitSystem {
 
     this.stateTime += dt;
     this.sinceStart += dt;
+
+    this.trackTaxiSpeed(dt);
 
     const tx = this.taxi.position.x;
     const tz = this.taxi.position.z;
@@ -669,12 +852,12 @@ export class PursuitSystem {
       this.loseTimer += dt;
     }
 
-    // Hold the standoff only while the taxi is actually in view; a
-    // stale last-known point is driven to properly.
+    // Match the taxi's speed and hold the gap while it is in view;
+    // a stale last-known point is driven to properly (arrive).
     this.drive(
       dt, this.lastKnownX, this.lastKnownZ,
       topSpeed * this.catchUpFactor(),
-      seen ? this.standoff() : 0
+      seen ? this.followSpeed(dt, topSpeed * this.catchUpFactor()) : -1
     );
 
     if (this.loseTimer >= this.config.loseTime) {
@@ -700,12 +883,88 @@ export class PursuitSystem {
   }
 
 
-  // Following distance, kept below captureDistance
+  // Standoff gap, kept below captureDistance
   standoff() {
     return Math.min(
-      STANDOFF_DISTANCE,
+      this.config.standoffDistance,
       this.config.captureDistance - STANDOFF_MARGIN
     );
+  }
+
+
+  // Records the taxi's speed (ring buffer, no allocation) and
+  // updates `slowed`. A drop of more than stumbleSpeedDrop within
+  // stumbleWindow is a stumble (collision, pothole...).
+  trackTaxiSpeed(dt) {
+
+    const { stumbleSpeedDrop, stumbleWindow, stumbleSurgeTime,
+      slowSpeedThreshold } = this.config;
+
+    this.clock += dt;
+    this.sinceStumble += dt;
+
+    const speed = Math.max(this.vehicle.getSpeed(), 0);
+
+    this.sampleTime[this.sampleHead] = this.clock;
+    this.sampleSpeed[this.sampleHead] = speed;
+    this.sampleHead = (this.sampleHead + 1) % SPEED_SAMPLES;
+    this.sampleCount = Math.min(this.sampleCount + 1, SPEED_SAMPLES);
+
+    let recentMax = speed;
+
+    for (let i = 0; i < this.sampleCount; i++) {
+      if (this.clock - this.sampleTime[i] <= stumbleWindow &&
+          this.sampleSpeed[i] > recentMax) {
+        recentMax = this.sampleSpeed[i];
+      }
+    }
+
+    if (recentMax - speed > stumbleSpeedDrop) {
+      this.sinceStumble = 0;
+    }
+
+    const wasSlowed = this.slowed;
+
+    this.slowed =
+      speed < slowSpeedThreshold ||
+      this.sinceStumble < stumbleSurgeTime;
+
+    // Taxi got going again: the gap opens, and the contact it had
+    // built up does not carry over
+    if (wasSlowed && !this.slowed) {
+      this.captureTimer = 0;
+    }
+  }
+
+
+  // Gap the pursuer is trying to hold right now
+  desiredGap() {
+    return this.slowed ? this.standoff() : this.config.cruiseGap;
+  }
+
+
+  // Target speed while the taxi is in view: the taxi's own speed
+  // plus a correction for the gap error. Never "arrives": it holds
+  // the gap at any taxi speed. When the gap is too wide on a slowed
+  // taxi it closes as fast as it can still stop at the standoff
+  // (full speed until the last moment).
+  followSpeed(dt, maxSpeed) {
+
+    const taxiSpeed = Math.max(this.vehicle.getSpeed(), 0);
+
+    // The taxi has already moved this frame; the pursuer has not.
+    // Judge the gap as it will be after the pursuer matches the
+    // taxi's step, which is what the camera and capture check see.
+    const error = this.distance - taxiSpeed * dt - this.desiredGap();
+
+    let target = taxiSpeed + this.config.closingGain * error;
+
+    if (this.slowed && error > 0) {
+      target = taxiSpeed + Math.sqrt(
+        2 * BRAKING * APPROACH_BRAKE_FRACTION * error);
+    }
+
+    return Math.min(Math.max(target, 0), maxSpeed);
   }
 
 
@@ -758,10 +1017,11 @@ export class PursuitSystem {
   }
 
 
-  // Steers towards (tx, tz) and moves, capped at maxSpeed.
-  // Slows on arrival (standoff metres short of the target) and in
+  // Steers towards (tx, tz) and moves, capped at maxSpeed. With
+  // followSpeed >= 0 that is the target speed (chasing a visible
+  // taxi); otherwise it slows on arrival at the point. Slows in
   // sharp turns; keeps clear of the taxi and stays on the road.
-  drive(dt, tx, tz, maxSpeed, standoff = 0) {
+  drive(dt, tx, tz, maxSpeed, followSpeed = -1) {
 
     const dx = tx - this.x;
     const dz = tz - this.z;
@@ -780,9 +1040,9 @@ export class PursuitSystem {
       const maxTurn = TURN_RATE * dt;
       this.heading += Math.min(Math.max(diff, -maxTurn), maxTurn);
 
-      target = Math.min(
-        maxSpeed, Math.max(dist - standoff, 0) * ARRIVE_GAIN
-      );
+      target = followSpeed >= 0
+        ? Math.min(maxSpeed, followSpeed)
+        : Math.min(maxSpeed, dist * ARRIVE_GAIN);
 
       if (dist < ARRIVE_RADIUS && this.state === 'searching') {
         target = 0;
@@ -836,7 +1096,7 @@ export class PursuitSystem {
     this.flashTime += dt;
 
     this.mesh.userData.flash?.(
-      Math.floor(this.flashTime * LIGHT_FLASH_RATE) % 2 === 0
+      Math.floor(this.flashTime * LIGHT_FLASH_RATE * 2) % 2 === 0
     );
   }
 
