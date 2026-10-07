@@ -1503,6 +1503,48 @@ document.body.appendChild(
 );
 
 
+const capturedOverlay =
+  document.createElement(
+    'div'
+  );
+
+
+capturedOverlay.className =
+  'game-over';
+
+
+capturedOverlay.style.display =
+  'none';
+
+
+document.body.appendChild(
+  capturedOverlay
+);
+
+
+// Level switches (1/2/3) skip restartGame(), so they use this to
+// drop the captured screen and give the taxi its controls back.
+function clearCaptured() {
+
+  if (
+    capturedOverlay.style.display ===
+    'none'
+  ) {
+
+    return;
+  }
+
+
+  capturedOverlay.style.display =
+    'none';
+
+
+  vehicle.setEnabled(
+    true
+  );
+}
+
+
 const levelManager =
   new LevelManager({
 
@@ -1550,6 +1592,44 @@ const levelManager =
 
         deliveredOverlay.style.display =
           'flex';
+      },
+
+    onCaptured:
+      (event) => {
+
+        capturedOverlay.innerHTML = `
+
+          <h1>
+            CAUGHT!
+          </h1>
+
+          <p>
+            Time: ${
+              event.time.toFixed(1)
+            } s
+          </p>
+
+          <p>
+            Cargo: ${
+              event.cargo.remaining
+            } / ${
+              event.cargo.total
+            }
+          </p>
+
+          <p>
+            Press R to retry
+          </p>
+        `;
+
+
+        capturedOverlay.style.display =
+          'flex';
+
+
+        vehicle.setEnabled(
+          false
+        );
       }
   });
 
@@ -1611,6 +1691,10 @@ function restartGame() {
 
 
   deliveredOverlay.style.display =
+    'none';
+
+
+  capturedOverlay.style.display =
     'none';
 
 
@@ -1715,6 +1799,9 @@ window.addEventListener(
 
       deliveredOverlay.style.display =
         'none';
+
+
+      clearCaptured();
     }
 
 
@@ -1740,6 +1827,9 @@ window.addEventListener(
 
       deliveredOverlay.style.display =
         'none';
+
+
+      clearCaptured();
     }
 
 
@@ -1765,6 +1855,9 @@ window.addEventListener(
 
       deliveredOverlay.style.display =
         'none';
+
+
+      clearCaptured();
     }
   }
 );
@@ -2142,6 +2235,28 @@ function animate() {
         : objective.status ===
           'delivered'
           ? ' — Delivered!'
+          : objective.status ===
+            'captured'
+            ? ' — Caught!'
+            : ''
+    ) +
+
+    (
+      objective.status ===
+        'driving' &&
+      objective.pursuit.state ===
+        'chasing'
+        ? ` | PURSUED ${
+            Math.round(
+              objective.pursuit
+                .distance
+            )
+          } m`
+        : objective.status ===
+            'driving' &&
+          objective.pursuit.state ===
+            'searching'
+          ? ' | Pursuer searching'
           : ''
     );
 
