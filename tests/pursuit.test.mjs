@@ -82,7 +82,7 @@ test('L1: chasing -> lost -> searching -> chasing; speed cap from vehicle', () =
 
   // Teleport far out of lose range (>120) and keep it there
   e.taxi.position.set(0, 0, -185);
-  e.lm.pursuit.x = 0; e.lm.pursuit.z = 100;
+  e.lm.pursuit.x = 0; e.lm.pursuit.z = 180;
   let maxSpeed = 0;
   let sawLost = false, sawSearching = false;
   for (let t = 0; t < 12; t += DT) {
@@ -92,8 +92,8 @@ test('L1: chasing -> lost -> searching -> chasing; speed cap from vehicle', () =
     sawSearching ||= e.lm.pursuit.state === 'searching';
   }
   assert.ok(sawLost && sawSearching, 'went through lost and searching');
-  // L1 speedFraction 0.95, times the far-away catch-up boost
-  assert.ok(maxSpeed <= 0.95 * 1.15 * MAX_SPEED + 1e-6, `speed cap (${maxSpeed})`);
+  // L1 speedFraction 1.05, times the far-away catch-up boost
+  assert.ok(maxSpeed <= 1.05 * 1.15 * MAX_SPEED + 1e-6, `speed cap (${maxSpeed})`);
   assert.ok(maxSpeed > 5, 'actually moved');
 
   // Re-detect: taxi comes back within detection radius
@@ -306,7 +306,7 @@ test('separation holds when the taxi reverses into the pursuer', () => {
   e.taxi.position.set(0, 0, -80);
   step(e.lm, DT * 2);
   run(e, 3, 0);
-  assert.ok(gap(e) < 4, 'pursuer is right behind the taxi');
+  assert.ok(gap(e) < 7, 'pursuer is right behind the taxi');
   let minGap = Infinity;
   run(e, 0.8, 6, () => { minGap = Math.min(minGap, gap(e)); });
   assert.equal(e.captured.length, 0, 'still chasing, so separation is enforced');
@@ -321,8 +321,8 @@ test('catch-up: boosted when far behind, never above speedFraction up close', ()
   far.lm.pursuit.z = far.taxi.position.z + 60;
   let farMax = 0;
   run(far, 6, 0, () => { farMax = Math.max(farMax, far.lm.pursuit.speed); });
-  assert.ok(farMax > 0.95 * MAX_SPEED + 0.5, `boosted (${farMax})`);
-  assert.ok(farMax <= 0.95 * 1.15 * MAX_SPEED + 1e-6, `cap (${farMax})`);
+  assert.ok(farMax > 1.05 * MAX_SPEED + 0.5, `boosted (${farMax})`);
+  assert.ok(farMax <= 1.05 * 1.15 * MAX_SPEED + 1e-6, `cap (${farMax})`);
 
   const near = make();
   near.lm.load(1);
@@ -331,7 +331,7 @@ test('catch-up: boosted when far behind, never above speedFraction up close', ()
   near.lm.pursuit.z = near.taxi.position.z + 24;
   let nearMax = 0;
   run(near, 5, 0, () => { nearMax = Math.max(nearMax, near.lm.pursuit.speed); });
-  assert.ok(nearMax <= 0.95 * MAX_SPEED + 1e-6, `no boost up close (${nearMax})`);
+  assert.ok(nearMax <= 1.05 * MAX_SPEED + 1e-6, `no boost up close (${nearMax})`);
 });
 
 test('mesh: faces -Z, bakkie-sized, lights, flashing swaps emissive only', () => {
@@ -339,7 +339,7 @@ test('mesh: faces -Z, bakkie-sized, lights, flashing swaps emissive only', () =>
   const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
   assert.ok(size.x > 1.9 && size.x < 2.2, `width ${size.x}`);
   assert.ok(Math.abs(size.z - 5.3) < 0.1, `length ${size.z}`);
-  assert.ok(size.y > 1.8 && size.y < 2.0, `height ${size.y}`);
+  assert.ok(Math.abs(size.y - 1.85) < 0.05, `height ${size.y}`);
   const zs = n => { const v = []; mesh.traverse(o => o.name === n && v.push(o.position.z)); return v; };
   assert.equal(zs('headlight').length, 2);
   assert.equal(zs('taillight').length, 2);

@@ -26,24 +26,24 @@ const ROAD_HALF_WIDTH = 9;
 const BOUNDS_MARGIN = 5;
 
 const TURN_RATE = 2.6;          // rad/s
-const ACCELERATION = 16;        // m/s^2
+const ACCELERATION = 24;        // m/s^2
 const BRAKING = 24;             // m/s^2
 const ARRIVE_GAIN = 2;          // desired speed = distance * this
 const ARRIVE_RADIUS = 2.5;      // "reached" the last known position
 const LOST_PAUSE_TIME = 1.5;    // seconds sitting still in 'lost'
 const SHARP_TURN_ANGLE = 1;     // rad; slow down beyond this
-const SHARP_TURN_SPEED_SCALE = 0.4;
+const SHARP_TURN_SPEED_SCALE = 0.6;
 const PRESSURE_RANGE = 60;      // distance at which pressure hits 0
 const ELEVATED_Y = 1;           // taxi above this is "on the flyover"
-const LIGHT_FLASH_RATE = 7;     // Hz
+const LIGHT_FLASH_RATE = 3;     // Hz
 const LIGHT_BAR_ON = 2.5;       // lens emissiveIntensity when lit
 
 // Following distance (centre to centre) the pursuer holds behind
 // the taxi. Must stay below captureDistance, or it could never
 // count as "in capture range". MIN_SEPARATION is the hard floor:
 // the pursuer is pushed back out to it if the taxi brakes hard.
-export const STANDOFF_DISTANCE = 3.5;
-export const MIN_SEPARATION = 3.0;
+export const STANDOFF_DISTANCE = 6.0;
+export const MIN_SEPARATION = 5.5;
 const STANDOFF_MARGIN = 0.25;   // standoff <= captureDistance - this
 
 const DEFAULT_CONFIG = {
@@ -83,8 +83,12 @@ const DEFAULT_CONFIG = {
 
 
 // Stylised low-poly SAPS bakkie (Isuzu D-Max style double cab with
-// a canopy). Code-built only: no external models or images.
-// Faces -Z at rotation.y = 0, ~2.0 m wide, 5.3 m long, 1.9 m tall.
+// a short canopy). Code-built only: no external models or images.
+// Faces -Z at rotation.y = 0, ~2.0 m wide, 5.3 m long, 1.85 m tall.
+// Side profile, front to back (z): bonnet -2.65..-1.45 (top 1.05),
+// double cab -1.45..0.55 (roof 1.76), canopy 0.58..2.18 (1.6 m, roof
+// just under the cab roof, stepping down at the rear), then the open
+// tailgate end of the load bed.
 // Returns a THREE.Object3D carrying userData.flash(on) for the roof
 // light bar. Everything it creates (geometries, materials and the
 // lettering texture) is released by disposeObject().
@@ -106,6 +110,9 @@ export function createPursuerMesh() {
   });
   const blackMaterial = new THREE.MeshStandardMaterial({
     color: 0x141414, roughness: 0.9
+  });
+  const archMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0a0a0a, roughness: 1
   });
   const bumperMaterial = new THREE.MeshStandardMaterial({
     color: 0x2a2d31, roughness: 0.7
@@ -133,32 +140,48 @@ export function createPursuerMesh() {
   const box = (w, h, d, material, x, y, z, name) =>
     add(new THREE.BoxGeometry(w, h, d), material, x, y, z, name);
 
-  // Lower body (y 0.45 - 1.1) and bumpers; front bumper at -Z
-  box(2.0, 0.65, 5.2, whiteMaterial, 0, 0.775, 0);
-  box(1.9, 0.2, 0.14, bumperMaterial, 0, 0.55, -2.58);
-  box(1.9, 0.2, 0.14, bumperMaterial, 0, 0.55, 2.58);
-  box(1.0, 0.18, 0.04, blackMaterial, 0, 0.9, -2.61);   // grille
+  // Heights (y) and the cab / canopy layout (z)
+  const BODY_BOTTOM_Y = 0.5;
+  const BODY_TOP_Y = 1.05;          // bonnet and load-bed sides
+  const CAB_ROOF_Y = 1.76;
+  const CANOPY_ROOF_Y = 1.72;
+  const CANOPY_REAR_ROOF_Y = 1.6;   // the small step down at the rear
+
+  const WINDSCREEN_FOOT_Z = -1.45;
+  const WINDSCREEN_TOP_Z = -0.9;
+  const CAB_ROOF_REAR_Z = 0.45;
+  const CAB_REAR_Z = 0.55;
+  const CANOPY_FRONT_Z = 0.58;
+  const CANOPY_STEP_Z = 1.88;
+  const CANOPY_REAR_Z = 2.18;
+
+  // Lower body (bonnet, door sills, load bed) sitting high on the
+  // wheels, a dark underbody below it, and the bumpers; front
+  // bumper at -Z
+  box(2.0, BODY_TOP_Y - BODY_BOTTOM_Y, 5.16, whiteMaterial,
+    0, (BODY_TOP_Y + BODY_BOTTOM_Y) / 2, 0);
+  box(1.7, 0.2, 4.6, blackMaterial, 0, 0.4, 0);
+  box(1.9, 0.2, 0.14, bumperMaterial, 0, 0.58, -2.58);
+  box(2.0, 0.24, 0.14, bumperMaterial, 0, 0.6, 2.58);   // rear bumper
+  box(1.0, 0.18, 0.04, blackMaterial, 0, 0.88, -2.61);  // grille
 
   // Cab: side profile extruded across the width, with a sloped
   // windscreen at the front. Shape (u, v) = (-z, y); rotateY(90deg)
   // maps u -> -z and the extrusion depth -> x.
-  const WINDSCREEN_FOOT_Z = -1.25;
-  const WINDSCREEN_TOP_Z = -0.55;
-  const BODY_TOP_Y = 1.1;
-  const CAB_ROOF_Y = 1.74;
+  const CAB_WIDTH = 1.94;
 
   const profile = new THREE.Shape();
   profile.moveTo(-WINDSCREEN_FOOT_Z, BODY_TOP_Y);
   profile.lineTo(-WINDSCREEN_TOP_Z, CAB_ROOF_Y);
-  profile.lineTo(-0.75, CAB_ROOF_Y);
-  profile.lineTo(-0.85, BODY_TOP_Y);
+  profile.lineTo(-CAB_ROOF_REAR_Z, CAB_ROOF_Y);
+  profile.lineTo(-CAB_REAR_Z, BODY_TOP_Y);
   profile.closePath();
 
   const cabGeometry = new THREE.ExtrudeGeometry(profile, {
-    depth: 1.9, bevelEnabled: false
+    depth: CAB_WIDTH, bevelEnabled: false
   });
   cabGeometry.rotateY(Math.PI / 2);
-  cabGeometry.translate(-0.95, 0, 0);
+  cabGeometry.translate(-CAB_WIDTH / 2, 0, 0);
   add(cabGeometry, whiteMaterial, 0, 0, 0);
 
   // Windscreen: plane lying on the slope, pushed just outside it
@@ -178,11 +201,20 @@ export function createPursuerMesh() {
   windscreen.rotation.x = Math.atan2(-normalY, normalZ);
   windscreen.castShadow = false;
 
-  // Canopy over the load bed
-  box(1.92, 0.75, 1.72, whiteMaterial, 0, 1.475, 1.76);
+  // Canopy over the front of the load bed: solid white, roof flush
+  // with the cab roof (just below it), small step down at the rear
+  const canopyMidZ = (CANOPY_FRONT_Z + CANOPY_STEP_Z) / 2;
+  const canopyRearMidZ = (CANOPY_STEP_Z + CANOPY_REAR_Z) / 2;
 
-  // Side windows (cab front door, cab rear door, canopy) and the
-  // POLICE lettering, mirrored onto both sides
+  box(1.92, CANOPY_ROOF_Y - BODY_TOP_Y,
+    CANOPY_STEP_Z - CANOPY_FRONT_Z, whiteMaterial,
+    0, (CANOPY_ROOF_Y + BODY_TOP_Y) / 2, canopyMidZ);
+  box(1.92, CANOPY_REAR_ROOF_Y - BODY_TOP_Y,
+    CANOPY_REAR_Z - CANOPY_STEP_Z, whiteMaterial,
+    0, (CANOPY_REAR_ROOF_Y + BODY_TOP_Y) / 2, canopyRearMidZ);
+
+  // Side windows (two per side on the cab, one small one on the
+  // canopy) and the POLICE lettering, mirrored onto both sides
   const windowGeometry = new THREE.PlaneGeometry(1, 1);
   const lettering = createLetteringTexture();
   const letteringGeometry = new THREE.PlaneGeometry(1.1, 0.2);
@@ -200,49 +232,60 @@ export function createPursuerMesh() {
   };
 
   for (const side of [1, -1]) {
-    sideWindow(side, -0.25, 1.46, 0.5, 0.4, 0.955);   // front door
-    sideWindow(side, 0.38, 1.46, 0.5, 0.4, 0.955);    // rear door
-    sideWindow(side, 1.7, 1.55, 1.0, 0.35, 0.965);    // canopy
+    // Front door and rear door windows, B-pillar between them
+    sideWindow(side, -0.5, 1.43, 0.74, 0.44, 0.975);
+    sideWindow(side, 0.2, 1.43, 0.4, 0.44, 0.975);
+    // Canopy: one small window
+    sideWindow(side, 1.1, 1.42, 0.55, 0.3, 0.965);
 
     // Livery: blue band over a thin yellow band along the body
-    box(0.012, 0.15, 5.2, blueMaterial, side * 1.006, 0.62, 0);
-    box(0.012, 0.07, 5.2, yellowMaterial, side * 1.006, 0.76, 0);
+    box(0.012, 0.15, 5.16, blueMaterial, side * 1.006, 0.6, 0);
+    box(0.012, 0.07, 5.16, yellowMaterial, side * 1.006, 0.73, 0);
 
     if (letteringMaterial) {
       const m = add(
-        letteringGeometry, letteringMaterial, side * 1.014, 0.93, -0.45
+        letteringGeometry, letteringMaterial, side * 1.014, 0.93, -0.3
       );
       m.rotation.y = side * Math.PI / 2;
       m.castShadow = false;
     }
   }
 
-  // Wheels: black cylinders on the X axis, front axle at -Z
-  const wheelGeometry = new THREE.CylinderGeometry(0.38, 0.38, 0.24, 12);
+  // Wheels: big black cylinders on the X axis (front axle at -Z),
+  // each in a dark wheel arch cut into the body
+  const WHEEL_RADIUS = 0.38;
+
+  const wheelGeometry = new THREE.CylinderGeometry(
+    WHEEL_RADIUS, WHEEL_RADIUS, 0.28, 14);
   wheelGeometry.rotateZ(Math.PI / 2);
 
-  for (const x of [-0.9, 0.9]) {
-    for (const z of [-1.65, 1.65]) {
-      add(wheelGeometry, blackMaterial, x, 0.38, z);
+  const archGeometry = new THREE.CylinderGeometry(0.45, 0.45, 0.2, 14);
+  archGeometry.rotateZ(Math.PI / 2);
+
+  for (const side of [-1, 1]) {
+    for (const z of [-1.6, 1.6]) {
+      add(archGeometry, archMaterial, side * 0.93, 0.45, z);
+      add(wheelGeometry, blackMaterial, side * 0.92, WHEEL_RADIUS, z);
     }
   }
 
-  // Lights: headlights at the front (-Z), red tail-lights at the back
+  // Lights: headlights at the front (-Z), red tail-lights low on the
+  // tailgate corners at the back
   const headlightGeometry = new THREE.BoxGeometry(0.38, 0.16, 0.04);
-  const taillightGeometry = new THREE.BoxGeometry(0.22, 0.3, 0.04);
+  const taillightGeometry = new THREE.BoxGeometry(0.2, 0.28, 0.04);
 
   for (const x of [-0.7, 0.7]) {
-    add(headlightGeometry, headlightMaterial, x, 0.95, -2.61, 'headlight');
-    add(taillightGeometry, taillightMaterial, x * 1.2, 0.95, 2.61, 'taillight');
+    add(headlightGeometry, headlightMaterial, x, 0.92, -2.61, 'headlight');
+    add(taillightGeometry, taillightMaterial, x * 1.2, 0.86, 2.6, 'taillight');
   }
 
-  // Roof light bar: red on the left, blue on the right
-  const barGeometry = new THREE.BoxGeometry(1.0, 0.05, 0.22);
-  const lensGeometry = new THREE.BoxGeometry(0.44, 0.1, 0.2);
+  // Cab-roof light bar: red on the left, blue on the right
+  const barGeometry = new THREE.BoxGeometry(1.0, 0.04, 0.22);
+  const lensGeometry = new THREE.BoxGeometry(0.44, 0.07, 0.2);
 
-  add(barGeometry, blackMaterial, 0, CAB_ROOF_Y + 0.025, 0.05);
-  add(lensGeometry, redLensMaterial, -0.25, CAB_ROOF_Y + 0.1, 0.05);
-  add(lensGeometry, blueLensMaterial, 0.25, CAB_ROOF_Y + 0.1, 0.05);
+  add(barGeometry, blackMaterial, 0, CAB_ROOF_Y + 0.02, -0.2);
+  add(lensGeometry, redLensMaterial, -0.25, CAB_ROOF_Y + 0.055, -0.2);
+  add(lensGeometry, blueLensMaterial, 0.25, CAB_ROOF_Y + 0.055, -0.2);
 
   root.userData.flash = (on) => {
     redLensMaterial.emissiveIntensity = on ? LIGHT_BAR_ON : 0;
