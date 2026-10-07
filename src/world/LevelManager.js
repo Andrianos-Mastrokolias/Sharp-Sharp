@@ -43,21 +43,21 @@ const ELEVATION_ENTRY_TOLERANCE = 0.6;
 // Level 1: appears near the end of the run
 const L1_PURSUIT_TRIGGER_PROGRESS = 0.66;  // along spawn -> destination
 const L1_PURSUIT_SPAWN_DISTANCE = 30;      // behind the taxi
-const L1_PURSUIT_SPEED = 0.95;
+const L1_PURSUIT_SPEED = 1.05;
 const L1_PURSUIT_LOSE_RANGE = 120;
 const L1_PURSUIT_LOSE_TIME = 5;
-const L1_PURSUIT_CAPTURE_DISTANCE = 4.5;
+const L1_PURSUIT_CAPTURE_DISTANCE = 7.0;
 const L1_PURSUIT_CAPTURE_TIME = 2.5;
 
-// Level 2: on the ground lane from the start, slightly slower.
+// Level 2: on the ground lane from the start, at the taxi's top speed.
 // It cannot follow onto the flyover - that is how you shake it.
 const L2_PURSUIT_START_DELAY = 3;
 const L2_PURSUIT_SPAWN_DISTANCE = 30;      // behind the spawn
-const L2_PURSUIT_SPEED = 0.85;
+const L2_PURSUIT_SPEED = 1.0;
 const L2_PURSUIT_DETECTION_RADIUS = 80;
 const L2_PURSUIT_LOSE_RANGE = 120;
 const L2_PURSUIT_LOSE_TIME = 3;
-const L2_PURSUIT_CAPTURE_DISTANCE = 4.5;
+const L2_PURSUIT_CAPTURE_DISTANCE = 7.0;
 const L2_PURSUIT_CAPTURE_TIME = 2.5;
 const L2_PURSUIT_LANE_MIN_X = -9;
 const L2_PURSUIT_LANE_MAX_X = 2;           // flyover starts at x 3
@@ -66,13 +66,13 @@ const L2_PURSUIT_LANE_MAX_X = 2;           // flyover starts at x 3
 // the unlit potholes (lights on = seen from far away).
 const L3_PURSUIT_START_DELAY = 4;
 const L3_PURSUIT_SPAWN_DISTANCE = 30;      // behind the spawn
-const L3_PURSUIT_SPEED = 0.9;
+const L3_PURSUIT_SPEED = 1.05;
 const L3_PURSUIT_DETECTION_LIGHTS_ON = 70;
 const L3_PURSUIT_DETECTION_LIGHTS_OFF = 15;
 const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 110;
 const L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF = 30;
 const L3_PURSUIT_LOSE_TIME = 4;
-const L3_PURSUIT_CAPTURE_DISTANCE = 4.5;
+const L3_PURSUIT_CAPTURE_DISTANCE = 7.0;
 const L3_PURSUIT_CAPTURE_TIME = 2.5;
 
 
