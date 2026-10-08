@@ -83,6 +83,22 @@ const L3_PURSUIT_CAPTURE_DISTANCE = 6.4;
 const L3_PURSUIT_CAPTURE_TIME = 1.5;
 
 
+// Spawn bay / destination ring / beam are unlit (MeshBasicMaterial), so
+// at night they are the brightest things on the road. A level scales
+// their opacity with `markerBrightness` (1 = as authored; missing = 1).
+// The beam is scaled less than the ring and bay (BEAM_BRIGHTNESS_FLOOR)
+// because it is what you find the destination by from a distance.
+const MARKER_OPACITY = {
+  rank: 0.35,
+  zone: 0.45,
+  zonePulseBase: 0.35,
+  zonePulseSwing: 0.12,
+  beam: 0.22
+};
+
+const BEAM_BRIGHTNESS_FLOOR = 0.5;
+
+
 export const LEVELS = {
 
   1: {
@@ -123,6 +139,8 @@ export const LEVELS = {
       captureDistance: L1_PURSUIT_CAPTURE_DISTANCE,
       captureTime: L1_PURSUIT_CAPTURE_TIME
     },
+
+    markerBrightness: 1,
 
     // The vehicle also hard-clamps to x +-30, z +-190
     boundaries: VEHICLE_BOUNDS
@@ -225,6 +243,8 @@ export const LEVELS = {
       }
     },
 
+    markerBrightness: 1,
+
     // TODO(setBounds): shared with every level for now - see
     // VEHICLE_BOUNDS. This route is squeezed into the road
     // (x +-9) and z +-170 purely because of that clamp.
@@ -292,6 +312,9 @@ export const LEVELS = {
       captureDistance: L3_PURSUIT_CAPTURE_DISTANCE,
       captureTime: L3_PURSUIT_CAPTURE_TIME
     },
+
+    // Night: the unlit spawn bay and destination ring would glare
+    markerBrightness: 0.5,
 
     boundaries: VEHICLE_BOUNDS
   }
@@ -385,8 +408,17 @@ export class LevelManager {
       new THREE.MeshBasicMaterial({
         color: 0xffcf4a,
         transparent: true,
-        opacity: 0.22,
+        opacity: MARKER_OPACITY.beam,
         depthWrite: false
+      });
+
+    // Created once like the others (clearMarkers() only disposes
+    // geometry, so a per-load material would leak)
+    this.rankMaterial =
+      new THREE.MeshBasicMaterial({
+        color: 0xe1b300,
+        transparent: true,
+        opacity: MARKER_OPACITY.rank
       });
   }
 
@@ -501,7 +533,10 @@ export class LevelManager {
 
     // Gentle pulse so the zone reads from a distance
     this.zoneMaterial.opacity =
-      0.35 + Math.sin(time * 4) * 0.12;
+      (
+        MARKER_OPACITY.zonePulseBase +
+        Math.sin(time * 4) * MARKER_OPACITY.zonePulseSwing
+      ) * this.getMarkerBrightness();
 
     if (this.isInDeliveryZone()) {
       this.deliver();
@@ -699,18 +734,38 @@ export class LevelManager {
   // Markers
   // --------------------------------------------------
 
+  // This level's markerBrightness, clamped to 0..1
+  getMarkerBrightness() {
+
+    const value = this.config?.markerBrightness ?? 1;
+
+    return Math.min(1, Math.max(0, value));
+  }
+
+
   buildMarkers() {
 
     const { spawn, destination } = this.config;
 
+    const brightness = this.getMarkerBrightness();
+
+    this.rankMaterial.opacity =
+      MARKER_OPACITY.rank * brightness;
+
+    this.zoneMaterial.opacity =
+      MARKER_OPACITY.zone * brightness;
+
+    this.beamMaterial.opacity =
+      MARKER_OPACITY.beam *
+      (
+        BEAM_BRIGHTNESS_FLOOR +
+        (1 - BEAM_BRIGHTNESS_FLOOR) * brightness
+      );
+
     // Taxi rank bay
     const rank = new THREE.Mesh(
       new THREE.PlaneGeometry(6, 9),
-      new THREE.MeshBasicMaterial({
-        color: 0xe1b300,
-        transparent: true,
-        opacity: 0.35
-      })
+      this.rankMaterial
     );
 
     rank.rotation.x = -Math.PI / 2;
