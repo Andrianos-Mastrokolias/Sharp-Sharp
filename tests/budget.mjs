@@ -10,6 +10,8 @@
 import * as THREE from 'three';
 import assert from 'node:assert/strict';
 import { buildEnvironment } from '../src/world/environments/index.js';
+import { TrafficSystem } from '../src/world/TrafficSystem.js';
+import { LEVELS } from '../src/world/LevelManager.js';
 import { makeLibrary } from './tools/fake-library.mjs';
 import { cameras, FOV, ASPECT } from './tools/cameras.mjs';
 
@@ -31,6 +33,16 @@ export const OVERHEAD = {
 
 // Collidables each environment registers (a few childless single Meshes)
 export const COLLIDABLES = { 1: 26, 2: 2, 3: 32 };
+
+// Traffic cars LevelManager registers on top of that (M2-07). Level 2's
+// shared collidable ceiling (environments.test.mjs) went 15 -> 20 for them:
+// 2 barriers + 6 rails + 4 pillars + 7 cars = 19.
+export const TRAFFIC_COLLIDABLES = { 1: 6, 2: 7, 3: 0 };
+
+// Traffic is counted at its worst moment: every 2 s of the first 2 minutes
+// (cars move, so a fixed layout would flatter the view)
+const TRAFFIC_SAMPLE_SECONDS = 120;
+const TRAFFIC_SAMPLE_STEP = 2;
 
 // The 26 level 1 building boxes, as before the draw-call merge (Stage 0)
 const L1_BUILDING_BOXES = [
@@ -114,11 +126,30 @@ for (const level of [1, 2, 3]) {
   const views = {};
   const total = { draws: 0, tris: 0 };
 
+  const trafficGroup = new THREE.Group();
+  const traffic = new TrafficSystem({ parent: trafficGroup });
+  traffic.configure(LEVELS[level]);
+  assert.equal(traffic.cars.length, TRAFFIC_COLLIDABLES[level], `level ${level}: traffic car count`);
+
   for (const view of cameras(level)) {
-    const count = countEnvironment(env, makeCamera(view));
-    views[view.name] = { draws: count.draws, tris: count.tris };
-    total.draws = Math.max(total.draws, count.draws + OVERHEAD[level].draws);
-    total.tris = Math.max(total.tris, count.tris + OVERHEAD[level].tris);
+    const camera = makeCamera(view);
+    const count = countEnvironment(env, camera);
+    const base = { draws: count.draws, tris: count.tris };
+    const worstTraffic = { draws: 0, tris: 0 };
+
+    if (traffic.cars.length) {
+      traffic.reset();
+      for (let t = 0; t <= TRAFFIC_SAMPLE_SECONDS; t += TRAFFIC_SAMPLE_STEP) {
+        const c = countEnvironment({ group: trafficGroup }, camera);
+        worstTraffic.draws = Math.max(worstTraffic.draws, c.draws);
+        worstTraffic.tris = Math.max(worstTraffic.tris, c.tris);
+        traffic.update(TRAFFIC_SAMPLE_STEP);
+      }
+    }
+
+    views[view.name] = { draws: base.draws, tris: base.tris, trafficDraws: worstTraffic.draws, trafficTris: worstTraffic.tris };
+    total.draws = Math.max(total.draws, base.draws + worstTraffic.draws + OVERHEAD[level].draws);
+    total.tris = Math.max(total.tris, base.tris + worstTraffic.tris + OVERHEAD[level].tris);
   }
 
   report[level] = { objects: countEnvironment(env, makeCamera(cameras(level)[0])).objects, collidables: env.collidables.length, views, worstWithOverhead: total };
@@ -142,6 +173,7 @@ for (const level of [1, 2, 3]) {
     });
   }
 
+  traffic.dispose();
   env.dispose();
 }
 

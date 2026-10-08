@@ -1,4 +1,5 @@
 // Dev tool: node tests/tools/gl-measure.mjs capture <outDir>
+//           (capture takes an optional 2nd arg: seconds the traffic has driven)
 //           node tests/tools/gl-measure.mjs diff <dirA> <dirB> <outDir>
 // Starts vite + headless Edge (SwiftShader), renders every level from four
 // fixed cameras (gl-harness.html) and writes <level>-<camera>.png plus
@@ -68,16 +69,16 @@ await send('Page.navigate', { url: `http://localhost:${VITE_PORT}/tests/tools/gl
 for (let i = 0; i < 100 && !(await run('window.__ready === true')); i++) await sleep(300);
 
 if (mode === 'capture') {
-  const [outDir] = args;
+  const [outDir, trafficSeconds = '0'] = args;
   fs.mkdirSync(outDir, { recursive: true });
   const stats = {};
   for (const level of [1, 2, 3]) {
-    const loaded = await run(`window.loadLevel(${level})`);
+    const loaded = await run(`window.loadLevel(${level}, ${Number(trafficSeconds)})`);
     const NAMES = await run(`window.cameraNames(${level})`);
     for (let c = 0; c < NAMES.length; c++) {
       const s = await run(`window.shot(${level}, ${c})`);
       fs.writeFileSync(path.join(outDir, `${level}-${NAMES[c]}.png`), png(s.png));
-      stats[`${level}-${NAMES[c]}`] = { calls: s.calls, triangles: s.triangles, collidables: loaded.collidables };
+      stats[`${level}-${NAMES[c]}`] = { calls: s.calls, triangles: s.triangles, collidables: loaded.collidables, trafficCars: loaded.trafficCars };
     }
   }
   fs.writeFileSync(path.join(outDir, 'stats.json'), JSON.stringify(stats, null, 1));

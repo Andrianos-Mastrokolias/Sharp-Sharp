@@ -26,6 +26,8 @@ import { LightingManager } from '/src/graphics/LightingManager.js';
 import { SkyManager } from '/src/graphics/SkyManager.js';
 import { MaterialLibrary } from '/src/graphics/MaterialLibrary.js';
 import { buildEnvironment } from '/src/world/environments/index.js';
+import { TrafficSystem } from '/src/world/TrafficSystem.js';
+import { LEVELS } from '/src/world/LevelManager.js';
 import { cameras, FOV, ASPECT } from '/tests/tools/cameras.mjs';
 
 const W = 1280, H = 720;
@@ -43,15 +45,22 @@ const sky = new SkyManager({ scene, renderer });
 const materials = new MaterialLibrary(renderer);
 
 let env = null;
+let traffic = null;
 
-window.loadLevel = async (level) => {
+// trafficSeconds: how far the (deterministic) traffic has driven from its
+// initial layout, so a capture can show cars at different places.
+window.loadLevel = async (level, trafficSeconds = 0) => {
   if (env) { env.dispose(); env = null; }
+  if (traffic) { traffic.dispose(); traffic = null; }
   lighting.setLevel(level);
   sky.setLevel(level);
   env = buildEnvironment(level, { materials });
   scene.add(env.group);
+  traffic = new TrafficSystem({ parent: scene });
+  traffic.configure(LEVELS[level]);
+  for (let t = 0; t < trafficSeconds; t += 1 / 30) traffic.update(1 / 30);
   await sleep(4000);                       // textures + HDRI
-  return { collidables: env.collidables.length };
+  return { collidables: env.collidables.length, trafficCars: traffic.cars.length };
 };
 
 // Renders until two consecutive frames are byte-identical (textures and the
