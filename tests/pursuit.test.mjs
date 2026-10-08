@@ -93,8 +93,8 @@ test('L1: chasing -> lost -> searching -> chasing; speed cap from vehicle', () =
     sawSearching ||= e.lm.pursuit.state === 'searching';
   }
   assert.ok(sawLost && sawSearching, 'went through lost and searching');
-  // L1 speedFraction 1.05, times the far-away catch-up boost
-  assert.ok(maxSpeed <= 1.05 * 1.15 * MAX_SPEED + 1e-6, `speed cap (${maxSpeed})`);
+  // L1 speedFraction 1.15 (was 1.05; raised with L1_PURSUIT_SPEED), times the far-away catch-up boost
+  assert.ok(maxSpeed <= 1.15 * 1.15 * MAX_SPEED + 1e-6, `speed cap (${maxSpeed})`);
   assert.ok(maxSpeed > 5, 'actually moved');
 
   // Re-detect: taxi comes back within detection radius
@@ -324,8 +324,8 @@ test('catch-up: boosted when far behind, never above speedFraction up close', ()
   far.lm.pursuit.z = far.taxi.position.z + 60;
   let farMax = 0;
   run(far, 6, 0, () => { farMax = Math.max(farMax, far.lm.pursuit.speed); });
-  assert.ok(farMax > 1.05 * MAX_SPEED + 0.5, `boosted (${farMax})`);
-  assert.ok(farMax <= 1.05 * 1.15 * MAX_SPEED + 1e-6, `cap (${farMax})`);
+  assert.ok(farMax > 1.15 * MAX_SPEED + 0.5, `boosted (${farMax})`);
+  assert.ok(farMax <= 1.15 * 1.15 * MAX_SPEED + 1e-6, `cap (${farMax})`);
 
   const near = make();
   near.lm.load(1);
@@ -334,7 +334,7 @@ test('catch-up: boosted when far behind, never above speedFraction up close', ()
   near.lm.pursuit.z = near.taxi.position.z + 24;
   let nearMax = 0;
   run(near, 5, 0, () => { nearMax = Math.max(nearMax, near.lm.pursuit.speed); });
-  assert.ok(nearMax <= 1.05 * MAX_SPEED + 1e-6, `no boost up close (${nearMax})`);
+  assert.ok(nearMax <= 1.15 * MAX_SPEED + 1e-6, `no boost up close (${nearMax})`);
 });
 
 
