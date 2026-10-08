@@ -5,20 +5,41 @@ import {
   createTexturedBox,
   MAIN_POTHOLES,
   createGeometryCache,
+  createMergeBatch,
   disposeObjectTree
 } from './helpers.js';
+
+import {
+  createStreetLamps
+} from './props.js';
 
 
 // ==================================================
 // LEVEL 1: CITY STREET
 // --------------------------------------------------
 // The original shared world, moved here from main.js
-// unchanged (same positions, sizes, materials, order).
+// unchanged (same positions, sizes, materials).
 // Only mechanical differences: it adds to `group`
 // instead of the scene, building meshes go in
-// `collidables`, and identical geometries / the
-// sidewalk material are created once and reused.
+// `collidables`, and identical geometries and
+// materials are created once and reused.
+//
+// Draw-call budget: every repeated, non-collidable part
+// (sidewalks, roofs, rooftop boxes, windows, shopfronts,
+// awnings, lane dashes) is merged per 30 m chunk (one
+// building slot) and side of the street, and each street
+// lamp station is its own instanced chunk, so frustum
+// culling still drops everything that is off screen. Merged
+// parts are drawn whole while any of their chunk is in view,
+// so the in-view triangle count stays within ~1% of the
+// unmerged street (measured: tests/tools/gl-measure.mjs).
+// The 26 collidable buildings stay single Meshes.
 // ==================================================
+
+// Merge chunk length along the street (metres): one building
+// slot, so a building's windows are drawn with the building.
+const CHUNK_SIZE = 30;
+
 
 export function createCityStreet({ materials }) {
 
@@ -30,6 +51,12 @@ const collidables =
 
 const geo =
   createGeometryCache();
+
+const batch =
+  createMergeBatch({
+    chunkSize:
+      CHUNK_SIZE
+  });
 
 // ==================================================
 // GROUND
@@ -89,6 +116,14 @@ group.add(
 // KERBS
 // ==================================================
 
+const kerbMaterial =
+  materials
+    .createRoughConcreteMaterial(
+      1,
+      80
+    );
+
+
 for (
   const side
   of [-1, 1]
@@ -103,11 +138,7 @@ for (
 
       400,
 
-      materials
-        .createRoughConcreteMaterial(
-          1,
-          80
-        )
+      kerbMaterial
     );
 
 
@@ -176,7 +207,7 @@ for (
     true;
 
 
-  group.add(
+  batch.add(
     line
   );
 }
@@ -352,6 +383,49 @@ const sidewalkMaterial =
     .createPavementMaterial();
 
 
+const buildingMaterials =
+  new Map();
+
+// Same roof slab / rooftop box texture on every building
+const roofMaterial =
+  materials
+    .createRoughConcreteMaterial(
+      4,
+      6
+    );
+
+const serviceBoxMaterial =
+  materials
+    .createRoughConcreteMaterial(
+      2,
+      2
+    );
+
+// Awnings: the same plain material createBox() would
+// make, one per colour instead of one per awning.
+const awningMaterials = {};
+
+for (
+  const color
+  of [0xb63a2d, 0x29577b]
+) {
+
+  awningMaterials[
+    color
+  ] =
+    new THREE.MeshStandardMaterial({
+
+      color,
+
+      roughness:
+        0.82,
+
+      metalness:
+        0.02
+    });
+}
+
+
 let buildingIndex =
   0;
 
@@ -395,7 +469,7 @@ for (
     );
 
 
-    group.add(
+    batch.add(
       sidewalk
     );
 
@@ -476,6 +550,8 @@ for (
       1;
 
 
+    // Buildings with the same kind, repeat and tint get
+    // identical materials, so they share one.
     let buildingMaterial;
 
 
@@ -483,11 +559,24 @@ for (
       useBrick
     ) {
 
+      const key =
+        `brick|${repeatY}`;
+
+
       buildingMaterial =
+        buildingMaterials.get(
+          key
+        ) ??
         materials
           .createBrickBuildingMaterial(
             repeatY
           );
+
+
+      buildingMaterials.set(
+        key,
+        buildingMaterial
+      );
     }
 
     else {
@@ -504,17 +593,32 @@ for (
       ];
 
 
+      const tint =
+        tintOptions[
+          buildingIndex %
+          tintOptions.length
+        ];
+
+
+      const key =
+        `concrete|${repeatY}|${tint}`;
+
+
       buildingMaterial =
+        buildingMaterials.get(
+          key
+        ) ??
         materials
           .createConcreteBuildingMaterial(
-
             repeatY,
-
-            tintOptions[
-              buildingIndex %
-              tintOptions.length
-            ]
+            tint
           );
+
+
+      buildingMaterials.set(
+        key,
+        buildingMaterial
+      );
     }
 
 
@@ -571,11 +675,7 @@ for (
         depth +
         0.35,
 
-        materials
-          .createRoughConcreteMaterial(
-            4,
-            6
-          )
+        roofMaterial
       );
 
 
@@ -590,7 +690,7 @@ for (
     );
 
 
-    group.add(
+    batch.add(
       roof
     );
 
@@ -614,11 +714,7 @@ for (
 
           3,
 
-          materials
-            .createRoughConcreteMaterial(
-              2,
-              2
-            )
+          serviceBoxMaterial
         );
 
 
@@ -634,7 +730,7 @@ for (
       );
 
 
-      group.add(
+      batch.add(
         serviceBox
       );
     }
@@ -735,7 +831,7 @@ for (
               2;
 
 
-        group.add(
+        batch.add(
           frame
         );
 
@@ -776,7 +872,7 @@ for (
           frame.rotation.y;
 
 
-        group.add(
+        batch.add(
           glass
         );
       }
@@ -846,7 +942,7 @@ for (
             2;
 
 
-      group.add(
+      batch.add(
         shop
       );
 
@@ -854,22 +950,35 @@ for (
       // Awning.
 
       const awning =
-        createBox(
+        new THREE.Mesh(
 
-          1,
+          geo(
+            'awning',
+            () => new THREE.BoxGeometry(
+              1,
+              0.15,
+              4.9
+            )
+          ),
 
-          0.15,
+          awningMaterials[
+            buildingIndex %
+            2 ===
+            0
 
-          4.9,
+              ? 0xb63a2d
 
-          buildingIndex %
-          2 ===
-          0
-
-            ? 0xb63a2d
-
-            : 0x29577b
+              : 0x29577b
+          ]
         );
+
+
+      awning.castShadow =
+        true;
+
+
+      awning.receiveShadow =
+        true;
 
 
       awning.position.set(
@@ -893,7 +1002,7 @@ for (
       );
 
 
-      group.add(
+      batch.add(
         awning
       );
     }
@@ -936,6 +1045,10 @@ const lampMaterial =
   });
 
 
+const lampStations =
+  [];
+
+
 for (
   let z = -160;
   z <= 160;
@@ -947,107 +1060,50 @@ for (
     of [-1, 1]
   ) {
 
-    const pole =
-      new THREE.Mesh(
-
-        geo(
-          'pole',
-          () => new THREE.CylinderGeometry(
-            0.08,
-            0.1,
-            6,
-            10
-          )
-        ),
-
-        poleMaterial
-      );
-
-
-    pole.position.set(
-
-      side *
-      9.6,
-
-      3,
+    lampStations.push({
+      x:
+        side *
+        9.6,
 
       z
-    );
-
-
-    pole.castShadow =
-      true;
-
-
-    group.add(
-      pole
-    );
-
-
-    const arm =
-      new THREE.Mesh(
-
-        geo(
-          'arm',
-          () => new THREE.BoxGeometry(
-            1.2,
-            0.08,
-            0.08
-          )
-        ),
-
-        poleMaterial
-      );
-
-
-    arm.position.set(
-
-      side *
-      9.05,
-
-      5.75,
-
-      z
-    );
-
-
-    group.add(
-      arm
-    );
-
-
-    const lamp =
-      new THREE.Mesh(
-
-        geo(
-          'lamp',
-          () => new THREE.BoxGeometry(
-            0.45,
-            0.12,
-            0.3
-          )
-        ),
-
-        lampMaterial
-      );
-
-
-    lamp.position.set(
-
-      side *
-      8.55,
-
-      5.7,
-
-      z
-    );
-
-
-    group.add(
-      lamp
-    );
+    });
   }
 }
+
+
+for (
+  const mesh
+  of createStreetLamps({
+
+    stations:
+      lampStations,
+
+    poleMaterial,
+
+    lampMaterial,
+
+    // lamps are 40 m apart: one station per instanced chunk
+    chunkSize:
+      20,
+
+    zMin:
+      -200
+  })
+) {
+
+  group.add(
+    mesh
+  );
+}
+
+
+// ==================================================
+// MERGED STREET DETAIL
+// ==================================================
+
+batch.build(
+  group
+);
 
 
 return {
