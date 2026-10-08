@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 
+import {
+  mergeGeometries
+} from 'three/addons/utils/BufferGeometryUtils.js';
+
 
 // ==================================================
 // SHARED HAZARD POSITIONS
@@ -188,6 +192,185 @@ export function createGeometryCache() {
 
 
     return geometry;
+  };
+}
+
+
+// Collects ordinary meshes and builds one merged Mesh per
+// (z chunk, side of the road, material, shadow flags) instead.
+// Chunks keep frustum culling working: a merged mesh is only
+// drawn while its own ~chunkSize metres of street are in view.
+//
+//   const batch = createMergeBatch({ chunkSize: 60 });
+//   batch.add(mesh);            // instead of group.add(mesh)
+//   batch.build(group);         // once, after everything is added
+//
+// A merged mesh keeps its parts' world positions; its origin is
+// moved to the middle of its own box (geometry re-centred), so
+// transparent sorting uses the chunk's centre, not the world
+// origin. Triangle counts are unchanged by merging.
+export function createMergeBatch({
+  chunkSize = 60,
+  zMin = -200
+} = {}) {
+
+  const bins =
+    new Map();
+
+  const matrix =
+    new THREE.Matrix4();
+
+
+  return {
+
+    add(
+      mesh
+    ) {
+
+      mesh.updateMatrix();
+
+
+      const chunk =
+        Math.floor(
+          (
+            mesh.position.z -
+            zMin
+          ) /
+          chunkSize
+        );
+
+
+      const side =
+        Math.sign(
+          mesh.position.x
+        );
+
+
+      const key =
+        `${chunk}|${side}|${mesh.material.uuid}|` +
+        `${mesh.castShadow ? 1 : 0}${mesh.receiveShadow ? 1 : 0}`;
+
+
+      let bin =
+        bins.get(
+          key
+        );
+
+
+      if (
+        !bin
+      ) {
+
+        bin = {
+          material: mesh.material,
+          castShadow: mesh.castShadow,
+          receiveShadow: mesh.receiveShadow,
+          parts: []
+        };
+
+        bins.set(
+          key,
+          bin
+        );
+      }
+
+
+      bin.parts.push(
+        mesh.geometry
+          .clone()
+          .applyMatrix4(
+            matrix.copy(
+              mesh.matrix
+            )
+          )
+      );
+    },
+
+
+    build(
+      group
+    ) {
+
+      const meshes =
+        [];
+
+      const centre =
+        new THREE.Vector3();
+
+
+      for (
+        const bin
+        of bins.values()
+      ) {
+
+        const geometry =
+          bin.parts.length === 1
+            ? bin.parts[0]
+            : mergeGeometries(
+                bin.parts
+              );
+
+
+        if (
+          bin.parts.length > 1
+        ) {
+
+          for (
+            const part
+            of bin.parts
+          ) {
+
+            part.dispose();
+          }
+        }
+
+
+        geometry.computeBoundingBox();
+
+        geometry.boundingBox.getCenter(
+          centre
+        );
+
+        geometry.translate(
+          -centre.x,
+          -centre.y,
+          -centre.z
+        );
+
+
+        const mesh =
+          new THREE.Mesh(
+            geometry,
+            bin.material
+          );
+
+
+        mesh.position.copy(
+          centre
+        );
+
+        mesh.castShadow =
+          bin.castShadow;
+
+        mesh.receiveShadow =
+          bin.receiveShadow;
+
+
+        group.add(
+          mesh
+        );
+
+        meshes.push(
+          mesh
+        );
+      }
+
+
+      bins.clear();
+
+
+      return meshes;
+    }
   };
 }
 

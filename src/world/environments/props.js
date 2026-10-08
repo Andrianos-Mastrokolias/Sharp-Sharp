@@ -9,6 +9,12 @@ import {
 } from './helpers.js';
 
 
+// Prop families live in ./props/<family>.js and are re-exported
+// here: this file stays the one list of swap points for the 3D
+// model team.
+export * from './props/utilities.js';
+
+
 // ==================================================
 // PROP FACTORIES
 // --------------------------------------------------
