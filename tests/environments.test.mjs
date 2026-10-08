@@ -104,6 +104,103 @@ function trackDisposal(resources) {
   return disposed;
 }
 
+// ---- Motorway checks (level 2) -----------------------------------------
+const FLYOVER_VOLUME = new THREE.Box3(
+  new THREE.Vector3(3, 0, -110),
+  new THREE.Vector3(9.4, 3.4, 10)       // deck 2.5 m + 0.9 m rails
+);
+
+// True when any part of the object that stands above the road surface
+// lies inside the volume. Plain meshes use their world box; instanced
+// meshes are checked vertex by vertex per instance, because one box
+// around a whole lamp pole (base to arm) would be far too coarse.
+function crossesVolume(object, volume) {
+  let crosses = false;
+  object.traverse((o) => {
+    if (!o.geometry || crosses) return;
+    if (o.isInstancedMesh) {
+      const p = new THREE.Vector3();
+      const m = new THREE.Matrix4();
+      const pos = o.geometry.attributes.position;
+      for (let i = 0; i < o.count && !crosses; i++) {
+        o.getMatrixAt(i, m);
+        m.premultiply(o.matrixWorld);
+        for (let v = 0; v < pos.count; v++) {
+          p.fromBufferAttribute(pos, v).applyMatrix4(m);
+          if (p.y > 0.1 && volume.containsPoint(p)) { crosses = true; break; }
+        }
+      }
+    } else {
+      const box = new THREE.Box3().setFromObject(o);
+      if (box.max.y > 0.1 && box.intersectsBox(volume)) crosses = true;   // > 0.1: not road markings
+    }
+  });
+  return crosses;
+}
+
+function checkMotorway(step, lm, scene, collidables) {
+  scene.updateMatrixWorld(true);
+  const env = lm.environment;
+  const named = (name) => {
+    const found = [];
+    env.group.traverse((o) => { if (o.name === name) found.push(o); });
+    return found;
+  };
+
+  // Only the two barriers are the environment's collidables; with the
+  // flyover rails (6) and pillars (4) the level stays within budget
+  assert.equal(env.collidables.length, 2, `step ${step}: motorway collidables`);
+  assert.ok(env.collidables.every((m) => m.name === 'motorway-barrier'));
+  assert.ok(collidables.length <= 15, `step ${step}: level 2 collidable budget (${collidables.length})`);
+
+  // Barriers sit at |x| ~ 10.3 on both sides and clear every flyover collidable
+  const barriers = named('motorway-barrier');
+  assert.deepEqual(barriers.map((b) => Math.sign(b.position.x)).sort(), [-1, 1]);
+  const others = collidables.filter((m) => !env.collidables.includes(m));
+  assert.ok(others.length >= 10, 'flyover rails/pillars not registered');
+  for (const barrier of barriers) {
+    const box = new THREE.Box3().setFromObject(barrier);
+    assert.ok(Math.abs(Math.abs(barrier.position.x) - 10.3) < 0.05, 'barrier x');
+    assert.ok(Math.min(Math.abs(box.min.x), Math.abs(box.max.x)) >= 9.9, 'barrier inner face');
+    for (const other of others) {
+      assert.ok(!box.intersectsBox(new THREE.Box3().setFromObject(other)), `step ${step}: barrier intersects flyover part`);
+    }
+  }
+
+  // Gantry: beam and sign at least 6.5 m up, legs outside the barriers,
+  // and wholly north of the flyover ramp toe (z = 10)
+  const [beam] = named('gantry-beam');
+  const [sign] = named('gantry-sign');
+  const legs = named('gantry-leg');
+  assert.ok(beam && sign && legs.length === 2, 'gantry parts');
+  assert.ok(new THREE.Box3().setFromObject(beam).min.y >= 6.5, 'gantry beam height');
+  assert.ok(new THREE.Box3().setFromObject(sign).min.y >= 6.5, 'gantry sign height');
+  for (const leg of legs) {
+    const box = new THREE.Box3().setFromObject(leg);
+    assert.ok(Math.min(Math.abs(box.min.x), Math.abs(box.max.x)) >= 11, 'gantry leg |x|');
+  }
+  for (const part of [beam, sign, ...legs]) {
+    const box = new THREE.Box3().setFromObject(part);
+    assert.ok(box.min.z > 10, 'gantry must stay clear of the flyover');
+    assert.ok(Math.abs((box.min.z + box.max.z) / 2 - 100) < 1, 'gantry at z = 100');
+  }
+
+  // Nothing standing above the road surface enters the flyover volume
+  assert.ok(!crossesVolume(env.group, FLYOVER_VOLUME), `step ${step}: a prop crosses the flyover`);
+
+  // Lamps are instanced (one InstancedMesh) and add no real lights
+  let lamps = 0;
+  env.group.traverse((o) => {
+    assert.ok(!o.isLight, 'motorway must not add lights');
+    if (o.isInstancedMesh && Array.isArray(o.material)) lamps++;
+  });
+  assert.equal(lamps, 1, 'lamp poles: one InstancedMesh');
+
+  // Sign texture is on the sign material, so dispose() must free it
+  assert.ok(sign.material.map?.isTexture, 'sign texture');
+  return sign.material.map;
+}
+
 const SEQUENCE = [1, 2, 3, 1, 2, 3, 1, 3, 2, 1, 1, 2, 3, 1];
 
 const { scene, lm, collidables, potholes, materials } = make();
@@ -111,6 +208,9 @@ const { scene, lm, collidables, potholes, materials } = make();
 // Counts per level, recorded the first time each level loads
 const baseline = {};
 const mainPotholes = potholes.length;
+
+let signTexturesCreated = 0;
+let signTexturesDisposed = 0;
 
 let previous = null;
 let previousDisposed = null;
@@ -178,6 +278,12 @@ for (const [step, level] of SEQUENCE.entries()) {
     MAIN_POTHOLES
   );
 
+  if (level === 2) {
+    const signTexture = checkMotorway(step, lm, scene, collidables);
+    signTexture.addEventListener('dispose', () => { signTexturesDisposed++; });
+    signTexturesCreated++;
+  }
+
   const resources = ownedResources(lm.environment.group);
   previous = lm.environment;
   previousDisposed = {
@@ -185,6 +291,10 @@ for (const [step, level] of SEQUENCE.entries()) {
     seen: trackDisposal(resources)
   };
 }
+
+// Every sign texture but the live one has been freed
+assert.ok(signTexturesCreated >= 3);
+assert.equal(signTexturesDisposed, signTexturesCreated - (lm.levelId === 2 ? 1 : 0), 'sign textures disposed');
 
 // The library's base textures were never disposed (listeners were
 // attached when they were created, so this covers every cycle)
