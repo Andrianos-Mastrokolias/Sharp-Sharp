@@ -90,25 +90,31 @@ const L3_PURSUIT_CAPTURE_TIME = 1.5;
 // Lanes: x (m across the road), dir along z (-1 = with the taxi,
 // +1 = oncoming), speed (m/s, constant), count, variants (any of
 // hatchback / sedan / bakkie / minibus). At most 10 cars a level.
-// Cars wrap at the ends of the stretch between the two clearance
-// zones; see TrafficSystem.js. Level 3 (stealth) has no traffic.
+// Lanes run across the whole road (zLo..zHi, inside the vehicle's
+// z +-190): cars enter at one end and leave at the other, far from
+// the spawn. The clearances only shape the initial layout. See
+// TrafficSystem.js. Level 3 (stealth) has no traffic.
 //
 // Taxi: 2.7 m wide, spawns at x = 0. Widest car 1.97 m (minibus):
 // a car in an x = +-4.5 lane leaves ~2.2 m between its side and the
 // taxi, and ~3.5 m to the road edge (x +-9).
 // ==================================================
 
-// Nobody is ever this close to the spawn bay / the delivery zone
+// The stretch of road the lanes run on
+const TRAFFIC_LANE_Z_LO = -185;
+const TRAFFIC_LANE_Z_HI = 185;
+
+// At the start nobody is this close to the spawn bay / the delivery zone
 const TRAFFIC_SPAWN_CLEARANCE = 40;
 const TRAFFIC_DESTINATION_CLEARANCE = 35;
 
 const L1_TRAFFIC_SEED = 1101;
 const L1_TRAFFIC_SAME_X = -4.5;
 const L1_TRAFFIC_SAME_SPEED = 9;
-const L1_TRAFFIC_SAME_COUNT = 3;
+const L1_TRAFFIC_SAME_COUNT = 4;
 const L1_TRAFFIC_ONCOMING_X = 4.5;
 const L1_TRAFFIC_ONCOMING_SPEED = 12;
-const L1_TRAFFIC_ONCOMING_COUNT = 3;
+const L1_TRAFFIC_ONCOMING_COUNT = 4;
 
 // Level 2: same direction only. Flyover footprint is x >= 3 (traffic
 // must stay at x < 2), so both lanes sit on the ground side.
@@ -180,6 +186,8 @@ export const LEVELS = {
 
     traffic: {
       seed: L1_TRAFFIC_SEED,
+      zLo: TRAFFIC_LANE_Z_LO,
+      zHi: TRAFFIC_LANE_Z_HI,
       spawnClearance: TRAFFIC_SPAWN_CLEARANCE,
       destinationClearance: TRAFFIC_DESTINATION_CLEARANCE,
       lanes: [
@@ -307,6 +315,8 @@ export const LEVELS = {
     // of the flyover footprint (checked by TrafficSystem.configure).
     traffic: {
       seed: L2_TRAFFIC_SEED,
+      zLo: TRAFFIC_LANE_Z_LO,
+      zHi: TRAFFIC_LANE_Z_HI,
       spawnClearance: TRAFFIC_SPAWN_CLEARANCE,
       destinationClearance: TRAFFIC_DESTINATION_CLEARANCE,
       lanes: [
@@ -469,7 +479,11 @@ export class LevelManager {
     // so clearMarkers() unregisters them like the flyover pillars
     this.traffic = new TrafficSystem({
       parent: this.group,
-      registerCollidable: mesh => this.registerCollidable(mesh)
+      registerCollidable: mesh => this.registerCollidable(mesh),
+      setCollidableActive: (mesh, active) =>
+        this.setCollidableActive(mesh, active),
+      taxi: this.taxi,
+      taxiCollisionBox: this.vehicle.localTaxiCollisionBox ?? null
     });
 
     this.zoneMaterial =
@@ -1037,6 +1051,35 @@ export class LevelManager {
 
     this.collidables.push(mesh);
     this.registered.push(mesh);
+  }
+
+
+  // Takes an already registered mesh out of / back into the shared
+  // collidables (a ghost car). It stays in `registered`, so
+  // clearMarkers() still cleans up whichever state it is in.
+  setCollidableActive(mesh, active) {
+
+    if (!this.collidables) {
+      return;
+    }
+
+    const i = this.collidables.indexOf(mesh);
+
+    if (active && i === -1) {
+      this.collidables.push(mesh);
+    }
+    else if (!active && i !== -1) {
+
+      // In place and without splice(), which allocates its result:
+      // this runs on the per-frame path
+      const list = this.collidables;
+
+      for (let k = i; k < list.length - 1; k++) {
+        list[k] = list[k + 1];
+      }
+
+      list.length--;
+    }
   }
 
 

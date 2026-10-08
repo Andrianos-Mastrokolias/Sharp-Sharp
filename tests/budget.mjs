@@ -36,13 +36,14 @@ export const COLLIDABLES = { 1: 26, 2: 2, 3: 32 };
 
 // Traffic cars LevelManager registers on top of that (M2-07). Level 2's
 // shared collidable ceiling (environments.test.mjs) went 15 -> 20 for them:
-// 2 barriers + 6 rails + 4 pillars + 7 cars = 19.
-export const TRAFFIC_COLLIDABLES = { 1: 6, 2: 7, 3: 0 };
+// 2 barriers + 6 rails + 4 pillars + 7 cars = 19. Level 1 runs 4 + 4 cars.
+export const TRAFFIC_COLLIDABLES = { 1: 8, 2: 7, 3: 0 };
 
-// Traffic is counted at its worst moment: every 2 s of the first 2 minutes
-// (cars move, so a fixed layout would flatter the view)
-const TRAFFIC_SAMPLE_SECONDS = 120;
-const TRAFFIC_SAMPLE_STEP = 2;
+// Traffic is counted at its worst moment: every second of the first 4
+// minutes, which is several full loops of every lane (the lanes are ~365 m
+// at 9..17 m/s), so every relative position of the cars is sampled.
+const TRAFFIC_SAMPLE_SECONDS = 240;
+const TRAFFIC_SAMPLE_STEP = 1;
 
 // The 26 level 1 building boxes, as before the draw-call merge (Stage 0)
 const L1_BUILDING_BOXES = [
@@ -130,6 +131,8 @@ for (const level of [1, 2, 3]) {
   const traffic = new TrafficSystem({ parent: trafficGroup });
   traffic.configure(LEVELS[level]);
   assert.equal(traffic.cars.length, TRAFFIC_COLLIDABLES[level], `level ${level}: traffic car count`);
+  // Cars cast no shadow: that second draw per part is what protects the ceiling
+  assert.ok(traffic.cars.every((c) => c.mesh.castShadow === false), `level ${level}: traffic casts shadows`);
 
   for (const view of cameras(level)) {
     const camera = makeCamera(view);
@@ -145,6 +148,16 @@ for (const level of [1, 2, 3]) {
         worstTraffic.tris = Math.max(worstTraffic.tris, c.tris);
         traffic.update(TRAFFIC_SAMPLE_STEP);
       }
+    }
+
+    // A ghost car costs the same as a solid one (same parts, transparent
+    // material): turning every car into a ghost must not change the count
+    if (traffic.cars.length) {
+      const solid = countEnvironment({ group: trafficGroup }, camera);
+      traffic.cars.forEach((c) => { traffic.setSolid(c, false); });
+      const ghost = countEnvironment({ group: trafficGroup }, camera);
+      assert.deepEqual(ghost, solid, `level ${level}: ghost cars draw differently`);
+      traffic.cars.forEach((c) => { traffic.setSolid(c, true); });
     }
 
     views[view.name] = { draws: base.draws, tris: base.tris, trafficDraws: worstTraffic.draws, trafficTris: worstTraffic.tris };

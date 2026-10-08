@@ -235,8 +235,8 @@ function checkCity(step, lm, collidables) {
   });
   assert.equal(zebras.length, 4, `step ${step}: zebra crossings`);
   assert.equal(env.collidables.length, 26, `step ${step}: level 1 collidables unchanged`);
-  // 26 buildings + 6 traffic cars (LevelManager registers the cars, not the environment)
-  assert.ok(collidables.length === 26 + 6, `step ${step}: shared collidable array (${collidables.length})`);
+  // 26 buildings + 8 traffic cars (LevelManager registers the cars, not the environment)
+  assert.ok(collidables.length === 26 + 8, `step ${step}: shared collidable array (${collidables.length})`);
 
   return people.length;
 }
