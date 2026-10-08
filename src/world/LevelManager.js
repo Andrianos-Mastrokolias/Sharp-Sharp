@@ -4,14 +4,16 @@ import {
   ELEVATION_ENTRY_MAX,
   ELEVATION_ENTRY_TOLERANCE
 } from './PursuitSystem.js';
+import { buildEnvironment } from './environments/index.js';
 
 // ==================================================
 // LEVEL DEFINITIONS
 // --------------------------------------------------
-// Data only. The shared road/buildings are still built
-// in main.js (one straight road along Z, x = 0), so a
-// level is currently: where you start, where you must
-// deliver, and the hazards/limits that apply.
+// Data only. The road/buildings come from the per-level
+// environment factories in ./environments (built by
+// load()), all on one straight road along Z at x = 0, so a
+// level is: where you start, where you must deliver, and
+// the hazards/limits that apply.
 //
 // Facing: heading 0 = driving towards -Z (matches
 // VehicleController.reset()).
@@ -304,6 +306,7 @@ export class LevelManager {
     taxi,
     collidables = null,
     potholes = null,
+    materials = null,
     getHeadlightsEnabled = null,
     onDelivered = null,
     onCaptured = null
@@ -323,6 +326,11 @@ export class LevelManager {
     // makes it block the taxi like a building.
     this.collidables = collidables;
     this.registered = [];
+
+    // MaterialLibrary handed to the environment factories. Without
+    // it no environment is built (headless tests of the rules).
+    this.materials = materials;
+    this.environment = null;
 
     this.scene = scene;
     this.vehicle = vehicle;
@@ -395,6 +403,8 @@ export class LevelManager {
 
     this.levelId = levelId;
     this.config = LEVELS[levelId] ?? null;
+
+    this.buildEnvironment(levelId);
 
     if (!this.config) {
       this.status = 'none';
@@ -880,7 +890,40 @@ export class LevelManager {
   }
 
 
+  // The level's world (ground, road, buildings, lights...). Its
+  // collidables go through registerCollidable(), so clearMarkers()
+  // unregisters them like the flyover pillars.
+  buildEnvironment(levelId) {
+
+    if (!this.materials) {
+      return;
+    }
+
+    this.environment = buildEnvironment(
+      levelId,
+      { materials: this.materials }
+    );
+
+    this.scene.add(this.environment.group);
+
+    for (const mesh of this.environment.collidables) {
+      this.registerCollidable(mesh);
+    }
+  }
+
+
+  // Frees the previous level's geometries, materials and cloned
+  // textures (never the MaterialLibrary's base textures).
+  disposeEnvironment() {
+
+    this.environment?.dispose();
+    this.environment = null;
+  }
+
+
   clearMarkers() {
+
+    this.disposeEnvironment();
 
     // Unregister in place: the vehicle holds this array
     if (this.collidables) {
