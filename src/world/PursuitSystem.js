@@ -120,6 +120,11 @@ const TOE_LEAD = 6;            // run for a point this far before the toe...
 const TOE_SWITCH = 2;          // ...until within this of it, then follow the taxi
 const LANE_RETURN_SPEED = 8;   // m/s: eases back into the lane off a section
 const PITCH_RATE = 8;          // 1/s: smoothing of the ramp pitch
+const PURSUER_HALF_WIDTH = 1.1;   // body half width (the mesh is 2.0 m wide)
+const FOOTPRINT_MARGIN = 0.3;     // extra clearance around an elevated section
+const KEEP_OUT = PURSUER_HALF_WIDTH + FOOTPRINT_MARGIN;
+const ON_DECK_Y = 0.3;            // above this the pursuer is on the section
+const FOOTPRINT_EPS = 0.001;
 
 const DEFAULT_CONFIG = {
 
@@ -614,6 +619,7 @@ export class PursuitSystem {
     this.onRamp = false;
     this.leftSection = false;
     this.boarding = null;   // section it is running to the toe of
+    this.taxiOnStructure = false;   // taxi is up on that section
     this.brakeLimit = BRAKING;
     this.heading = 0;
     this.speed = 0;
@@ -709,6 +715,7 @@ export class PursuitSystem {
     this.onRamp = false;
     this.leftSection = false;
     this.boarding = null;
+    this.taxiOnStructure = false;
     this.distance = Infinity;
     this.sampleHead = 0;
     this.sampleCount = 0;
@@ -809,20 +816,29 @@ export class PursuitSystem {
       boundaries.maxZ - BOUNDS_MARGIN
     );
 
-    // Same lift rule as the taxi: only from the toe, or when up
+    // Same lift rule as the taxi: from the entry toe, or when already
+    // up. A ground pursuer is never lifted at the exit end (its low
+    // slope is not a toe for it), so it cannot drive up the back.
     const s = this.getElevation ? this.sectionAt(this.x, this.z) : null;
     const h = s ? this.getElevation(this.x, this.z) : 0;
 
-    if (s && (h <= ELEVATION_ENTRY_MAX ||
-              this.y >= h - ELEVATION_ENTRY_TOLERANCE)) {
+    if (s) {
+      const up =
+        (this.y > ON_DECK_Y || this.section) &&
+        this.y >= h - ELEVATION_ENTRY_TOLERANCE;
 
-      this.section = s;
-      this.x = Math.min(Math.max(this.x, s.xMin + RAIL_CLAMP_MARGIN),
-        s.xMax - RAIL_CLAMP_MARGIN);
-      this.y = this.getElevation(this.x, this.z);
-      this.onRamp = this.y > 0.01 && this.y < s.height - 0.01;
-      this.leftSection = true;
-      return;
+      const atToe =
+        h <= ELEVATION_ENTRY_MAX && this.z > (s.zEntry + s.zExit) / 2;
+
+      if (up || atToe) {
+        this.section = s;
+        this.x = Math.min(Math.max(this.x, s.xMin + RAIL_CLAMP_MARGIN),
+          s.xMax - RAIL_CLAMP_MARGIN);
+        this.y = this.getElevation(this.x, this.z);
+        this.onRamp = this.y > 0.01 && this.y < s.height - 0.01;
+        this.leftSection = true;
+        return;
+      }
     }
 
     this.section = null;
@@ -834,7 +850,9 @@ export class PursuitSystem {
     let maxX = Math.min(lane ? lane.maxX : ROAD_HALF_WIDTH,
       boundaries.maxX - BOUNDS_MARGIN);
 
-    if (this.boarding) {
+    // Boarding opens the lane to the rails only on the approach side
+    // of the toe; past it the pursuer would cut into the ramp's side
+    if (this.boarding && this.z >= this.boarding.zEntry) {
       maxX = Math.max(maxX, this.boarding.xMax - RAIL_CLAMP_MARGIN);
     }
 
@@ -847,6 +865,49 @@ export class PursuitSystem {
       this.x = Math.min(minX, this.x + ease);
     } else {
       this.leftSection = false;
+    }
+
+    if (this.getElevation) {
+      this.keepOutOfFootprints(minX, maxX);
+    }
+  }
+
+
+  // A pursuer at ground level is never inside an elevated section's
+  // footprint (widened by its half width and a margin), which also
+  // covers the pillars and the space under the deck. Only the toe
+  // (entered from z > zEntry, handled by the lift above) is open.
+  // Pushed out along the least-penetration axis; a sideways push must
+  // stay inside the lane, otherwise the next frame would pull it back in.
+  keepOutOfFootprints(minX, maxX) {
+
+    for (const s of this.level.elevated ?? []) {
+
+      const xl = s.xMin - KEEP_OUT;
+      const xr = s.xMax + KEEP_OUT;
+
+      if (this.x <= xl || this.x >= xr ||
+          this.z > s.zEntry || this.z < s.zExit) {
+        continue;
+      }
+
+      const options = [
+        { depth: this.z - s.zExit, x: this.x, z: s.zExit - FOOTPRINT_EPS },
+        { depth: s.zEntry - this.z, x: this.x, z: s.zEntry + FOOTPRINT_EPS }
+      ];
+
+      if (xl >= minX) {
+        options.push({ depth: this.x - xl, x: xl, z: this.z });
+      }
+
+      if (xr <= maxX) {
+        options.push({ depth: xr - this.x, x: xr, z: this.z });
+      }
+
+      const out = options.reduce((a, b) => (b.depth < a.depth ? b : a));
+
+      this.x = out.x;
+      this.z = out.z;
     }
   }
 
@@ -1026,6 +1087,7 @@ export class PursuitSystem {
   updateBoarding() {
 
     this.boarding = null;
+    this.taxiOnStructure = false;
 
     if (this.section || !this.getElevation) {
       return;
@@ -1047,6 +1109,7 @@ export class PursuitSystem {
 
       if (approaching || onStructure) {
         this.boarding = s;
+        this.taxiOnStructure = onStructure;
         return;
       }
     }
@@ -1068,17 +1131,31 @@ export class PursuitSystem {
     const maxSpeed = topSpeed * this.catchUpFactor();
 
     // Boarding: head for just before the ramp toe at full speed, then
-    // follow the taxi up. Past the toe's approach it steers at the taxi.
+    // follow the taxi up. It steers straight at the taxi only once it
+    // is on the section or inside the toe's approach corridor; from
+    // anywhere else it keeps heading for the toe point.
     const toe = this.boarding;
 
-    if (
-      toe && seen && this.taxi.position.y > ELEVATED_Y &&
-      this.z > toe.zEntry + TOE_LEAD + TOE_SWITCH
-    ) {
-      this.drive(
-        dt, (toe.xMin + toe.xMax) / 2, toe.zEntry + TOE_LEAD,
-        maxSpeed, maxSpeed
-      );
+    if (toe && seen && this.taxi.position.y > ELEVATED_Y) {
+
+      const inCorridor =
+        this.x >= toe.xMin && this.x <= toe.xMax &&
+        this.z >= toe.zEntry &&
+        this.z <= toe.zEntry + TOE_LEAD + TOE_SWITCH;
+
+      if (this.section || inCorridor) {
+        this.drive(
+          dt, this.lastKnownX, this.lastKnownZ, maxSpeed,
+          this.followSpeed(dt, maxSpeed)
+        );
+      } else if (this.z >= toe.zEntry) {
+        this.drive(
+          dt, (toe.xMin + toe.xMax) / 2, toe.zEntry + TOE_LEAD,
+          maxSpeed, maxSpeed
+        );
+      } else {
+        this.paceOnGround(dt, toe, tz, maxSpeed);
+      }
     } else {
       // Match the taxi's speed and hold the gap while it is in view;
       // a stale last-known point is driven to properly (arrive).
@@ -1107,6 +1184,32 @@ export class PursuitSystem {
     } else {
       this.captureTimer = 0;
     }
+  }
+
+
+  // Already past the toe at ground level with the taxi on the
+  // structure: it cannot board, so it runs along the ground lane
+  // level with the taxi (the cruise gap behind it) and is waiting
+  // when the taxi comes down at zExit. Capture still needs the same
+  // level, so this never catches a taxi on the deck.
+  paceOnGround(dt, section, taxiZ, maxSpeed) {
+
+    const { lane, cruiseGap, closingGain } = this.config;
+
+    const laneX = Math.min(
+      Math.max(0, lane ? lane.minX : -ROAD_HALF_WIDTH),
+      lane ? lane.maxX : ROAD_HALF_WIDTH,
+      section.xMin - KEEP_OUT
+    );
+
+    const taxiSpeed = Math.max(this.vehicle.getSpeed(), 0);
+    const ahead = this.z - (taxiZ + cruiseGap);   // > 0: still to cover
+
+    const target = Math.min(
+      Math.max(taxiSpeed + closingGain * ahead, 0), maxSpeed);
+
+    // Aim down the lane; the target speed holds the station
+    this.drive(dt, laneX, this.z - 30, maxSpeed, target);
   }
 
 

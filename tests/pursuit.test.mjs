@@ -973,6 +973,99 @@ test('flyover: when the taxi comes back down the pursuer follows down behind it'
   assert.equal(e.captured.length, 0);
 });
 
+// ---- Flyover keep-out: a ground pursuer never enters the footprint ----
+
+const KEEP = 1.1 + 0.3;   // half width + margin (PursuitSystem KEEP_OUT)
+
+function insideFootprint(p) {
+  return p.x > SECTION.xMin - KEEP + 1e-6 && p.x < SECTION.xMax + KEEP - 1e-6 &&
+    p.z < SECTION.zEntry && p.z > SECTION.zExit;
+}
+
+// Taxi on the deck driven along x 6.2; pursuer placed at (px, pz) on the
+// ground. Asserts EVERY frame (pursuer and mesh) and returns the tracker.
+function sweepRun(px, pz, taxiSpeed, { startZ = 60, endZ = -150, frames = 60 * 30 } = {}) {
+  const e = make();
+  e.lm.load(2);
+  step(e.lm, 3.2);
+  const p = e.lm.pursuit;
+  p.x = px; p.z = pz; p.y = 0; p.section = null; p.heading = 0; p.speed = 0;
+  let z = startZ, captured0 = 0;
+  e.taxi.position.set(6.2, e.lm.getElevationAt(6.2, z), z);
+  e.setSpeed(taxiSpeed);
+  const r = { e, p, minZ: Infinity, boarded: false, states: new Set(), bad: null,
+    atZExit: null, crossLevel: false };
+  for (let f = 0; f < frames && z > endZ; f++) {
+    z -= taxiSpeed * DT;
+    const x = 6.2;
+    e.taxi.position.set(x, e.lm.getElevationAt(x, z), z);
+    e.lm.update(DT, f * DT);
+    r.states.add(p.state);
+    if (!p.section && p.mesh.position.y < 0.3 && insideFootprint(p) && !r.bad) {
+      r.bad = `frame ${f}: ground pursuer inside footprint at (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`;
+    }
+    if (p.section) r.boarded = true;
+    if (e.captured.length > captured0) {
+      captured0 = e.captured.length;
+      if (Math.abs(e.taxi.position.y - p.y) > 1.0) r.crossLevel = true;
+    }
+    if (r.atZExit === null && e.taxi.position.z <= SECTION.zExit) {
+      r.atZExit = { pz: p.z, py: p.y, taxiY: e.taxi.position.y };
+    }
+  }
+  return r;
+}
+
+test('flyover keep-out: ground pursuer never inside the footprint (start positions x taxi speeds)', () => {
+  const starts = [
+    [0, 9], [2, 5], [0, -30], [0, -60], [1.6, -50], [2, -90], [0, -111],   // beside / past the toe
+    [0, 10.2], [0, 12], [6.2, 10.5], [3.5, 14], [8, 12], [0, 20],          // at the toe
+    [0, 40], [0, 80], [-6, 60], [6.2, 40]                                  // behind it
+  ];
+  for (const [px, pz] of starts) {
+    for (const v of [12, 20, 27]) {
+      const beside = pz < SECTION.zEntry && pz > SECTION.zExit;
+      const r = sweepRun(px, pz, v, { startZ: beside ? -5 : 60 });
+      assert.equal(r.bad, null, `start (${px}, ${pz}) at ${v} m/s: ${r.bad}`);
+      assert.equal(r.crossLevel, false, `start (${px}, ${pz}) at ${v}: captured on another level`);
+    }
+  }
+});
+
+test('flyover keep-out: boarding from behind the toe still works', () => {
+  for (const [px, pz] of [[0, 40], [0, 80], [-6, 60], [0, 14], [6.2, 40], [3.5, 14]]) {
+    const r = sweepRun(px, pz, 20);
+    assert.equal(r.bad, null, r.bad);
+    assert.ok(r.boarded, `start (${px}, ${pz}) boarded the section`);
+    assert.ok(r.p.y >= 0 && r.p.y <= deckY + 1e-9);
+  }
+});
+
+test('flyover keep-out: pursuer beside the ramp waits at zExit when the taxi comes down', () => {
+  for (const [px, pz] of [[0, 9], [2, 5], [0, -30], [0, -60], [1.6, -50]]) {
+    for (const v of [12, 20, 27]) {
+      const r = sweepRun(px, pz, v, { startZ: -5, endZ: -113 });
+      assert.equal(r.bad, null, r.bad);
+      assert.equal(r.boarded, false, 'cannot board once past the toe');
+      assert.ok(r.states.has('chasing') && !r.states.has('lost') && !r.states.has('searching'),
+        `start (${px}, ${pz}) at ${v}: never loses the taxi (${[...r.states]})`);
+      assert.ok(r.atZExit, 'taxi reached zExit');
+      const dz = r.atZExit.pz - SECTION.zExit;
+      assert.ok(Math.abs(dz) < 20 && r.atZExit.py === 0,
+        `start (${px}, ${pz}) at ${v}: pursuer ${dz.toFixed(1)} m from zExit when the taxi comes down`);
+      assert.equal(r.e.captured.length, 0);
+    }
+  }
+});
+
+test('flyover keep-out: slow taxi on the deck is never captured by a ground pursuer', () => {
+  for (const [px, pz] of [[0, -30], [1.6, -50], [0, 9]]) {
+    const r = sweepRun(px, pz, 1.5, { startZ: -20, endZ: -60, frames: 60 * 40 });
+    assert.equal(r.bad, null, r.bad);
+    assert.equal(r.e.captured.length, 0, `start (${px}, ${pz}) captured across levels`);
+  }
+});
+
 test('flyover: the pursuer is never a collidable', () => {
   const e = make();
   e.lm.load(2);
