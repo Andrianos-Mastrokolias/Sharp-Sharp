@@ -14,7 +14,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const EDGE = process.env.EDGE_PATH ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const VITE_PORT = 5199;
 const CDP_PORT = 9334;
-const NAMES = ['spawn', 'mid', 'dest', 'side'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const png = (url) => Buffer.from(url.split(',')[1], 'base64');
 const dataUrl = (file) => 'data:image/png;base64,' + fs.readFileSync(file).toString('base64');
@@ -55,6 +54,14 @@ const run = async (expression) => {
   return r.result.value;
 };
 
+const consoleErrors = [];
+ws.addEventListener('message', (m) => {
+  const d = JSON.parse(m.data);
+  if (d.method === 'Runtime.exceptionThrown') consoleErrors.push(JSON.stringify(d.params.exceptionDetails).slice(0, 400));
+  if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') consoleErrors.push(d.params.args.map((a) => a.value ?? a.description).join(' ').slice(0, 600));
+});
+
+await send('Runtime.enable');
 await send('Page.enable');
 await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
 await send('Page.navigate', { url: `http://localhost:${VITE_PORT}/tests/tools/gl-harness.html` });
@@ -66,7 +73,8 @@ if (mode === 'capture') {
   const stats = {};
   for (const level of [1, 2, 3]) {
     const loaded = await run(`window.loadLevel(${level})`);
-    for (let c = 0; c < 4; c++) {
+    const NAMES = await run(`window.cameraNames(${level})`);
+    for (let c = 0; c < NAMES.length; c++) {
       const s = await run(`window.shot(${level}, ${c})`);
       fs.writeFileSync(path.join(outDir, `${level}-${NAMES[c]}.png`), png(s.png));
       stats[`${level}-${NAMES[c]}`] = { calls: s.calls, triangles: s.triangles, collidables: loaded.collidables };
@@ -74,13 +82,15 @@ if (mode === 'capture') {
   }
   fs.writeFileSync(path.join(outDir, 'stats.json'), JSON.stringify(stats, null, 1));
   console.log(JSON.stringify(stats));
+  if (consoleErrors.length) console.error(['PAGE ERRORS:', ...consoleErrors].join(String.fromCharCode(10)));
 } else {
   const [a, b, outDir] = args;
   fs.mkdirSync(outDir, { recursive: true });
   const result = {};
   for (const level of [1, 2, 3]) {
-    for (const name of NAMES) {
-      const key = `${level}-${name}`;
+    for (const file of fs.readdirSync(a).filter((f) => f.startsWith(level + '-') && f.endsWith('.png'))) {
+      const key = file.replace('.png', '');
+      if (!fs.existsSync(path.join(b, file))) continue;
       const r = await run(`window.diff(${JSON.stringify(dataUrl(path.join(a, key + '.png')))}, ${JSON.stringify(dataUrl(path.join(b, key + '.png')))})`);
       fs.writeFileSync(path.join(outDir, key + '-diff.png'), png(r.png));
       delete r.png;

@@ -13,6 +13,8 @@ import {
 // here: this file stays the one list of swap points for the 3D
 // model team.
 export * from './props/utilities.js';
+export * from './props/people.js';
+export * from './props/signage.js';
 
 
 // ==================================================

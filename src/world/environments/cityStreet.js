@@ -10,8 +10,13 @@ import {
 } from './helpers.js';
 
 import {
-  createStreetLamps
+  createStreetLamps,
+  createZebraCrossing
 } from './props.js';
+
+import {
+  createLife
+} from './life.js';
 
 
 // ==================================================
@@ -34,6 +39,13 @@ import {
 // so the in-view triangle count stays within ~1% of the
 // unmerged street (measured: tests/tools/gl-measure.mjs).
 // The 26 collidable buildings stay single Meshes.
+//
+// Street life (Stage 1): four side streets are cut into the
+// gaps between building slots (the sidewalk slabs stop at the
+// building edges there, a dark strip runs out from the kerb,
+// and a zebra crosses its mouth). life.js puts people on the
+// sidewalks at |x| >= 11 and on those zebras; nobody is ever
+// on the carriageway and nothing of it is collidable.
 // ==================================================
 
 // Merge chunk length along the street (metres): one building
@@ -426,6 +438,59 @@ for (
 }
 
 
+// ==================================================
+// SIDE STREETS
+// --------------------------------------------------
+// The street runs out between building slot k and k + 1
+// on one side, through the gap the two buildings leave.
+// ==================================================
+
+const SLOT_Z0 =
+  -180;
+
+const SLOT_SPACING =
+  30;
+
+// The building's depth (along z), as in the loop below
+const slotDepth =
+  (k, side) =>
+    18 +
+    (
+      (2 * k + (side === 1 ? 1 : 0)) %
+      4
+    ) *
+    1.8;
+
+const sideStreets =
+  [
+    { k: 1, side: 1 },
+    { k: 3, side: -1 },
+    { k: 6, side: 1 },
+    { k: 9, side: -1 }
+  ].map(
+    ({ k, side }) => ({
+      k,
+      side,
+      z0:
+        SLOT_Z0 + k * SLOT_SPACING +
+        slotDepth(k, side) / 2,
+      z1:
+        SLOT_Z0 + (k + 1) * SLOT_SPACING -
+        slotDepth(k + 1, side) / 2
+    })
+  );
+
+const SIDEWALK_TOP =
+  0.2;
+
+// Where people may be (see life.js)
+const lifeLayout =
+  {
+    sidewalks: [],
+    crossings: []
+  };
+
+
 let buildingIndex =
   0;
 
@@ -445,6 +510,52 @@ for (
     // SIDEWALK
     // ----------------------------------------------
 
+    // Full slab z - 14 .. z + 14, except where a side street
+    // leaves the main road: then it stops at the building edge.
+    let walkFrom =
+      z - 14;
+
+    let walkTo =
+      z + 14;
+
+    const slot =
+      Math.round(
+        (z - SLOT_Z0) /
+        SLOT_SPACING
+      );
+
+
+    for (
+      const street
+      of sideStreets
+    ) {
+
+      if (
+        street.side !== side
+      ) {
+
+        continue;
+      }
+
+
+      if (
+        street.k === slot
+      ) {
+
+        walkTo =
+          street.z0;
+      }
+
+      if (
+        street.k + 1 === slot
+      ) {
+
+        walkFrom =
+          street.z1;
+      }
+    }
+
+
     const sidewalk =
       createTexturedBox(
 
@@ -452,7 +563,7 @@ for (
 
         0.3,
 
-        28,
+        walkTo - walkFrom,
 
         sidewalkMaterial
       );
@@ -465,8 +576,16 @@ for (
 
       0.05,
 
-      z
+      (walkFrom + walkTo) / 2
     );
+
+
+    lifeLayout.sidewalks.push({
+      side,
+      z0: walkFrom + 0.8,
+      z1: walkTo - 0.8,
+      y: SIDEWALK_TOP
+    });
 
 
     batch.add(
@@ -1011,6 +1130,112 @@ for (
     buildingIndex++;
   }
 }
+
+
+// ==================================================
+// SIDE STREET SURFACES, ZEBRAS AND PEOPLE
+// ==================================================
+
+// The main road's average colour (linear), without its grain
+const sideStreetMaterial =
+  new THREE.MeshStandardMaterial({
+
+    color:
+      new THREE.Color().setRGB(
+        0.055,
+        0.0447,
+        0.0361
+      ),
+
+    roughness:
+      1
+  });
+
+
+for (
+  const street
+  of sideStreets
+) {
+
+  const reach =
+    60 - 8.91;
+
+  const surface =
+    new THREE.Mesh(
+
+      new THREE.BoxGeometry(
+        reach,
+        0.05,
+        street.z1 - street.z0
+      ),
+
+      sideStreetMaterial
+    );
+
+
+  surface.position.set(
+    street.side *
+    (8.91 + reach / 2),
+    -0.05,
+    (street.z0 + street.z1) / 2
+  );
+
+
+  surface.receiveShadow =
+    true;
+
+
+  group.add(
+    surface
+  );
+
+
+  group.add(
+    createZebraCrossing({
+
+      x:
+        street.side *
+        12.2,
+
+      z0:
+        street.z0 + 0.2,
+
+      z1:
+        street.z1 - 0.2,
+
+      y:
+        -0.025,
+
+      length:
+        2.8,
+
+      material:
+        lineMaterial
+    })
+  );
+
+
+  lifeLayout.crossings.push({
+    side:
+      street.side,
+
+    z0:
+      street.z0 + 0.8,
+
+    z1:
+      street.z1 - 0.8,
+
+    y:
+      -0.02
+  });
+}
+
+
+createLife({
+  level: 1,
+  layout: lifeLayout,
+  group
+});
 
 
 // ==================================================
