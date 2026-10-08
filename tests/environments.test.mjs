@@ -203,6 +203,41 @@ function checkMotorway(step, lm, scene, collidables) {
   return sign.material.map;
 }
 
+// ---- City street checks (level 1: street life) ----------------------------
+// (tests/people.test.mjs covers where people may stand; this is the lifecycle:
+// they must not leak, duplicate or become collidable across level switches)
+function checkCity(step, lm, collidables) {
+  const env = lm.environment;
+  const named = (name) => {
+    const found = [];
+    env.group.traverse((o) => { if (o.name === name) found.push(o); });
+    return found;
+  };
+
+  const people = named('life-people');
+  assert.ok(people.length > 0, `step ${step}: level 1 people`);
+
+  let instances = 0;
+  for (const mesh of people) {
+    assert.ok(mesh.isInstancedMesh && !Array.isArray(mesh.material), `step ${step}: people are single-material InstancedMeshes`);
+    assert.ok(!collidables.includes(mesh), `step ${step}: people must not be collidable`);
+    assert.equal(mesh.material.customProgramCacheKey(), 'person-walk-v1', 'people shader key');
+    instances += mesh.count;
+  }
+  assert.ok(instances >= 150 && instances <= 220, `step ${step}: ${instances} people`);
+
+  // Four side streets: a surface and a zebra each, nothing collidable
+  const zebras = [];
+  env.group.traverse((o) => {
+    if (o.isInstancedMesh && o.geometry.type === 'BoxGeometry' && o.geometry.parameters.height === 0.025 && o.geometry.parameters.width === 2.8) zebras.push(o);
+  });
+  assert.equal(zebras.length, 4, `step ${step}: zebra crossings`);
+  assert.equal(env.collidables.length, 26, `step ${step}: level 1 collidables unchanged`);
+  assert.ok(collidables.length === 26, `step ${step}: shared collidable array`);
+
+  return people.length;
+}
+
 // ---- Township checks (level 3) ------------------------------------------
 const CORRIDOR = 7.5;                       // route runs between x = +-5, taxi 2.7 m wide
 
@@ -575,6 +610,10 @@ for (const [step, level] of SEQUENCE.entries()) {
   }
 
   checkMarkers(step, level, lm);
+
+  if (level === 1) {
+    checkCity(step, lm, collidables);
+  }
 
   if (level === 3) {
     checkTownshipGlowAndRoofs(step, lm);
