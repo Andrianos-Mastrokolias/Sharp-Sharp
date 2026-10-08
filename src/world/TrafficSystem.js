@@ -43,17 +43,22 @@ export { TRAFFIC_VARIANTS };
 // destinationClearance of the destination, and no two cars of a lane
 // are closer than MIN_CAR_GAP bumper to bumper.
 //
-// Ghosts: a car must never block the delivery or stack cargo stress.
-//   - Zone ghost: inside GHOST_ZONE_RADIUS of the destination centre
-//     a car is non-solid.
-//   - Contact ghost: the first frame a car's box overlaps the
-//     taxi's collision box it turns non-solid for TRAFFIC_GHOST_TIME
-//     and stays so while it overlaps.
-// A non-solid car is removed from the shared collidables and drawn
-// with a preallocated semi-transparent material (swapped by
-// reference). It turns solid again, and is registered again, only
-// when the ghost time is over, it is outside the zone and it no
-// longer overlaps the taxi.
+// Zone ghost: a car must never block the delivery. Inside
+// GHOST_ZONE_RADIUS of the destination centre a car is non-solid:
+// removed from the shared collidables and drawn with a preallocated
+// semi-transparent material (swapped by reference). It is solid
+// again, and registered again, once it is outside the zone.
+//
+// Hit stop: a car the taxi hits is a normal solid wall (the vehicle
+// puts the taxi back, bounces it and applies one stress). To keep
+// the cars from piling stress on, every lane has one speed scale
+// shared by all its cars. When any solid car of a lane is "in
+// contact" (its box, now or at its next position, grown by
+// CONTACT_MARGIN, overlaps the taxi's world box) the scale drops to
+// 0 that same frame, stays there for HOLD_TIME after the last
+// contact, then rises back to 1 over RESUME_TIME. Sharing the scale
+// keeps the spacing, so MIN_CAR_GAP holds through stops and
+// restarts. A zone ghost never counts as contact.
 // ==================================================
 
 // Bumper-to-bumper gap no two cars of a lane ever get below (m)
@@ -70,8 +75,15 @@ export const FOOTPRINT_MARGIN = 1;
 // are non-solid
 export const GHOST_ZONE_RADIUS = 18;
 
-// How long a car that touched the taxi stays non-solid (s)
-export const TRAFFIC_GHOST_TIME = 1.5;
+// A solid car this close (m, per side) to the taxi's box, now or at
+// its next position, is "in contact" and holds its lane
+export const CONTACT_MARGIN = 0.6;
+
+// A lane stays stopped this long after the last contact (s)...
+export const HOLD_TIME = 1.0;
+
+// ...then its speed scale rises from 0 to 1 over this long (s)
+export const RESUME_TIME = 0.5;
 
 // Opacity of the ghost materials
 const GHOST_OPACITY = 0.35;
@@ -116,19 +128,17 @@ export class TrafficSystem {
     this.config = null;
     this.destination = null;
 
-    // { x, dir, speed, zLo, zHi, centreLo, centreHi, trackLength }
+    // { x, dir, speed, zLo, zHi, centreLo, centreHi, trackLength,
+    //   sinceContact, scale }  (scale: 0..1, shared by the lane's cars)
     this.lanes = [];
 
     // { mesh, laneIndex, variant, length, width, height, u0, u,
-    //   solid, ghostTime, materials, ghostMaterials }
+    //   solid, materials, ghostMaterials }
     this.cars = [];
 
     this.geometries = new Set();
     this.materials = new Map();
     this.ghostMaterials = new Map();
-
-    // Contact ghosts since the last reset (a stat for tests)
-    this.contactGhostCount = 0;
 
     // Scratch boxes, never reallocated
     this.taxiBox = new THREE.Box3();
@@ -247,7 +257,9 @@ export class TrafficSystem {
         zHi: range.hi,
         centreLo,
         centreHi,
-        trackLength
+        trackLength,
+        sinceContact: HOLD_TIME + RESUME_TIME,
+        scale: 1
       };
 
       this.lanes.push(lane);
@@ -278,7 +290,6 @@ export class TrafficSystem {
           u0: offsets[i],
           u: 0,
           solid: true,
-          ghostTime: 0,
           materials: entry.material,
           ghostMaterials: entry.ghostMaterial
         });
@@ -428,14 +439,16 @@ export class TrafficSystem {
   }
 
 
-  // Back to the initial, seeded layout, every car solid
+  // Back to the initial, seeded layout, every car solid, no hold
   reset() {
 
-    this.contactGhostCount = 0;
+    for (const lane of this.lanes) {
+      lane.sinceContact = HOLD_TIME + RESUME_TIME;
+      lane.scale = 1;
+    }
 
     for (const car of this.cars) {
       car.u = car.u0;
-      car.ghostTime = 0;
       this.place(car);
       this.setSolid(car, true);
     }
@@ -471,13 +484,25 @@ export class TrafficSystem {
   }
 
 
-  // Does the car (at its current position) overlap the taxi box?
-  overlapsTaxi(car) {
+  // Is the car in contact with the taxi: its box swept from the
+  // current position to the next one (current + speed * dt), grown
+  // by CONTACT_MARGIN, overlaps the taxi's world box? Cars only move
+  // along z, so the sweep is one box.
+  inContact(car, lane, dt) {
 
     const { x, z } = car.mesh.position;
+    const z1 = z + lane.dir * lane.speed * dt;
 
-    this.carBox.min.set(x - car.width / 2, 0, z - car.length / 2);
-    this.carBox.max.set(x + car.width / 2, car.height, z + car.length / 2);
+    this.carBox.min.set(
+      x - car.width / 2 - CONTACT_MARGIN,
+      0,
+      Math.min(z, z1) - car.length / 2 - CONTACT_MARGIN
+    );
+    this.carBox.max.set(
+      x + car.width / 2 + CONTACT_MARGIN,
+      car.height,
+      Math.max(z, z1) + car.length / 2 + CONTACT_MARGIN
+    );
 
     return this.carBox.intersectsBox(this.taxiBox);
   }
@@ -494,18 +519,43 @@ export class TrafficSystem {
         .applyMatrix4(this.taxi.matrixWorld);
     }
 
-    // Where the vehicle just tested the cars (it runs before us):
-    // a car it hit goes non-solid now, not a frame later, so the
-    // vehicle cannot hit it a second time
-    if (checkTaxi) {
-      for (let i = 0; i < this.cars.length; i++) {
+    // Hold / resume per lane, before anything moves: a lane with a
+    // car in contact stops this very frame
+    for (let l = 0; l < this.lanes.length; l++) {
 
-        const car = this.cars[i];
+      const lane = this.lanes[l];
+      let contact = false;
 
-        if (car.solid && this.overlapsTaxi(car)) {
-          this.startContactGhost(car);
+      if (checkTaxi) {
+        for (let i = 0; i < this.cars.length && !contact; i++) {
+
+          const car = this.cars[i];
+
+          contact = (
+            car.laneIndex === l &&
+            !this.inGhostZone(car) &&
+            this.inContact(car, lane, dt)
+          );
         }
       }
+
+      if (contact) {
+        lane.sinceContact = 0;
+        lane.scale = 0;
+        continue;
+      }
+
+      lane.sinceContact = Math.min(
+        lane.sinceContact + dt,
+        HOLD_TIME + RESUME_TIME
+      );
+
+      const t = Math.min(
+        Math.max((lane.sinceContact - HOLD_TIME) / RESUME_TIME, 0),
+        1
+      );
+
+      lane.scale = t * t * (3 - 2 * t);
     }
 
     for (let i = 0; i < this.cars.length; i++) {
@@ -513,7 +563,7 @@ export class TrafficSystem {
       const car = this.cars[i];
       const lane = this.lanes[car.laneIndex];
 
-      car.u += lane.speed * dt;
+      car.u += lane.speed * lane.scale * dt;
 
       if (car.u >= lane.trackLength) {
         car.u -= lane.trackLength;
@@ -524,32 +574,8 @@ export class TrafficSystem {
           ? lane.centreHi - car.u
           : lane.centreLo + car.u;
 
-      if (car.ghostTime > 0) {
-        car.ghostTime = Math.max(0, car.ghostTime - dt);
-      }
-
-      // Contact at the new position
-      const overlap = checkTaxi && this.overlapsTaxi(car);
-
-      if (overlap && car.solid) {
-        this.startContactGhost(car);
-      }
-
-      const inZone = this.inGhostZone(car);
-
-      this.setSolid(
-        car,
-        car.ghostTime <= 0 && !inZone && !overlap
-      );
+      this.setSolid(car, !this.inGhostZone(car));
     }
-  }
-
-
-  startContactGhost(car) {
-
-    car.ghostTime = TRAFFIC_GHOST_TIME;
-    this.contactGhostCount++;
-    this.setSolid(car, false);
   }
 
 
@@ -594,6 +620,5 @@ export class TrafficSystem {
     this.ghostMaterials.clear();
     this.config = null;
     this.destination = null;
-    this.contactGhostCount = 0;
   }
 }
