@@ -15,6 +15,9 @@ import * as THREE from 'three';
 //   lost       - stops briefly, confused
 //   searching  - drives to the last place the taxi was seen and
 //                waits there; re-detecting the taxi -> chasing
+//   catching   - capture timer done: lunges the last fraction of a
+//                metre onto the taxi's bumper, then fires
+//                onCaptured once (see CONTACT_DISTANCE)
 //
 // Capture is distance based (pursuer within captureDistance
 // of the taxi for captureTime in a row). The pursuer is never
@@ -40,7 +43,7 @@ const LIGHT_BAR_ON = 2.5;       // lens emissiveIntensity when lit
 
 // Following distances (centre to centre) behind the taxi.
 //   CRUISE_GAP   - held at ANY taxi speed while the taxi is going
-//                  well: just outside the 7 m capture range, and
+//                  well: just outside the 6.4 m capture range, and
 //                  visible between the chase camera (10.5 m back)
 //                  and the taxi.
 //   STANDOFF     - held while the taxi is "slowed" (below
@@ -49,11 +52,19 @@ const LIGHT_BAR_ON = 2.5;       // lens emissiveIntensity when lit
 //                  captureDistance, or it could never count as
 //                  "in capture range".
 // MIN_SEPARATION is the hard floor: the pursuer is pushed back out
-// to it if the taxi brakes hard.
+// to it if the taxi brakes hard. The models touch at ~5.35 m centre
+// to centre, so the floor and CONTACT_DISTANCE stay above that.
 export const CRUISE_GAP = 8.5;
-export const STANDOFF_DISTANCE = 6.0;
-export const MIN_SEPARATION = 5.5;
+export const STANDOFF_DISTANCE = 5.7;
+export const MIN_SEPARATION = 5.45;
 const STANDOFF_MARGIN = 0.25;   // standoff <= captureDistance - this
+
+// Catch lunge: when the capture timer completes the pursuer closes
+// to CONTACT_DISTANCE (the bumper hit) before onCaptured fires, but
+// for no longer than CATCH_LUNGE_MAX_TIME.
+export const CONTACT_DISTANCE = 5.5;
+export const CATCH_LUNGE_MAX_TIME = 0.35;   // s
+const CONTACT_TOLERANCE = 0.03;             // m: "arrived"
 
 // Chase behaviour (all overridable per level in LEVELS[n].pursuit)
 export const SLOW_SPEED_THRESHOLD = 12;  // m/s; taxi below this is "slowed"
@@ -135,6 +146,9 @@ const DEFAULT_CONFIG = {
 
   cruiseGap: CRUISE_GAP,
   standoffDistance: STANDOFF_DISTANCE,
+  minSeparation: MIN_SEPARATION,
+  contactDistance: CONTACT_DISTANCE,
+  catchLungeMaxTime: CATCH_LUNGE_MAX_TIME,
   slowSpeedThreshold: SLOW_SPEED_THRESHOLD,
   stumbleSpeedDrop: STUMBLE_SPEED_DROP,
   stumbleWindow: STUMBLE_WINDOW,
@@ -613,6 +627,7 @@ export class PursuitSystem {
     this.stateTime = 0;
     this.loseTimer = 0;
     this.captureTimer = 0;
+    this.lungeTimer = 0;
     this.sinceStart = 0;
     this.flashTime = 0;
     this.spawned = false;
@@ -680,6 +695,7 @@ export class PursuitSystem {
     this.stateTime = 0;
     this.loseTimer = 0;
     this.captureTimer = 0;
+    this.lungeTimer = 0;
     this.sinceStart = 0;
     this.flashTime = 0;
     this.speed = 0;
@@ -922,6 +938,10 @@ export class PursuitSystem {
         this.updateChasing(dt, tx, tz, visible, reachable, loseRange, topSpeed);
         break;
 
+      case 'catching':
+        this.updateCatching(dt, tx, tz, topSpeed);
+        break;
+
       case 'lost':
         this.drive(dt, this.x, this.z, 0);
 
@@ -1081,13 +1101,65 @@ export class PursuitSystem {
       this.captureTimer += dt;
 
       if (this.captureTimer >= this.config.captureTime) {
-        this.captured = true;
-        this.speed = 0;
-        this.onCaptured?.();
+        this.lungeTimer = 0;
+        this.setState('catching');
       }
     } else {
       this.captureTimer = 0;
     }
+  }
+
+
+  // The last closing move. Runs at full chase speed at the taxi,
+  // matching its speed, braking hard only for the last metres so it
+  // stops at contactDistance (never below the separation floor).
+  // Ends on arrival or after catchLungeMaxTime, then captures once.
+  updateCatching(dt, tx, tz, topSpeed) {
+
+    this.lungeTimer += dt;
+
+    this.lastKnownX = tx;
+    this.lastKnownZ = tz;
+
+    const { preContactBraking } = this.config;
+    const taxiSpeed = Math.max(this.vehicle.getSpeed(), 0);
+
+    // Same frame-order allowance as followSpeed: the taxi has moved
+    const error =
+      this.distance - taxiSpeed * dt - this.contactDistance();
+
+    let target = taxiSpeed;
+
+    if (error > 0) {
+      this.brakeLimit = preContactBraking;
+
+      target = Math.min(topSpeed,
+        taxiSpeed + Math.sqrt(2 * preContactBraking * error));
+    }
+
+    this.drive(dt, tx, tz, topSpeed, target);
+
+    this.distance = Math.hypot(tx - this.x, tz - this.z);
+
+    if (
+      this.distance <= this.contactDistance() + CONTACT_TOLERANCE ||
+      this.lungeTimer >= this.config.catchLungeMaxTime
+    ) {
+      this.captured = true;
+      this.speed = 0;
+      this.onCaptured?.();
+    }
+  }
+
+
+  // Where the lunge stops: never inside the separation floor
+  contactDistance() {
+    return Math.max(this.config.contactDistance, this.minSeparation());
+  }
+
+
+  minSeparation() {
+    return Math.min(this.config.minSeparation, this.standoff());
   }
 
 
@@ -1249,7 +1321,7 @@ export class PursuitSystem {
       return;
     }
 
-    const min = Math.min(MIN_SEPARATION, this.standoff());
+    const min = this.minSeparation();
 
     const dx = this.x - this.taxi.position.x;
     const dz = this.z - this.taxi.position.z;
@@ -1337,6 +1409,11 @@ export class PursuitSystem {
 
 
   updatePressure() {
+
+    if (this.state === 'catching') {
+      this.pressure = 1;
+      return;
+    }
 
     if (this.state !== 'chasing') {
       this.pressure = 0;

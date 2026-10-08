@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { LevelManager, LEVELS } from '../src/world/LevelManager.js';
 import {
   createPursuerMesh, STANDOFF_DISTANCE, MIN_SEPARATION, CRUISE_GAP,
+  CONTACT_DISTANCE, CATCH_LUNGE_MAX_TIME,
   SLOW_SPEED_THRESHOLD, STUMBLE_SURGE_TIME,
   PRESSURE_SPEED_FRACTION, PRESSURE_RISE_RATE, PRESSURE_FALL_RATE,
   GAP_BREATH_AMPLITUDE, GAP_BREATH_RATE, PRE_CONTACT_BRAKE_DISTANCE,
@@ -11,6 +12,7 @@ import {
 } from '../src/world/PursuitSystem.js';
 
 const MAX_SPEED = 28;
+const TOUCHING_DISTANCE = 5.35;   // model centres this far apart = bumpers touch
 const DT = 1 / 60;
 
 function make() {
@@ -598,7 +600,7 @@ test('chase: capture fires once, only after captureTime, in capture range', () =
   e.taxi.position.z = 0; e.lm.pursuit.z = STANDOFF_DISTANCE;
   run(e, 1.4, -3);
   assert.equal(e.captured.length, 0, 'not before captureTime');
-  run(e, 0.3, -3);
+  run(e, 0.3 + CATCH_LUNGE_MAX_TIME + 0.1, -3);   // timer, then the lunge
   assert.equal(e.captured.length, 1);
   run(e, 3, -3);
   assert.equal(e.captured.length, 1, 'still once');
@@ -619,6 +621,135 @@ test('chase: separation never drops below MIN_SEPARATION through brake, stumble 
   }
   run(e, 2, -28, watch);
   assert.ok(minGap >= MIN_SEPARATION - 1e-9, `min gap ${minGap}`);
+});
+
+// ---- Catch lunge and the new gap numbers ---------------------------
+
+test('numbers: floor and contact stay above the touching distance, capture range above standoff', () => {
+  assert.equal(STANDOFF_DISTANCE, 5.7);
+  assert.equal(MIN_SEPARATION, 5.45);
+  assert.equal(CONTACT_DISTANCE, 5.5);
+  assert.equal(CATCH_LUNGE_MAX_TIME, 0.35);
+  assert.ok(MIN_SEPARATION > TOUCHING_DISTANCE);
+  assert.ok(CONTACT_DISTANCE > TOUCHING_DISTANCE);
+  assert.ok(CONTACT_DISTANCE >= MIN_SEPARATION);
+  for (const n of [1, 2, 3]) {
+    const c = LEVELS[n].pursuit.captureDistance;
+    assert.equal(c, 6.4, `level ${n}`);
+    // the standoff clamp (standoff <= captureDistance - margin) does not bite
+    assert.ok(STANDOFF_DISTANCE <= c - 0.25, `level ${n} standoff clamp`);
+    // breathing never takes the cruise gap into capture range
+    assert.ok(CRUISE_GAP - GAP_BREATH_AMPLITUDE > c, `level ${n} cruise gap`);
+  }
+});
+
+test('lunge: per-level override of the new numbers is honoured', () => {
+  const e = make();
+  e.lm.load(1);
+  const saved = LEVELS[1].pursuit.contactDistance;
+  LEVELS[1].pursuit.contactDistance = 5.9;
+  LEVELS[1].pursuit.minSeparation = 5.6;
+  try {
+    e.lm.load(1);
+    const p = e.lm.pursuit;
+    assert.equal(p.contactDistance(), 5.9);
+    assert.equal(p.minSeparation(), 5.6);
+  } finally {
+    if (saved === undefined) delete LEVELS[1].pursuit.contactDistance;
+    else LEVELS[1].pursuit.contactDistance = saved;
+    delete LEVELS[1].pursuit.minSeparation;
+  }
+});
+
+// A slowed taxi creeping at `v`, pursuer already inside capture range.
+// Records the gap and pursuer state every frame.
+function lunge(v, startGap = STANDOFF_DISTANCE) {
+  const e = chase(v, startGap);
+  const log = { minGap: Infinity, gapAtCapture: null, states: new Set(), fires: 0 };
+  e.lm.pursuit.onCaptured = (...a) => { log.fires++; log.gapAtCapture = gap(e); };
+  run(e, 4, -v, () => {
+    log.minGap = Math.min(log.minGap, gap(e));
+    log.states.add(e.lm.pursuit.state);
+  });
+  return { e, log };
+}
+
+test('lunge: capture goes through a catching phase and ends at CONTACT_DISTANCE', () => {
+  for (const v of [0, 3, 8]) {
+    const { e, log } = lunge(v);
+    assert.ok(log.states.has('catching'), `v ${v}: lunged`);
+    assert.equal(e.captured.length, 1, `v ${v}: onCaptured once`);
+    assert.equal(e.lm.pursuit.captured, true);
+    assert.ok(Math.abs(log.gapAtCapture - CONTACT_DISTANCE) <= 0.1,
+      `v ${v}: gap at capture ${log.gapAtCapture}`);
+    assert.ok(Math.abs(gap(e) - CONTACT_DISTANCE) <= 0.1 ||
+      e.lm.pursuit.speed === 0, `v ${v}: settled`);
+    assert.ok(log.minGap >= TOUCHING_DISTANCE, `v ${v}: min gap ${log.minGap}`);
+    assert.ok(log.minGap >= MIN_SEPARATION - 1e-9, `v ${v}: floor ${log.minGap}`);
+  }
+});
+
+test('lunge: does not capture before the timer; lunge is capped at CATCH_LUNGE_MAX_TIME', () => {
+  const e = chase(3, STANDOFF_DISTANCE);
+  const p = e.lm.pursuit;
+  let enteredAt = null, firedAt = null, t = 0;
+  e.lm.pursuit.onCaptured = () => { firedAt = t; };
+  run(e, 4, -3, () => {
+    t += DT;
+    if (enteredAt === null && p.state === 'catching') enteredAt = t;
+  });
+  assert.ok(enteredAt !== null && firedAt !== null);
+  assert.ok(enteredAt >= p.config.captureTime - 2 * DT, `not before captureTime (${enteredAt})`);
+  assert.ok(firedAt - enteredAt <= CATCH_LUNGE_MAX_TIME + 2 * DT, `lunge took ${firedAt - enteredAt} s`);
+});
+
+test('lunge: from the edge of capture range it closes in and matches the taxi speed', () => {
+  // Capture timer completes at the far edge of the range (6.4 m)
+  const e = chase(10, 6.35);
+  const p = e.lm.pursuit;
+  p.config.captureTime = 0.3;
+  let minGap = Infinity, speedAtCatch = null, fires = 0, gapAtCapture = null;
+  p.onCaptured = () => { fires++; gapAtCapture = gap(e); speedAtCatch = p.speed; };
+  run(e, 3, -10, () => { minGap = Math.min(minGap, gap(e)); });
+  assert.equal(fires, 1);
+  assert.ok(Math.abs(gapAtCapture - CONTACT_DISTANCE) <= 0.1, `gap ${gapAtCapture}`);
+  assert.ok(minGap >= TOUCHING_DISTANCE, `never overlaps (${minGap})`);
+});
+
+test('lunge: onCaptured fires once and the pursuer then stays put', () => {
+  const { e } = lunge(3);
+  assert.equal(e.captured.length, 1);
+  const { x, z } = e.lm.pursuit;
+  run(e, 3, -3);
+  assert.equal(e.captured.length, 1);
+  assert.equal(e.lm.pursuit.x, x);
+  assert.equal(e.lm.pursuit.z, z);
+  assert.equal(e.lm.pursuit.speed, 0);
+});
+
+test('lunge: restart or level switch mid-lunge cancels it', () => {
+  for (const action of ['reset', 'load']) {
+    const e = chase(3, STANDOFF_DISTANCE);
+    const p = e.lm.pursuit;
+    // step until the lunge starts, then act before it can fire
+    let entered = false;
+    for (let t = 0; t < 4 && !entered; t += DT) {
+      e.taxi.position.z -= 3 * DT;
+      e.lm.update(DT, t);
+      entered = p.state === 'catching';
+    }
+    assert.ok(entered, 'reached the catching phase');
+    assert.equal(e.captured.length, 0, 'not fired yet');
+    if (action === 'reset') e.lm.reset(); else e.lm.load(2);
+    const q = e.lm.pursuit;
+    assert.notEqual(q.state, 'catching');
+    assert.equal(q.lungeTimer, 0);
+    assert.equal(q.captured, false);
+    assert.equal(q.captureTimer, 0);
+    run(e, 3, 0);                      // the cancelled lunge must not fire later
+    assert.equal(e.captured.length, 0, `${action}: nothing fires afterwards`);
+    assert.notEqual(e.lm.status, 'captured');
+  }
 });
 
 // ---- Level 2: following onto the flyover ---------------------------

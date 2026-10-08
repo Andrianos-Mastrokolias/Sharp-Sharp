@@ -51,7 +51,7 @@ function trial(brakeAt, crawl = false) {   // brakeAt: metres before the zone ed
     speed = Math.min(Math.max(speed, crawl && braking ? 3.9 : 0), TOP);   // crawl: release S at 3.9 m/s
     taxi.position.z -= speed * DT;
     lm.update(DT, t);
-    if (contactT === null && lm.pursuit.distance <= 7) contactT = t;
+    if (contactT === null && lm.pursuit.distance <= LEVELS[1].pursuit.captureDistance) contactT = t;
   }
   const margin = out.delivered
     ? (contactT === null ? Infinity : 1.5 - (out.delivered - contactT)) : null;
