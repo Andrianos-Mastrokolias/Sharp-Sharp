@@ -814,7 +814,8 @@ test('flyover: pursuer follows up the ramp onto the deck and never loses the tax
   assert.deepEqual([...states], ['chasing']);
   assert.ok(maxY >= deckY - 1e-9, `reached the deck (max y ${maxY})`);
   assert.ok(Math.abs(p.y - deckY) < 1e-9 && p.section, 'on the deck');
-  assert.equal(p.mesh.position.y, p.y);
+  // mesh height follows the axles, so it can sit a few cm off the centre height
+  assert.ok(Math.abs(p.mesh.position.y - p.y) < 0.01, `mesh y ${p.mesh.position.y}`);
   assert.ok(gap(e) < CRUISE_GAP + GAP_BREATH_AMPLITUDE + 3, `close behind (${gap(e)})`);
   assert.equal(e.captured.length, 0);
 });
@@ -826,7 +827,7 @@ test('flyover: pursuer y matches the elevation profile, pitched on the ramps onl
   driveFlyover(e, 27, -125, () => {
     if (p.section) {
       onSectionFrames++;
-      worst = Math.max(worst, Math.abs(p.mesh.position.y - e.lm.getElevationAt(p.x, p.z)));
+      worst = Math.max(worst, Math.abs(p.mesh.position.y - e.lm.getElevationAt(p.x, p.z)));   // axle-based: off the centre height by the pitch lever only
       if (p.z > SECTION.zEntry - SECTION.rampLength) upPitch = Math.max(upPitch, p.mesh.rotation.x);
       else if (p.z < SECTION.zExit + SECTION.rampLength) downPitch = Math.min(downPitch, p.mesh.rotation.x);
       // (the pitch is smoothed: allow ~20 m after each ramp to settle)
@@ -835,11 +836,12 @@ test('flyover: pursuer y matches the elevation profile, pitched on the ramps onl
         deckPitch = Math.max(deckPitch, Math.abs(p.mesh.rotation.x));
       }
     } else {
-      assert.equal(p.mesh.position.y, 0, 'on the ground off the section');
+      // ground pursuer: only its nose at the toe / tail at the exit ramp lift it
+      assert.ok(p.mesh.position.y >= 0 && p.mesh.position.y < 0.15, `off the section y ${p.mesh.position.y}`);
     }
   });
   assert.ok(onSectionFrames > 100);
-  assert.ok(worst < 1e-9, `y off the profile by ${worst}`);
+  assert.ok(worst < 0.15, `y off the profile by ${worst}`);
   const ramp = Math.atan2(deckY, SECTION.rampLength);
   assert.ok(upPitch > ramp * 0.6 && upPitch < ramp + 0.01, `nose up on the ramp (${upPitch})`);
   assert.ok(downPitch < -ramp * 0.6 && downPitch > -ramp - 0.01, `nose down on the exit ramp (${downPitch})`);
@@ -1139,6 +1141,64 @@ test('level without pursuit config: no pursuer, state none', () => {
   assert.equal(e.lm.getState().pursuit.state, 'none');
   step(e.lm, 1);
   LEVELS[3].pursuit = saved;
+});
+
+// Real flyover ramp/deck/rail meshes, raycast straight down from the
+// pursuer's four tyre contact points (taken from its real mesh)
+test('L2: pursuer wheels stay on the flyover surface along the whole structure', () => {
+  const e = make();
+  e.lm.load(2);
+  e.scene.updateMatrixWorld(true);
+
+  const p = e.lm.pursuit;
+  const surfaces = e.lm.group.children.filter(o => o.isMesh &&
+    o.geometry.type === 'BoxGeometry' && o.material === e.lm.concreteMaterial);
+  assert.ok(surfaces.length >= 9, 'ramp, deck and rail meshes present');
+
+  const contacts = [];
+  p.mesh.traverse(o => {
+    if (o.isMesh && o.geometry.type === 'CylinderGeometry' &&
+        o.geometry.parameters.radiusTop === 0.38) {
+      contacts.push(new THREE.Vector3(o.position.x, o.position.y - 0.38, o.position.z));
+    }
+  });
+  assert.equal(contacts.length, 4);
+
+  const ray = new THREE.Raycaster();
+  let worstPen = 0, worstFloat = 0, atPen = '', atFloat = '';
+
+  for (const x of [4.8, 6.2, 7.6]) {
+    p.placeAt(x, 30);
+    for (let z = 30; z >= -118; z -= 0.1) {
+      p.x = x; p.z = z; p.heading = 0;
+      p.boarding = p.level.elevated[0];
+      p.clampToRoad();
+      // steady state: the eased pitch has caught up with the surface
+      p.pitch = p.surfacePitch();
+      p.syncMesh();
+      p.mesh.updateMatrixWorld(true);
+
+      for (const c of contacts) {
+        const w = c.clone().applyMatrix4(p.mesh.matrixWorld);
+        // A tyre bridges the ~4 cm crack where each ramp box's slanted
+        // end face meets the deck box, so the surface under a contact
+        // is the highest of a few rays across its patch (+-5 cm in z)
+        let surf = 0;
+        for (const dz of [-0.05, 0, 0.05]) {
+          ray.set(new THREE.Vector3(w.x, 50, w.z + dz), new THREE.Vector3(0, -1, 0));
+          const hit = ray.intersectObjects(surfaces, false)[0];
+          if (hit) surf = Math.max(surf, 50 - hit.distance);
+        }
+        const gap = w.y - surf;
+
+        if (-gap > worstPen) { worstPen = -gap; atPen = `x=${x} z=${z.toFixed(1)}`; }
+        if (gap > worstFloat) { worstFloat = gap; atFloat = `x=${x} z=${z.toFixed(1)}`; }
+      }
+    }
+  }
+
+  assert.ok(worstPen <= 0.02, `wheel ${worstPen.toFixed(3)} m below surface (${atPen})`);
+  assert.ok(worstFloat <= 0.15, `wheel ${worstFloat.toFixed(3)} m above surface (${atFloat})`);
 });
 
 let failed = 0;

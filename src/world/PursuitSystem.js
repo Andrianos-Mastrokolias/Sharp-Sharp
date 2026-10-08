@@ -200,6 +200,16 @@ const DEFAULT_CONFIG = {
 // Returns a THREE.Object3D carrying userData.flash(on) for the roof
 // light bar. Everything it creates (geometries, materials and the
 // lettering texture) is released by disposeObject().
+// Wheel layout, shared by the mesh and the surface pose. u runs from
+// the nose; the mesh origin sits at u = 2.65, so the axles are this
+// far in front of / behind it (along the heading).
+const FRONT_Z = -2.65;
+const FRONT_WHEEL_U = 1.05;
+const REAR_WHEEL_U = 4.15;
+const FRONT_AXLE = -(FRONT_Z + FRONT_WHEEL_U);   // 1.6 m ahead of the origin
+const REAR_AXLE = FRONT_Z + REAR_WHEEL_U;        // 1.5 m behind it
+const WHEELBASE = FRONT_AXLE + REAR_AXLE;
+
 export function createPursuerMesh() {
 
   const root = new THREE.Group();
@@ -249,7 +259,6 @@ export function createPursuerMesh() {
 
   const flat = (mesh) => { mesh.castShadow = false; return mesh; };
 
-  const FRONT_Z = -2.65;
   const zOf = (u) => u + FRONT_Z;
 
   // ---- Body: extruded side profile -----------------------------
@@ -264,8 +273,6 @@ export function createPursuerMesh() {
 
   const WHEEL_RADIUS = 0.38;
   const ARCH_RADIUS = 0.46;
-  const FRONT_WHEEL_U = 1.05;
-  const REAR_WHEEL_U = 4.15;
 
   const archHalfChord = Math.sqrt(
     ARCH_RADIUS ** 2 - (BOTTOM_Y - WHEEL_RADIUS) ** 2);
@@ -912,27 +919,56 @@ export class PursuitSystem {
   }
 
 
-  // Nose-up angle of the surface under the pursuer, from the
-  // elevation function one metre either side along its heading.
-  surfacePitch() {
-
-    if (!this.section) {
-      return 0;
-    }
+  // Surface height under the front and rear axle, along the heading.
+  // (The elevation function is 0 off the sections, so a ground
+  // pursuer whose nose reaches the toe already sees the slope.)
+  axleHeights() {
 
     const fx = -Math.sin(this.heading);
     const fz = -Math.cos(this.heading);
 
-    const rise =
-      this.getElevation(this.x + fx, this.z + fz) -
-      this.getElevation(this.x - fx, this.z - fz);
+    return {
+      front: this.getElevation(
+        this.x + fx * FRONT_AXLE, this.z + fz * FRONT_AXLE),
+      rear: this.getElevation(
+        this.x - fx * REAR_AXLE, this.z - fz * REAR_AXLE)
+    };
+  }
 
-    return Math.atan(rise / 2);
+
+  // Nose-up angle of the surface under the pursuer: the rise between
+  // the axles over the wheelbase.
+  surfacePitch() {
+
+    if (!this.getElevation) {
+      return 0;
+    }
+
+    const { front, rear } = this.axleHeights();
+
+    return Math.atan((front - rear) / WHEELBASE);
+  }
+
+
+  // Mesh height: both axles on or above the surface for the current
+  // (eased) pitch, whichever is higher deciding. The mesh origin sits
+  // between the axles, so a pitch about it moves them by
+  // +-axle * sin(pitch).
+  surfaceHeight() {
+
+    if (!this.getElevation) {
+      return this.y;
+    }
+
+    const { front, rear } = this.axleHeights();
+    const s = Math.sin(this.pitch);
+
+    return Math.max(front - FRONT_AXLE * s, rear + REAR_AXLE * s);
   }
 
 
   syncMesh() {
-    this.mesh.position.set(this.x, this.y, this.z);
+    this.mesh.position.set(this.x, this.surfaceHeight(), this.z);
     this.mesh.rotation.set(this.pitch, this.heading, 0);
   }
 
