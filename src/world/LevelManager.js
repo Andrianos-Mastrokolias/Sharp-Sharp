@@ -4,6 +4,7 @@ import {
   ELEVATION_ENTRY_MAX,
   ELEVATION_ENTRY_TOLERANCE
 } from './PursuitSystem.js';
+import { TrafficSystem } from './TrafficSystem.js';
 import { buildEnvironment } from './environments/index.js';
 
 // ==================================================
@@ -83,6 +84,49 @@ const L3_PURSUIT_CAPTURE_DISTANCE = 6.4;
 const L3_PURSUIT_CAPTURE_TIME = 1.5;
 
 
+// ==================================================
+// TRAFFIC TUNING (hand-tunable)
+// --------------------------------------------------
+// Lanes: x (m across the road), dir along z (-1 = with the taxi,
+// +1 = oncoming), speed (m/s, constant), count, variants (any of
+// hatchback / sedan / bakkie / minibus). At most 10 cars a level.
+// Lanes run across the whole road (zLo..zHi, inside the vehicle's
+// z +-190): cars enter at one end and leave at the other, far from
+// the spawn. The clearances only shape the initial layout. See
+// TrafficSystem.js. Level 3 (stealth) has no traffic.
+//
+// Taxi: 2.7 m wide, spawns at x = 0. Widest car 1.97 m (minibus):
+// a car in an x = +-4.5 lane leaves ~2.2 m between its side and the
+// taxi, and ~3.5 m to the road edge (x +-9).
+// ==================================================
+
+// The stretch of road the lanes run on
+const TRAFFIC_LANE_Z_LO = -185;
+const TRAFFIC_LANE_Z_HI = 185;
+
+// At the start nobody is this close to the spawn bay / the delivery zone
+const TRAFFIC_SPAWN_CLEARANCE = 40;
+const TRAFFIC_DESTINATION_CLEARANCE = 35;
+
+const L1_TRAFFIC_SEED = 1101;
+const L1_TRAFFIC_SAME_X = -4.5;
+const L1_TRAFFIC_SAME_SPEED = 9;
+const L1_TRAFFIC_SAME_COUNT = 4;
+const L1_TRAFFIC_ONCOMING_X = 4.5;
+const L1_TRAFFIC_ONCOMING_SPEED = 12;
+const L1_TRAFFIC_ONCOMING_COUNT = 4;
+
+// Level 2: same direction only. Flyover footprint is x >= 3 (traffic
+// must stay at x < 2), so both lanes sit on the ground side.
+const L2_TRAFFIC_SEED = 2202;
+const L2_TRAFFIC_LANE_A_X = 0;
+const L2_TRAFFIC_LANE_A_SPEED = 13;
+const L2_TRAFFIC_LANE_A_COUNT = 3;
+const L2_TRAFFIC_LANE_B_X = -3.6;
+const L2_TRAFFIC_LANE_B_SPEED = 17;
+const L2_TRAFFIC_LANE_B_COUNT = 4;
+
+
 // Spawn bay / destination ring / beam are unlit (MeshBasicMaterial), so
 // at night they are the brightest things on the road. A level scales
 // their opacity with `markerBrightness` (1 = as authored; missing = 1).
@@ -138,6 +182,30 @@ export const LEVELS = {
       loseTime: L1_PURSUIT_LOSE_TIME,
       captureDistance: L1_PURSUIT_CAPTURE_DISTANCE,
       captureTime: L1_PURSUIT_CAPTURE_TIME
+    },
+
+    traffic: {
+      seed: L1_TRAFFIC_SEED,
+      zLo: TRAFFIC_LANE_Z_LO,
+      zHi: TRAFFIC_LANE_Z_HI,
+      spawnClearance: TRAFFIC_SPAWN_CLEARANCE,
+      destinationClearance: TRAFFIC_DESTINATION_CLEARANCE,
+      lanes: [
+        {
+          x: L1_TRAFFIC_SAME_X,
+          dir: -1,
+          speed: L1_TRAFFIC_SAME_SPEED,
+          count: L1_TRAFFIC_SAME_COUNT,
+          variants: ['hatchback', 'sedan', 'bakkie', 'minibus']
+        },
+        {
+          x: L1_TRAFFIC_ONCOMING_X,
+          dir: 1,
+          speed: L1_TRAFFIC_ONCOMING_SPEED,
+          count: L1_TRAFFIC_ONCOMING_COUNT,
+          variants: ['minibus', 'sedan', 'hatchback', 'bakkie']
+        }
+      ]
     },
 
     markerBrightness: 1,
@@ -241,6 +309,32 @@ export const LEVELS = {
         minX: L2_PURSUIT_LANE_MIN_X,
         maxX: L2_PURSUIT_LANE_MAX_X
       }
+    },
+
+    // Same direction only, on the ground side of the road. Kept clear
+    // of the flyover footprint (checked by TrafficSystem.configure).
+    traffic: {
+      seed: L2_TRAFFIC_SEED,
+      zLo: TRAFFIC_LANE_Z_LO,
+      zHi: TRAFFIC_LANE_Z_HI,
+      spawnClearance: TRAFFIC_SPAWN_CLEARANCE,
+      destinationClearance: TRAFFIC_DESTINATION_CLEARANCE,
+      lanes: [
+        {
+          x: L2_TRAFFIC_LANE_A_X,
+          dir: -1,
+          speed: L2_TRAFFIC_LANE_A_SPEED,
+          count: L2_TRAFFIC_LANE_A_COUNT,
+          variants: ['minibus', 'bakkie', 'sedan']
+        },
+        {
+          x: L2_TRAFFIC_LANE_B_X,
+          dir: -1,
+          speed: L2_TRAFFIC_LANE_B_SPEED,
+          count: L2_TRAFFIC_LANE_B_COUNT,
+          variants: ['hatchback', 'sedan', 'bakkie']
+        }
+      ]
     },
 
     markerBrightness: 1,
@@ -381,6 +475,17 @@ export class LevelManager {
       getElevation: (x, z) => this.getElevationAt(x, z)
     });
 
+    // Collidable cars: they register through registerCollidable(),
+    // so clearMarkers() unregisters them like the flyover pillars
+    this.traffic = new TrafficSystem({
+      parent: this.group,
+      registerCollidable: mesh => this.registerCollidable(mesh),
+      setCollidableActive: (mesh, active) =>
+        this.setCollidableActive(mesh, active),
+      taxi: this.taxi,
+      taxiCollisionBox: this.vehicle.localTaxiCollisionBox ?? null
+    });
+
     this.zoneMaterial =
       new THREE.MeshBasicMaterial({
         color: 0xffcf4a,
@@ -462,6 +567,7 @@ export class LevelManager {
     this.buildElevated();
     this.buildHazards();
     this.pursuit.configure(this.config);
+    this.traffic.configure(this.config);
     this.reset();
 
     return true;
@@ -510,6 +616,7 @@ export class LevelManager {
 
     this.vehicle.reset(this.config.spawn);
     this.pursuit.reset();
+    this.traffic.reset();
 
     this.setZoneDelivered(false);
   }
@@ -537,6 +644,8 @@ export class LevelManager {
         MARKER_OPACITY.zonePulseBase +
         Math.sin(time * 4) * MARKER_OPACITY.zonePulseSwing
       ) * this.getMarkerBrightness();
+
+    this.traffic.update(dt);
 
     if (this.isInDeliveryZone()) {
       this.deliver();
@@ -945,6 +1054,35 @@ export class LevelManager {
   }
 
 
+  // Takes an already registered mesh out of / back into the shared
+  // collidables (a ghost car). It stays in `registered`, so
+  // clearMarkers() still cleans up whichever state it is in.
+  setCollidableActive(mesh, active) {
+
+    if (!this.collidables) {
+      return;
+    }
+
+    const i = this.collidables.indexOf(mesh);
+
+    if (active && i === -1) {
+      this.collidables.push(mesh);
+    }
+    else if (!active && i !== -1) {
+
+      // In place and without splice(), which allocates its result:
+      // this runs on the per-frame path
+      const list = this.collidables;
+
+      for (let k = i; k < list.length - 1; k++) {
+        list[k] = list[k + 1];
+      }
+
+      list.length--;
+    }
+  }
+
+
   // The level's world (ground, road, buildings, lights...). Its
   // collidables go through registerCollidable(), so clearMarkers()
   // unregisters them like the flyover pillars.
@@ -1007,6 +1145,10 @@ export class LevelManager {
 
     // Removes the pursuer mesh and disposes its geometry/materials
     this.pursuit.dispose();
+
+    // Removes the cars (their collidable entries went above) and
+    // disposes their shared geometry and materials
+    this.traffic.dispose();
 
     for (const child of [...this.group.children]) {
       this.group.remove(child);

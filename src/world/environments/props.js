@@ -15,6 +15,7 @@ import {
 export * from './props/utilities.js';
 export * from './props/people.js';
 export * from './props/signage.js';
+export * from './props/vehicles.js';
 
 
 // ==================================================

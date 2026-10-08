@@ -150,10 +150,12 @@ function checkMotorway(step, lm, scene, collidables) {
   };
 
   // Only the two barriers are the environment's collidables; with the
-  // flyover rails (6) and pillars (4) the level stays within budget
+  // flyover rails (6), pillars (4) and the 7 traffic cars the level is 19.
+  // The ceiling was 15; raised to 20 on purpose for traffic (M2-07).
   assert.equal(env.collidables.length, 2, `step ${step}: motorway collidables`);
   assert.ok(env.collidables.every((m) => m.name === 'motorway-barrier'));
-  assert.ok(collidables.length <= 15, `step ${step}: level 2 collidable budget (${collidables.length})`);
+  assert.equal(collidables.length, 2 + 6 + 4 + 7, `step ${step}: level 2 collidables`);
+  assert.ok(collidables.length <= 20, `step ${step}: level 2 collidable budget (${collidables.length})`);
 
   // Barriers sit at |x| ~ 10.3 on both sides and clear every flyover collidable
   const barriers = named('motorway-barrier');
@@ -233,7 +235,8 @@ function checkCity(step, lm, collidables) {
   });
   assert.equal(zebras.length, 4, `step ${step}: zebra crossings`);
   assert.equal(env.collidables.length, 26, `step ${step}: level 1 collidables unchanged`);
-  assert.ok(collidables.length === 26, `step ${step}: shared collidable array`);
+  // 26 buildings + 8 traffic cars (LevelManager registers the cars, not the environment)
+  assert.ok(collidables.length === 26 + 8, `step ${step}: shared collidable array (${collidables.length})`);
 
   return people.length;
 }
