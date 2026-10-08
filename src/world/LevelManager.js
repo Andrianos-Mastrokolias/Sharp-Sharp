@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { PursuitSystem } from './PursuitSystem.js';
+import {
+  PursuitSystem,
+  ELEVATION_ENTRY_MAX,
+  ELEVATION_ENTRY_TOLERANCE
+} from './PursuitSystem.js';
 
 // ==================================================
 // LEVEL DEFINITIONS
@@ -26,9 +30,9 @@ const VEHICLE_BOUNDS = {
 
 // A raised section only lifts the taxi if it is already near the
 // deck surface (or at the ramp toe), so driving on the ground
-// underneath does not snap it up onto the deck.
-const ELEVATION_ENTRY_MAX = 0.3;
-const ELEVATION_ENTRY_TOLERANCE = 0.6;
+// underneath does not snap it up onto the deck. The pursuer
+// follows the same rule, so both constants live in PursuitSystem.js
+// (ELEVATION_ENTRY_MAX / ELEVATION_ENTRY_TOLERANCE).
 
 
 // ==================================================
@@ -50,7 +54,8 @@ const L1_PURSUIT_CAPTURE_DISTANCE = 7.0;
 const L1_PURSUIT_CAPTURE_TIME = 1.5;
 
 // Level 2: on the ground lane from the start, at the taxi's top speed.
-// It cannot follow onto the flyover - that is how you shake it.
+// It follows onto the flyover too (ramp toe -> deck -> back down), a
+// bit slower on the ramp slope (RAMP_SPEED_FACTOR in PursuitSystem.js).
 const L2_PURSUIT_START_DELAY = 3;
 const L2_PURSUIT_SPAWN_DISTANCE = 30;      // behind the spawn
 const L2_PURSUIT_SPEED = 1.1;
@@ -60,7 +65,7 @@ const L2_PURSUIT_LOSE_TIME = 3;
 const L2_PURSUIT_CAPTURE_DISTANCE = 7.0;
 const L2_PURSUIT_CAPTURE_TIME = 1.5;
 const L2_PURSUIT_LANE_MIN_X = -9;
-const L2_PURSUIT_LANE_MAX_X = 2;           // flyover starts at x 3
+const L2_PURSUIT_LANE_MAX_X = 2;           // ground lane; flyover starts at x 3
 
 // Level 3: detection range is the stealth tradeoff against
 // the unlit potholes (lights on = seen from far away).
@@ -200,7 +205,8 @@ export const LEVELS = {
       maxDeliverSpeed: 4
     },
 
-    // Ground-lane pursuer; taking the flyover shakes it.
+    // Ground-lane pursuer that also follows up the flyover (it gets
+    // its height from getElevationAt()). Not collidable.
     pursuit: {
       mode: 'immediate',
       startDelay: L2_PURSUIT_START_DELAY,
@@ -211,7 +217,6 @@ export const LEVELS = {
       loseTime: L2_PURSUIT_LOSE_TIME,
       captureDistance: L2_PURSUIT_CAPTURE_DISTANCE,
       captureTime: L2_PURSUIT_CAPTURE_TIME,
-      ignoreElevated: true,
       lane: {
         minX: L2_PURSUIT_LANE_MIN_X,
         maxX: L2_PURSUIT_LANE_MAX_X
@@ -341,7 +346,8 @@ export class LevelManager {
       parent: this.group,
       taxi,
       vehicle,
-      headlightsOn: () => this.headlightsOn()
+      headlightsOn: () => this.headlightsOn(),
+      getElevation: (x, z) => this.getElevationAt(x, z)
     });
 
     this.zoneMaterial =
@@ -525,6 +531,28 @@ export class LevelManager {
     }
 
     return height;
+  }
+
+
+  // Deck / ramp surface height at (x, z) for the current level:
+  // 0 off the elevated sections. Pure (reads only the level config,
+  // no taxi state), so the pursuer can use it as its own elevation
+  // function. The taxi-only "must already be up" lift rule is
+  // applied by the callers (getGroundHeight, PursuitSystem).
+  getElevationAt(x, z) {
+
+    let h = 0;
+
+    for (const s of this.config?.elevated ?? []) {
+
+      if (x < s.xMin || x > s.xMax) {
+        continue;
+      }
+
+      h = Math.max(h, LevelManager.elevationProfile(s, z));
+    }
+
+    return h;
   }
 
 

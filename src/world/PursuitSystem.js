@@ -34,8 +34,8 @@ const LOST_PAUSE_TIME = 1.5;    // seconds sitting still in 'lost'
 const SHARP_TURN_ANGLE = 1;     // rad; slow down beyond this
 const SHARP_TURN_SPEED_SCALE = 0.6;
 const PRESSURE_RANGE = 60;      // distance at which pressure hits 0
-const ELEVATED_Y = 1;           // taxi above this is "on the flyover"
-const LIGHT_FLASH_RATE = 3;     // Hz: red/blue cycles per second: red/blue cycles per second
+export const ELEVATED_Y = 1;    // taxi above this is "on the flyover"
+const LIGHT_FLASH_RATE = 3;     // Hz: red/blue cycles per second
 const LIGHT_BAR_ON = 2.5;       // lens emissiveIntensity when lit
 
 // Following distances (centre to centre) behind the taxi.
@@ -61,8 +61,54 @@ export const STUMBLE_SPEED_DROP = 8;     // m/s lost within STUMBLE_WINDOW
 export const STUMBLE_WINDOW = 0.4;       // s
 export const STUMBLE_SURGE_TIME = 2;     // s a stumble keeps the gap tight
 const CLOSING_GAIN = 3;                  // (m/s) of speed per metre of gap error
-const APPROACH_BRAKE_FRACTION = 0.8;     // of BRAKING, when closing in a surge
 const SPEED_SAMPLES = 128;               // ring buffer; covers 0.4 s up to 300 fps
+
+// Hunger (overridable per level; see DEFAULT_CONFIG).
+//   Pressure 0..1 sets the gap: desiredGap = lerp(cruise, standoff,
+//   pressure). It rises while the taxi is slower than
+//   PRESSURE_SPEED_FRACTION of its top speed (faster the further
+//   below), falls when it is at or above, and is pinned at 1 by a
+//   stumble or a slowed taxi.
+export const PRESSURE_SPEED_FRACTION = 0.9;
+export const PRESSURE_RISE_RATE = 0.5;       // per second, at a standstill
+export const PRESSURE_FALL_RATE = 0.6;       // per second
+
+//   Pounce: more than POUNCE_GAP_EXCESS above the desired gap it runs
+//   at full chase speed. It only brakes in the last
+//   PRE_CONTACT_BRAKE_DISTANCE, with a harsh PRE_CONTACT_BRAKING
+//   limit, then matches the taxi's speed. Within GAP_DEADBAND of the
+//   desired gap it just matches speed (no hunting against
+//   MIN_SEPARATION).
+export const POUNCE_GAP_EXCESS = 1.0;        // m
+export const PRE_CONTACT_BRAKE_DISTANCE = 2; // m
+export const PRE_CONTACT_BRAKING = 40;       // m/s^2
+export const GAP_DEADBAND = 0.15;            // m
+
+//   Breathing: the cruise gap (only) swells by +-GAP_BREATH_AMPLITUDE
+//   at GAP_BREATH_RATE, so it nips at the taxi but stays outside
+//   capture range at cruise (CRUISE_GAP - amplitude > captureDistance).
+export const GAP_BREATH_AMPLITUDE = 0.6;     // m
+export const GAP_BREATH_RATE = 0.8;          // Hz
+
+// Flyover following. Pursuer and taxi are "on the same level" within
+// SAME_LEVEL_TOLERANCE of height (capture needs that). On a ramp
+// slope the pursuer is RAMP_SPEED_FACTOR as fast, so the flyover
+// keeps a slight edge. The deck lift rule is the taxi's: lifted only
+// from the ramp toe (h <= ELEVATION_ENTRY_MAX) or when already up
+// (within ELEVATION_ENTRY_TOLERANCE of the surface).
+export const RAMP_SPEED_FACTOR = 0.9;
+export const SAME_LEVEL_TOLERANCE = 1.0;     // m
+export const ELEVATION_ENTRY_MAX = 0.3;
+export const ELEVATION_ENTRY_TOLERANCE = 0.6;
+// Centre-to-rail clamp on a section: rail inner face (rail centre
+// 0.12 in from the edge, 0.25 wide) + the taxi's collision half
+// width of 1.35 (VehicleController.localTaxiCollisionBox).
+export const RAIL_CLAMP_MARGIN = 0.245 + 1.35;
+const BOARDING_APPROACH = 40;  // taxi this close before a toe opens the lane
+const TOE_LEAD = 6;            // run for a point this far before the toe...
+const TOE_SWITCH = 2;          // ...until within this of it, then follow the taxi
+const LANE_RETURN_SPEED = 8;   // m/s: eases back into the lane off a section
+const PITCH_RATE = 8;          // 1/s: smoothing of the ramp pitch
 
 const DEFAULT_CONFIG = {
 
@@ -102,7 +148,20 @@ const DEFAULT_CONFIG = {
   catchUpDistance: 25,
   catchUpMultiplier: 1.15,
 
-  // Level 2: cannot follow onto the flyover
+  // Hunger (see the constants above)
+  pressureSpeedFraction: PRESSURE_SPEED_FRACTION,
+  pressureRiseRate: PRESSURE_RISE_RATE,
+  pressureFallRate: PRESSURE_FALL_RATE,
+  pounceGapExcess: POUNCE_GAP_EXCESS,
+  preContactBrakeDistance: PRE_CONTACT_BRAKE_DISTANCE,
+  preContactBraking: PRE_CONTACT_BRAKING,
+  gapDeadband: GAP_DEADBAND,
+  gapBreathAmplitude: GAP_BREATH_AMPLITUDE,
+  gapBreathRate: GAP_BREATH_RATE,
+  rampSpeedFactor: RAMP_SPEED_FACTOR,
+
+  // Legacy option: the taxi on the flyover is out of sight and out of
+  // reach (no level uses it now; Level 2 follows onto the flyover).
   ignoreElevated: false,
   lane: null                   // { minX, maxX } or null = road
 };
@@ -517,7 +576,8 @@ export class PursuitSystem {
     taxi,
     vehicle,
     headlightsOn = () => true,
-    onCaptured = null
+    onCaptured = null,
+    getElevation = null    // (x, z) => deck height; null = flat world
   }) {
 
     this.parent = parent;
@@ -525,6 +585,7 @@ export class PursuitSystem {
     this.vehicle = vehicle;
     this.headlightsOn = headlightsOn;
     this.onCaptured = onCaptured;
+    this.getElevation = getElevation;
 
     this.config = null;
     this.mesh = null;
@@ -533,6 +594,13 @@ export class PursuitSystem {
     // Scratch / state, reused every frame
     this.x = 0;
     this.z = 0;
+    this.y = 0;
+    this.pitch = 0;
+    this.section = null;    // elevated section it is on, or null
+    this.onRamp = false;
+    this.leftSection = false;
+    this.boarding = null;   // section it is running to the toe of
+    this.brakeLimit = BRAKING;
     this.heading = 0;
     this.speed = 0;
     this.lastKnownX = 0;
@@ -551,7 +619,8 @@ export class PursuitSystem {
     this.captured = false;
     this.reachable = true;
     this.distance = Infinity;
-    this.pressure = 0;
+    this.pressure = 0;       // HUD: how close the net is
+    this.gapPressure = 0;    // 0..1: how hungry (sets the gap)
 
     // Taxi speed history for stumble detection (preallocated)
     this.sampleTime = new Float32Array(SPEED_SAMPLES);
@@ -583,6 +652,7 @@ export class PursuitSystem {
     this.level = level;
 
     this.mesh = createPursuerMesh();
+    this.mesh.rotation.order = 'YXZ';   // yaw, then pitch about its own axle
     this.parent.add(this.mesh);
 
     this.reset();
@@ -616,6 +686,13 @@ export class PursuitSystem {
     this.spawned = false;
     this.captured = false;
     this.pressure = 0;
+    this.gapPressure = 0;
+    this.y = 0;
+    this.pitch = 0;
+    this.section = null;
+    this.onRamp = false;
+    this.leftSection = false;
+    this.boarding = null;
     this.distance = Infinity;
     this.sampleHead = 0;
     this.sampleCount = 0;
@@ -675,6 +752,9 @@ export class PursuitSystem {
 
     this.x = x;
     this.z = z;
+    this.y = 0;
+    this.pitch = 0;
+    this.section = null;
     this.clampToRoad();
 
     // Face along the route
@@ -685,28 +765,98 @@ export class PursuitSystem {
   }
 
 
-  clampToRoad() {
+  // Elevated section whose footprint holds (x, z), or null.
+  sectionAt(x, z) {
+
+    for (const s of this.level.elevated ?? []) {
+      if (x >= s.xMin && x <= s.xMax && z <= s.zEntry && z >= s.zExit) {
+        return s;
+      }
+    }
+
+    return null;
+  }
+
+
+  // Keeps the pursuer on the road and bounds. On an elevated section
+  // it is between the rails (the taxi's margin) with y from the
+  // elevation function; elsewhere the lane clamp applies, widened to
+  // reach the ramp toe while boarding. With a dt, an x outside the
+  // lane (just came off a section) eases back instead of snapping.
+  clampToRoad(dt = Infinity) {
 
     const { lane } = this.config;
     const { boundaries } = this.level;
-
-    const minX = Math.max(lane ? lane.minX : -ROAD_HALF_WIDTH,
-      boundaries.minX + BOUNDS_MARGIN);
-    const maxX = Math.min(lane ? lane.maxX : ROAD_HALF_WIDTH,
-      boundaries.maxX - BOUNDS_MARGIN);
-
-    this.x = Math.min(Math.max(this.x, minX), maxX);
 
     this.z = Math.min(
       Math.max(this.z, boundaries.minZ + BOUNDS_MARGIN),
       boundaries.maxZ - BOUNDS_MARGIN
     );
+
+    // Same lift rule as the taxi: only from the toe, or when up
+    const s = this.getElevation ? this.sectionAt(this.x, this.z) : null;
+    const h = s ? this.getElevation(this.x, this.z) : 0;
+
+    if (s && (h <= ELEVATION_ENTRY_MAX ||
+              this.y >= h - ELEVATION_ENTRY_TOLERANCE)) {
+
+      this.section = s;
+      this.x = Math.min(Math.max(this.x, s.xMin + RAIL_CLAMP_MARGIN),
+        s.xMax - RAIL_CLAMP_MARGIN);
+      this.y = this.getElevation(this.x, this.z);
+      this.onRamp = this.y > 0.01 && this.y < s.height - 0.01;
+      this.leftSection = true;
+      return;
+    }
+
+    this.section = null;
+    this.onRamp = false;
+    this.y = 0;
+
+    const minX = Math.max(lane ? lane.minX : -ROAD_HALF_WIDTH,
+      boundaries.minX + BOUNDS_MARGIN);
+    let maxX = Math.min(lane ? lane.maxX : ROAD_HALF_WIDTH,
+      boundaries.maxX - BOUNDS_MARGIN);
+
+    if (this.boarding) {
+      maxX = Math.max(maxX, this.boarding.xMax - RAIL_CLAMP_MARGIN);
+    }
+
+    // Only just off a section does it ease back; otherwise a hard clamp
+    const ease = this.leftSection ? LANE_RETURN_SPEED * dt : Infinity;
+
+    if (this.x > maxX) {
+      this.x = Math.max(maxX, this.x - ease);
+    } else if (this.x < minX) {
+      this.x = Math.min(minX, this.x + ease);
+    } else {
+      this.leftSection = false;
+    }
+  }
+
+
+  // Nose-up angle of the surface under the pursuer, from the
+  // elevation function one metre either side along its heading.
+  surfacePitch() {
+
+    if (!this.section) {
+      return 0;
+    }
+
+    const fx = -Math.sin(this.heading);
+    const fz = -Math.cos(this.heading);
+
+    const rise =
+      this.getElevation(this.x + fx, this.z + fz) -
+      this.getElevation(this.x - fx, this.z - fz);
+
+    return Math.atan(rise / 2);
   }
 
 
   syncMesh() {
-    this.mesh.position.set(this.x, 0, this.z);
-    this.mesh.rotation.y = this.heading;
+    this.mesh.position.set(this.x, this.y, this.z);
+    this.mesh.rotation.set(this.pitch, this.heading, 0);
   }
 
 
@@ -730,13 +880,21 @@ export class PursuitSystem {
 
     this.distance = Math.hypot(tx - this.x, tz - this.z);
 
-    // Out of reach: up on the flyover and this pursuer cannot
-    // follow. Counts as not seen and cannot be captured.
-    const reachable =
+    // `visible`: the taxi can be seen (only the legacy ignoreElevated
+    // option hides it up on the flyover). `reachable`: also on the
+    // same level as the pursuer, which capture and the separation
+    // floor need.
+    const visible =
       !(this.config.ignoreElevated &&
         this.taxi.position.y > ELEVATED_Y);
 
+    const reachable =
+      visible &&
+      Math.abs(this.taxi.position.y - this.y) <= SAME_LEVEL_TOLERANCE;
+
     this.reachable = reachable;
+    this.brakeLimit = BRAKING;
+    this.updateBoarding();
 
     const dark = !this.headlightsOn();
 
@@ -757,17 +915,17 @@ export class PursuitSystem {
     switch (this.state) {
 
       case 'idle':
-        this.updateIdle(reachable, detection);
+        this.updateIdle(visible, detection);
         break;
 
       case 'chasing':
-        this.updateChasing(dt, tx, tz, reachable, loseRange, topSpeed);
+        this.updateChasing(dt, tx, tz, visible, reachable, loseRange, topSpeed);
         break;
 
       case 'lost':
         this.drive(dt, this.x, this.z, 0);
 
-        if (reachable && this.distance <= detection) {
+        if (visible && this.distance <= detection) {
           this.setState('chasing');
         } else if (this.stateTime >= LOST_PAUSE_TIME) {
           this.setState('searching');
@@ -777,7 +935,7 @@ export class PursuitSystem {
       case 'searching':
         this.drive(dt, this.lastKnownX, this.lastKnownZ, topSpeed);
 
-        if (reachable && this.distance <= detection) {
+        if (visible && this.distance <= detection) {
           this.setState('chasing');
         }
         break;
@@ -788,7 +946,7 @@ export class PursuitSystem {
   }
 
 
-  updateIdle(reachable, detection) {
+  updateIdle(visible, detection) {
 
     if (this.config.mode === 'trigger') {
 
@@ -822,7 +980,7 @@ export class PursuitSystem {
 
     if (
       this.sinceStart >= this.config.startDelay &&
-      reachable &&
+      visible &&
       this.distance <= detection
     ) {
       this.beginChase();
@@ -840,9 +998,44 @@ export class PursuitSystem {
   }
 
 
-  updateChasing(dt, tx, tz, reachable, loseRange, topSpeed) {
+  // The taxi is on a flyover, or lining up for its ramp, and the
+  // pursuer is not on it yet: remember the section so the lane clamp
+  // opens up to let the pursuer follow, and so it can run to the toe.
+  // (Ground under the deck is not "on" the section: that is only
+  // from the ramp toe up, same as the taxi's lift rule.)
+  updateBoarding() {
 
-    const seen = reachable && this.distance <= loseRange;
+    this.boarding = null;
+
+    if (this.section || !this.getElevation) {
+      return;
+    }
+
+    const { x, y, z } = this.taxi.position;
+
+    for (const s of this.level.elevated ?? []) {
+
+      if (x < s.xMin || x > s.xMax) {
+        continue;
+      }
+
+      const approaching =
+        z > s.zEntry && z <= s.zEntry + BOARDING_APPROACH;
+
+      const onStructure =
+        z <= s.zEntry && z >= s.zExit && y > ELEVATION_ENTRY_MAX;
+
+      if (approaching || onStructure) {
+        this.boarding = s;
+        return;
+      }
+    }
+  }
+
+
+  updateChasing(dt, tx, tz, visible, reachable, loseRange, topSpeed) {
+
+    const seen = visible && this.distance <= loseRange;
 
     if (seen) {
       this.loseTimer = 0;
@@ -852,13 +1045,28 @@ export class PursuitSystem {
       this.loseTimer += dt;
     }
 
-    // Match the taxi's speed and hold the gap while it is in view;
-    // a stale last-known point is driven to properly (arrive).
-    this.drive(
-      dt, this.lastKnownX, this.lastKnownZ,
-      topSpeed * this.catchUpFactor(),
-      seen ? this.followSpeed(dt, topSpeed * this.catchUpFactor()) : -1
-    );
+    const maxSpeed = topSpeed * this.catchUpFactor();
+
+    // Boarding: head for just before the ramp toe at full speed, then
+    // follow the taxi up. Past the toe's approach it steers at the taxi.
+    const toe = this.boarding;
+
+    if (
+      toe && seen && this.taxi.position.y > ELEVATED_Y &&
+      this.z > toe.zEntry + TOE_LEAD + TOE_SWITCH
+    ) {
+      this.drive(
+        dt, (toe.xMin + toe.xMax) / 2, toe.zEntry + TOE_LEAD,
+        maxSpeed, maxSpeed
+      );
+    } else {
+      // Match the taxi's speed and hold the gap while it is in view;
+      // a stale last-known point is driven to properly (arrive).
+      this.drive(
+        dt, this.lastKnownX, this.lastKnownZ, maxSpeed,
+        seen ? this.followSpeed(dt, maxSpeed) : -1
+      );
+    }
 
     if (this.loseTimer >= this.config.loseTime) {
       this.captureTimer = 0;
@@ -929,6 +1137,8 @@ export class PursuitSystem {
       speed < slowSpeedThreshold ||
       this.sinceStumble < stumbleSurgeTime;
 
+    this.updateGapPressure(dt, speed);
+
     // Taxi got going again: the gap opens, and the contact it had
     // built up does not carry over
     if (wasSlowed && !this.slowed) {
@@ -937,18 +1147,57 @@ export class PursuitSystem {
   }
 
 
-  // Gap the pursuer is trying to hold right now
+  // Rises while the taxi is below pressureSpeedFraction of top speed
+  // (faster the further below), falls at or above it, and is pinned
+  // at 1 while the taxi is slowed or has stumbled.
+  updateGapPressure(dt, speed) {
+
+    const { pressureSpeedFraction, pressureRiseRate, pressureFallRate } =
+      this.config;
+
+    const threshold =
+      pressureSpeedFraction * this.vehicle.settings.maxForwardSpeed;
+
+    let p = this.gapPressure;
+
+    if (this.slowed) {
+      p = 1;
+    } else if (speed < threshold) {
+      p += pressureRiseRate * (1 - speed / threshold) * dt;
+    } else {
+      p -= pressureFallRate * dt;
+    }
+
+    this.gapPressure = Math.min(Math.max(p, 0), 1);
+  }
+
+
+  // Gap the pursuer is trying to hold right now: the cruise gap
+  // (breathing in and out, on the pursuer's own clock) towards the
+  // standoff as pressure builds. Breathing fades with the pressure.
   desiredGap() {
-    return this.slowed ? this.standoff() : this.config.cruiseGap;
+
+    const { cruiseGap, gapBreathAmplitude, gapBreathRate } = this.config;
+
+    const cruise = cruiseGap + gapBreathAmplitude *
+      Math.sin(2 * Math.PI * gapBreathRate * this.clock);
+
+    return cruise + (this.standoff() - cruise) * this.gapPressure;
   }
 
 
   // Target speed while the taxi is in view: the taxi's own speed
   // plus a correction for the gap error. Never "arrives": it holds
-  // the gap at any taxi speed. When the gap is too wide on a slowed
-  // taxi it closes as fast as it can still stop at the standoff
-  // (full speed until the last moment).
+  // the gap at any taxi speed.
+  //   error > pounceGapExcess: pounce, full chase speed. No gentle
+  //     approach: it only brakes inside preContactBrakeDistance, at
+  //     the harsh preContactBraking limit, to just match the taxi.
+  //   within gapDeadband: match the taxi's speed (no hunting).
+  //   otherwise: the closing-gain correction.
   followSpeed(dt, maxSpeed) {
+
+    const { pounceGapExcess, preContactBrakeDistance, preContactBraking,
+      gapDeadband, closingGain } = this.config;
 
     const taxiSpeed = Math.max(this.vehicle.getSpeed(), 0);
 
@@ -957,11 +1206,21 @@ export class PursuitSystem {
     // taxi's step, which is what the camera and capture check see.
     const error = this.distance - taxiSpeed * dt - this.desiredGap();
 
-    let target = taxiSpeed + this.config.closingGain * error;
+    let target;
 
-    if (this.slowed && error > 0) {
-      target = taxiSpeed + Math.sqrt(
-        2 * BRAKING * APPROACH_BRAKE_FRACTION * error);
+    if (error > pounceGapExcess) {
+      target = maxSpeed;
+    } else if (Math.abs(error) > gapDeadband) {
+      target = taxiSpeed + closingGain * error;
+    } else {
+      target = taxiSpeed;
+    }
+
+    if (error > 0 && error <= preContactBrakeDistance) {
+      this.brakeLimit = preContactBraking;
+
+      target = Math.min(target,
+        taxiSpeed + Math.sqrt(2 * preContactBraking * error));
     }
 
     return Math.min(Math.max(target, 0), maxSpeed);
@@ -1023,6 +1282,11 @@ export class PursuitSystem {
   // sharp turns; keeps clear of the taxi and stays on the road.
   drive(dt, tx, tz, maxSpeed, followSpeed = -1) {
 
+    // Slower on the ramp slope, so the flyover keeps an edge
+    if (this.onRamp) {
+      maxSpeed *= this.config.rampSpeedFactor;
+    }
+
     const dx = tx - this.x;
     const dz = tz - this.z;
     const dist = Math.hypot(dx, dz);
@@ -1053,7 +1317,7 @@ export class PursuitSystem {
       }
     }
 
-    const rate = target > this.speed ? ACCELERATION : BRAKING;
+    const rate = target > this.speed ? ACCELERATION : this.brakeLimit;
     const step = rate * dt;
 
     this.speed +=
@@ -1063,7 +1327,11 @@ export class PursuitSystem {
     this.z -= Math.cos(this.heading) * this.speed * dt;
 
     this.keepSeparation();
-    this.clampToRoad();
+    this.clampToRoad(dt);
+
+    this.pitch +=
+      (this.surfacePitch() - this.pitch) * Math.min(1, PITCH_RATE * dt);
+
     this.syncMesh();
   }
 
