@@ -1095,10 +1095,17 @@ export class PursuitSystem {
       return;
     }
 
+    // For levels that start near a world boundary (Level 3),
+    // the detection window can be missed while the car waits.
+    // Activate on schedule; all subsequent chase/search/capture
+    // behaviour uses the same AI as Level 2.
     if (
       this.sinceStart >= this.config.startDelay &&
       visible &&
-      this.distance <= detection
+      (
+        this.config.activateAfterDelay === true ||
+        this.distance <= detection
+      )
     ) {
       this.beginChase();
     }

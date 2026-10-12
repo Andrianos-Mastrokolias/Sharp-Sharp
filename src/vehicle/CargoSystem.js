@@ -273,10 +273,10 @@ export class CargoSystem {
 
     const targetShiftX =
       THREE.MathUtils.clamp(
-        turningForce,
+        turningForce * 1.15,
 
-        -0.32,
-        0.32
+        -0.39,
+        0.39
       );
 
 
@@ -328,38 +328,31 @@ export class CargoSystem {
     // Continuous driving stress
     // --------------------------------------------------
 
-    const accelerationStress =
-      Math.max(
-        0,
+    // Sharp driving only becomes dangerous above normal city speed.
+    // At ~20 m/s (~72 km/h), holding full steering for a few seconds
+    // should be able to throw cargo off the roof.
+    const absSpeed = Math.abs(speed);
+    const steeringAmount = Math.abs(steeringInput);
 
-        Math.abs(
-          acceleration
-        ) -
-        5
-      ) *
-      0.02;
+    const corneringSpeed = THREE.MathUtils.clamp(
+      (absSpeed - 9) / 15, 0, 1.5
+    );
 
-
+    // Quadratic response keeps gentle steering manageable, while
+    // a sudden/full-lock manoeuvre generates substantial stress.
     const turningStress =
-      Math.abs(
-        steeringInput
-      ) *
-      Math.max(
-        0,
+      Math.pow(steeringAmount, 1.5) *
+      Math.pow(corneringSpeed, 1.5) *
+      19;
 
-        Math.abs(speed) -
-        10
-      ) *
-      0.018;
+    // Hard braking/accelerating stresses straps too.
+    const accelerationStress =
+      Math.max(0, Math.abs(acceleration) - 8) * 0.55;
 
-
+    // applyStress() already scales individual item loss by cargo
+    // vulnerability and how worn the straps are.
     this.applyStress(
-      (
-        accelerationStress +
-        turningStress
-      ) *
-      dt *
-      10
+      (turningStress + accelerationStress) * dt
     );
 
 

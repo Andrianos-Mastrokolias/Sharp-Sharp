@@ -741,10 +741,10 @@ isOnSpeedBump(
           .applyStress(
             THREE.MathUtils.clamp(
               impactSpeed *
-              0.45,
+              0.60,
 
               2,
-              12
+              17
             )
           );
 
@@ -1203,8 +1203,9 @@ isOnSpeedBump(
 
       this.cargoSystem
         .applyStress(
+          // A deep pothole at 20+ m/s is a serious roof-load shock.
           impact *
-          4
+          9
         );
     }
 
@@ -1329,10 +1330,10 @@ const leavingSpeedBump =
               Math.abs(
                 this.speed
               ) *
-              0.18,
+              0.55,
 
-              2,
-              8
+              4,
+              17
             )
           );
 
@@ -1400,7 +1401,7 @@ const leavingSpeedBump =
           this.cargoSystem
             .applyStress(
               impactSpeed *
-              1.4
+              2.0
             );
         }
 
