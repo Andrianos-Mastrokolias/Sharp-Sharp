@@ -392,19 +392,21 @@ export const LEVELS = {
       maxDeliverSpeed: 4
     },
 
-    // Seen from far with the lights on, nearly invisible without
+    // Level 3 uses the same pursuit and capture tuning as Level 2.
+    // The taxi spawns close to the -Z world boundary, so the police
+    // may be clipped closer than intended or miss its first detection
+    // window. Activate after the delay to avoid an idle pursuer.
     pursuit: {
       mode: 'immediate',
-      startDelay: L3_PURSUIT_START_DELAY,
-      spawnDistance: L3_PURSUIT_SPAWN_DISTANCE,
-      speedFraction: L3_PURSUIT_SPEED,
-      detectionRadius: L3_PURSUIT_DETECTION_LIGHTS_ON,
-      detectionRadiusDark: L3_PURSUIT_DETECTION_LIGHTS_OFF,
-      loseRange: L3_PURSUIT_LOSE_RANGE_LIGHTS_ON,
-      loseRangeDark: L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF,
-      loseTime: L3_PURSUIT_LOSE_TIME,
-      captureDistance: L3_PURSUIT_CAPTURE_DISTANCE,
-      captureTime: L3_PURSUIT_CAPTURE_TIME
+      startDelay: L2_PURSUIT_START_DELAY,
+      spawnDistance: L2_PURSUIT_SPAWN_DISTANCE,
+      speedFraction: L2_PURSUIT_SPEED,
+      detectionRadius: L2_PURSUIT_DETECTION_RADIUS,
+      loseRange: L2_PURSUIT_LOSE_RANGE,
+      loseTime: L2_PURSUIT_LOSE_TIME,
+      captureDistance: L2_PURSUIT_CAPTURE_DISTANCE,
+      captureTime: L2_PURSUIT_CAPTURE_TIME,
+      activateAfterDelay: true
     },
 
     // Night: the unlit spawn bay and destination ring would glare
