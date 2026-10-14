@@ -87,6 +87,12 @@ const L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF = 30;
 const L3_PURSUIT_LOSE_TIME = 4;
 const L3_PURSUIT_CAPTURE_DISTANCE = 6.4;
 const L3_PURSUIT_CAPTURE_TIME = 1.5;
+// Patrol: woken without seeing the taxi, it drives +Z down its lane at
+// this speed (a blind taxi above it pulls away, one below it is caught
+// up) and stops 40 m short of the destination. Reaction: first sighting
+// makes it stop and flash this long before the chase starts.
+const L3_PURSUIT_PATROL_SPEED = 17;
+const L3_PURSUIT_REACTION_TIME = 1.5;
 
 
 // ==================================================
@@ -410,7 +416,9 @@ export const LEVELS = {
       loseRangeDark: L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF,
       loseTime: L3_PURSUIT_LOSE_TIME,
       captureDistance: L3_PURSUIT_CAPTURE_DISTANCE,
-      captureTime: L3_PURSUIT_CAPTURE_TIME
+      captureTime: L3_PURSUIT_CAPTURE_TIME,
+      patrolSpeed: L3_PURSUIT_PATROL_SPEED,
+      reactionTime: L3_PURSUIT_REACTION_TIME
     },
 
     // Night: the unlit spawn bay and destination ring would glare
