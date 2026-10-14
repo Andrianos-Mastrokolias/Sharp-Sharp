@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+import { menuBackdropHTML, titleLockup } from './screens.js';
+
 // ============================================================
 // LOADING SCREEN
 // ============================================================
@@ -9,92 +11,6 @@ import * as THREE from 'three';
 // HDRIs, the taxi GLB) is created without its own manager, so
 // they all report here. Construct this BEFORE any of them start
 // loading, or the first files are not counted.
-
-const styles = `
-  .ss-loading {
-    position: fixed;
-    inset: 0;
-    z-index: 2000;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    background: #050c16;
-
-    font-family: Arial, Helvetica, sans-serif;
-    color: white;
-
-    opacity: 1;
-    transition: opacity 0.6s ease;
-  }
-
-  .ss-loading.hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .ss-loading-panel {
-    width: min(520px, calc(100vw - 40px));
-    padding: 35px;
-    box-sizing: border-box;
-    text-align: center;
-  }
-
-  .ss-loading-eyebrow {
-    color: #f5c84c;
-    font-size: 13px;
-    font-weight: bold;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-  }
-
-  .ss-loading-title {
-    margin: 14px 0 30px;
-    font-size: clamp(32px, 6vw, 52px);
-    line-height: 1.1;
-    font-weight: 900;
-  }
-
-  .ss-loading-track {
-    height: 10px;
-    overflow: hidden;
-
-    background: #26394c;
-    border-radius: 10px;
-  }
-
-  .ss-loading-bar {
-    width: 0%;
-    height: 100%;
-
-    background: #f5c84c;
-    border-radius: 10px;
-
-    transition: width 0.2s ease;
-  }
-
-  .ss-loading-status {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 12px;
-
-    color: #aebdc8;
-    font-size: 14px;
-  }
-
-  .ss-loading-status strong {
-    color: white;
-  }
-
-  .ss-loading-error {
-    margin-top: 14px;
-    min-height: 1em;
-
-    color: #ff7785;
-    font-size: 13px;
-  }
-`;
 
 export class LoadingScreen {
 
@@ -144,29 +60,30 @@ export class LoadingScreen {
 
   build() {
 
-    const style = document.createElement('style');
-    style.textContent = styles;
-    document.head.appendChild(style);
-
     this.element = document.createElement('div');
     this.element.className = 'ss-loading';
 
     this.element.innerHTML = `
+      ${menuBackdropHTML()}
+
       <div class="ss-loading-panel">
-        <div class="ss-loading-eyebrow">South African Taxi Simulator</div>
+        ${titleLockup()}
 
-        <h1 class="ss-loading-title">SHARP-SHARP</h1>
+        <div class="ss-loading-meter">
+          <div class="ss-loading-track">
+            <div class="ss-loading-bar chevron"></div>
+          </div>
 
-        <div class="ss-loading-track">
-          <div class="ss-loading-bar"></div>
+          <div class="ss-loading-status">
+            <span class="lk-rye">hold on, now-now…</span>
+            <strong>
+              <span class="ss-loading-files"></span>
+              <span class="ss-loading-percent">0%</span>
+            </strong>
+          </div>
+
+          <div class="ss-loading-error"></div>
         </div>
-
-        <div class="ss-loading-status">
-          <span class="ss-loading-files">Loading assets…</span>
-          <strong class="ss-loading-percent">0%</strong>
-        </div>
-
-        <div class="ss-loading-error"></div>
       </div>
     `;
 
@@ -192,7 +109,7 @@ export class LoadingScreen {
 
     this.bar.style.width = `${percent}%`;
     this.percentText.textContent = `${percent}%`;
-    this.filesText.textContent = `Loading assets… ${loaded} / ${total}`;
+    this.filesText.textContent = `${loaded} / ${total} ·`;
   }
 
 

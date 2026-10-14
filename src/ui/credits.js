@@ -40,6 +40,16 @@ export const CREDITS = [
   },
 
   {
+    heading: 'Fonts',
+    entries: [
+      { name: 'Bungee', detail: 'SIL Open Font License 1.1 (via Fontsource)' },
+      { name: 'Alfa Slab One', detail: 'SIL Open Font License 1.1 (via Fontsource)' },
+      { name: 'Rye', detail: 'SIL Open Font License 1.1 (via Fontsource)' },
+      { name: 'Barlow', detail: 'SIL Open Font License 1.1 (via Fontsource)' }
+    ]
+  },
+
+  {
     heading: 'Textures',
     entries: [
       {

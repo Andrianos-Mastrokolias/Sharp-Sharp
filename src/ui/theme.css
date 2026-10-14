@@ -1,0 +1,1072 @@
+/* ============================================================
+   JOBURG STREET THEME
+   ============================================================
+
+   Palette, sizing and the reusable components (.sign,
+   .decal-btn, .label, .lockup, .shop-band) for every overlay
+   screen, the loading screen and the HUD. The HTML for the
+   components is built by the helpers in screens.js.
+
+   No gradients except the chevron and shutter patterns, no
+   blur and no soft shadows: everything is flat, painted and
+   outlined in ink. */
+
+:root {
+  --maroon: #8E2B2B;
+  --brick: #9E2F2C;
+  --cream: #EFE3C8;
+  --mustard: #C9962E;
+  --ink: #1A1714;
+  --sign-green: #1E5E46;
+  --sign-white: #EDEDE8;
+  --route-yellow: #E8B93A;
+  --chevron-red: #C8222A;
+  --chevron-white: #F4F4EE;
+  --taxi-white: #F7F6F1;
+  --stripe-red: #B8322E;
+  --stripe-green: #1E6B48;
+  --stripe-blue: #234A9A;
+  --cargo: #A9784A;
+
+  --shutter-a: #5C4434;
+  --shutter-b: #4A3426;
+  --pole: #8A8D8F;
+  --scrim: rgba(26, 23, 20, 0.6);
+
+  --font-title: 'Bungee', 'Arial Black', sans-serif;
+  --font-slab: 'Alfa Slab One', Georgia, serif;
+  --font-ornament: 'Rye', Georgia, serif;
+  --font-sign: 'Barlow', Arial, Helvetica, sans-serif;
+
+  /* Main menu backdrop: shop band + shutter along the bottom */
+  --band-h: 3.2rem;
+  --shutter-h: 15vh;
+}
+
+/* Everything is sized in rem: 1280 px wide → ~14 px,
+   1920 px wide → 18 px. */
+html {
+  font-size: clamp(12px, 1.1vw, 18px);
+}
+
+/* ============================================================
+   PATTERNS
+   ============================================================ */
+
+.chevron {
+  --chev: 34px;
+
+  background: repeating-linear-gradient(
+    135deg,
+    var(--chevron-red) 0 var(--chev),
+    var(--chevron-white) var(--chev) calc(var(--chev) * 2)
+  );
+}
+
+.shutter {
+  background: repeating-linear-gradient(
+    0deg,
+    var(--shutter-a) 0 6px,
+    var(--shutter-b) 6px 12px
+  );
+}
+
+/* ============================================================
+   1. ROAD SIGN
+   ============================================================ */
+
+.sign {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-sign);
+}
+
+.sign > * {
+  border: 4px solid var(--sign-white);
+  box-shadow: 0 0 0 3px var(--ink);
+}
+
+.sign > * + * {
+  border-top: 0;
+}
+
+.sign-head {
+  padding: 0.5rem 1.2rem;
+
+  background: var(--sign-white);
+  border-radius: 18px 18px 0 0;
+
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.sign-body {
+  padding: 0.5rem 0.6rem;
+
+  background: var(--sign-green);
+
+  color: #fff;
+  font-weight: 600;
+}
+
+.sign-body:last-child {
+  border-radius: 0 0 18px 18px;
+}
+
+.sign-chevron {
+  height: 1.8rem;
+  border-radius: 0 0 18px 18px;
+}
+
+/* Rows: route code | name | arrow (buttons or plain info) */
+.sign-row {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+
+  display: grid;
+  grid-template-columns: 3.4rem 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+
+  padding: 0.35rem 0.6rem;
+  margin: 0;
+
+  background: none;
+  border: 0;
+  border-radius: 8px;
+
+  color: #fff;
+  font-family: var(--font-sign);
+  font-size: 1.15rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.sign-row + .sign-row {
+  border-top: 2px solid rgba(237, 237, 232, 0.35);
+  border-radius: 0;
+}
+
+button.sign-row {
+  cursor: pointer;
+}
+
+button.sign-row:hover,
+button.sign-row:focus-visible {
+  background: var(--ink);
+  outline: none;
+}
+
+/* Yellow route codes are 1.6 rem / 800 so they count as
+   large text (3:1) on the green; they are ~4.2:1. */
+.sign-code {
+  color: var(--route-yellow);
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.sign-name small {
+  display: block;
+  margin-top: 0.15rem;
+
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.sign-arrow {
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Two-column info row: label ........ value */
+.sign-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1.5rem;
+
+  padding: 0.45rem 0.6rem;
+
+  font-size: 1.05rem;
+}
+
+.sign-stat + .sign-stat {
+  border-top: 2px solid rgba(237, 237, 232, 0.35);
+}
+
+.sign-stat strong {
+  color: var(--route-yellow);
+  font-size: 1.2rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.sign-text {
+  margin: 0.3rem 0.6rem 0.6rem;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* Grey posts under a free-standing sign */
+.sign-poles {
+  flex: 1;
+  min-height: 2rem;
+
+  display: flex;
+  justify-content: space-around;
+
+  width: 60%;
+  margin-top: 3px;
+}
+
+.sign-poles span {
+  width: 0.9rem;
+  background: var(--pole);
+  border: 3px solid var(--ink);
+  border-top: 0;
+}
+
+/* ============================================================
+   2. TAXI DECAL BUTTON / PANEL
+   ============================================================ */
+
+.decal {
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+
+  background: var(--taxi-white);
+  border: 4px solid var(--ink);
+  border-radius: 16px 34px 16px 16px;
+}
+
+.decal-btn {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0.9rem 1.5rem 0;
+
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.decal-btn:hover,
+.decal-btn:focus-visible {
+  outline: 3px solid var(--mustard);
+  outline-offset: 3px;
+}
+
+.decal-btn:active {
+  transform: translate(2px, 2px);
+}
+
+.decal-label {
+  display: inline-block;
+  transform: skewX(-12deg);
+
+  color: var(--maroon);
+  font-family: var(--font-slab);
+  font-size: 2.1rem;
+  line-height: 1.1;
+  letter-spacing: 1px;
+  text-shadow: 2px 2px 0 #fff, 4px 4px 0 var(--ink);
+}
+
+.decal-stripes {
+  display: block;
+  margin: 0.7rem -1.5rem 0.5rem;
+}
+
+.decal-stripes i {
+  display: block;
+  height: 0.6rem;
+  margin-top: 2px;
+}
+
+.decal-stripes i:nth-child(1) { background: var(--mustard); }
+.decal-stripes i:nth-child(2) { background: var(--stripe-red); transform: skewY(-2deg); }
+.decal-stripes i:nth-child(3) { background: var(--stripe-green); transform: skewY(-2deg); }
+.decal-stripes i:nth-child(4) { background: var(--stripe-blue); }
+
+/* ============================================================
+   3. LABEL
+   ============================================================ */
+
+.label {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+
+  min-height: 44px;
+  margin: 0;
+  padding: 0.4rem 0.9rem;
+
+  background: var(--ink);
+  border: 0;
+  border-radius: 8px;
+
+  color: #fff;
+  font-family: var(--font-sign);
+  font-size: clamp(12px, 0.8rem, 14px);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 1px;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+button.label,
+summary.label {
+  cursor: pointer;
+}
+
+button.label:hover,
+button.label:focus-visible,
+summary.label:hover,
+summary.label:focus-visible {
+  background: var(--maroon);
+  outline: 3px solid var(--mustard);
+  outline-offset: 2px;
+}
+
+.label-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+/* ============================================================
+   4. LETTERING LOCKUP
+   ============================================================ */
+
+.lockup {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+
+  transform: rotate(-1deg);
+}
+
+.lockup-row {
+  display: flex;
+  align-items: stretch;
+}
+
+/* Blocks share their 5 px borders with their neighbours */
+.lockup-row + .lockup-row {
+  margin-top: -5px;
+}
+
+.lk {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+
+  padding: 0.35rem 0.8rem;
+
+  border: 5px solid var(--ink);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.lk + .lk {
+  margin-left: -5px;
+}
+
+.lockup-row:first-child > .lk:first-child { border-top-left-radius: 14px; }
+.lockup-row:first-child > .lk:last-child { border-top-right-radius: 14px; }
+.lockup-row:last-child > .lk:first-child { border-bottom-left-radius: 14px; }
+.lockup-row:last-child > .lk:last-child { border-bottom-right-radius: 14px; }
+
+.lk-ink { background: var(--ink); color: var(--cream); }
+.lk-mustard { background: var(--mustard); color: var(--ink); }
+.lk-cream { background: var(--cream); color: var(--maroon); }
+.lk-maroon { background: var(--maroon); color: var(--cream); }
+
+/* Rye is for small lowercase phrases only */
+.lk-rye {
+  font-family: var(--font-ornament);
+  font-size: 1.25rem;
+  line-height: 1.15;
+  text-transform: lowercase;
+}
+
+.lk-ink.lk-rye { color: var(--mustard); }
+
+.lk-slab {
+  font-family: var(--font-slab);
+  font-size: 2rem;
+}
+
+.lk-bungee {
+  font-family: var(--font-title);
+  font-size: 3.2rem;
+}
+
+.lk-xl {
+  font-size: min(6rem, 12vh);
+}
+
+.lk-lg {
+  font-size: min(4.6rem, 9.5vh);
+}
+
+.lk-sign {
+  font-family: var(--font-sign);
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 3px;
+}
+
+/* ============================================================
+   5. SHOP BAND
+   ============================================================ */
+
+.shop-band {
+  padding: 0.5rem 1rem;
+
+  background: var(--mustard);
+  border-top: 5px solid var(--ink);
+  border-bottom: 5px solid var(--ink);
+
+  color: var(--ink);
+  font-family: var(--font-slab);
+  font-size: 1.2rem;
+  letter-spacing: 2px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ============================================================
+   CONTROLS LIST
+   ============================================================ */
+
+.controls {
+  margin: 0;
+  padding: 0.8rem 1rem;
+
+  background: var(--cream);
+  border: 4px solid var(--ink);
+  border-radius: 14px;
+
+  color: var(--ink);
+  font-family: var(--font-sign);
+  list-style: none;
+  text-align: left;
+}
+
+.controls li {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  align-items: center;
+  gap: 0.8rem;
+
+  padding: 0.2rem 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.controls kbd {
+  justify-self: start;
+  padding: 0.15rem 0.5rem;
+
+  background: var(--ink);
+  border-radius: 6px;
+
+  color: #fff;
+  font-family: var(--font-sign);
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+/* CONTROLS drop-down on the main menu */
+.controls-menu {
+  position: relative;
+}
+
+.controls-menu > summary {
+  list-style: none;
+}
+
+.controls-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.controls-menu > .controls {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.6rem);
+  z-index: 2;
+
+  width: 22rem;
+}
+
+/* ============================================================
+   OVERLAY SCREENS
+   ============================================================ */
+
+.ss-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+
+  display: none;
+
+  font-family: var(--font-sign);
+  color: var(--ink);
+}
+
+.ss-screen.visible {
+  display: block;
+}
+
+.ss-screen[data-variant="scrim"] {
+  background: var(--scrim);
+}
+
+.ss-screen[data-variant="scrim"] .menu-backdrop {
+  display: none;
+}
+
+.ss-panel {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+/* Menu screens sit above the shop band and shutter */
+.ss-screen[data-variant="menu"] .ss-panel {
+  bottom: calc(var(--band-h) + var(--shutter-h));
+}
+
+/* Centred column used by the in-game screens */
+.ss-column {
+  box-sizing: border-box;
+  min-height: 100%;
+  width: min(34rem, calc(100vw - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  gap: 1.1rem;
+}
+
+.ss-column > .lockup {
+  align-self: center;
+}
+
+.ss-column > .label-row {
+  justify-content: center;
+}
+
+.ss-reason {
+  margin: 0;
+  padding: 0.6rem 1rem;
+
+  background: var(--cream);
+  border: 4px solid var(--ink);
+  border-radius: 12px;
+
+  font-size: 1.15rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Level intro: the level name as the big sign line */
+.ss-intro-title {
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+
+.ss-intro-title .sign-code,
+.ss-intro-title .sign-arrow {
+  font-size: 2rem;
+}
+
+/* ---------- Main menu backdrop (also the loading screen) ---------- */
+
+.menu-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--cream);
+}
+
+.menu-wall {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 35%;
+
+  background: var(--brick);
+  border-bottom: 5px solid var(--ink);
+}
+
+.menu-backdrop .shop-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--shutter-h);
+
+  box-sizing: border-box;
+  height: var(--band-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-backdrop .shutter {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--shutter-h);
+}
+
+/* ---------- Main menu layout ---------- */
+
+.menu-layout {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 2.2rem 3rem 0;
+
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: stretch;
+  gap: 2rem 4.5rem;
+}
+
+.menu-left {
+  flex: 0 1 34rem;
+
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.4rem;
+
+  padding-bottom: 1.6rem;
+}
+
+.menu-left .decal-btn {
+  width: min(26rem, 100%);
+}
+
+.menu-left .decal-label {
+  font-size: 2.6rem;
+}
+
+.menu-right {
+  flex: 0 0 24rem;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  padding-top: 1rem;
+}
+
+.menu-right .sign {
+  width: 100%;
+}
+
+/* ---------- Level select / credits ---------- */
+
+.menu-center {
+  box-sizing: border-box;
+  min-height: 100%;
+  width: min(36rem, calc(100vw - 2rem));
+  margin: 0 auto;
+  padding: 1.6rem 0;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.1rem;
+}
+
+.menu-center > .lockup,
+.menu-center > .label {
+  align-self: center;
+}
+
+.credits-panel {
+  max-height: calc(100vh - var(--band-h) - var(--shutter-h) - 10rem);
+  min-height: 8rem;
+  overflow-y: auto;
+
+  background: var(--cream);
+  border: 5px solid var(--ink);
+  border-radius: 14px;
+}
+
+.credits-panel .shop-band {
+  position: sticky;
+  top: 0;
+
+  font-size: 1rem;
+  text-align: left;
+}
+
+.credits-panel .shop-band:first-child {
+  border-top: 0;
+}
+
+.ss-credit {
+  padding: 0.55rem 1rem;
+  border-bottom: 2px solid rgba(26, 23, 20, 0.2);
+}
+
+.ss-credit strong {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.ss-credit span {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.ss-credit small {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.ss-credit .ss-todo {
+  color: var(--maroon);
+  font-weight: 800;
+}
+
+/* ============================================================
+   LOADING SCREEN
+   ============================================================ */
+
+.ss-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+
+  font-family: var(--font-sign);
+  color: var(--ink);
+
+  opacity: 1;
+  transition: opacity 0.6s ease;
+}
+
+.ss-loading.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ss-loading-panel {
+  position: absolute;
+  inset: 0 0 calc(var(--band-h) + var(--shutter-h));
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+}
+
+.ss-loading-meter {
+  width: min(32rem, calc(100vw - 2rem));
+}
+
+.ss-loading-track {
+  height: 2rem;
+  padding: 4px;
+  box-sizing: border-box;
+
+  background: var(--sign-white);
+  border: 4px solid var(--sign-white);
+  border-radius: 18px;
+  box-shadow: 0 0 0 3px var(--ink);
+}
+
+.ss-loading-bar {
+  --chev: 18px;
+
+  width: 0%;
+  height: 100%;
+
+  border-radius: 10px;
+  transition: width 0.2s ease;
+}
+
+.ss-loading-status {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.8rem;
+
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.ss-loading-error {
+  margin-top: 0.6rem;
+  min-height: 1em;
+
+  color: var(--maroon);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+/* ============================================================
+   HUD
+   ============================================================ */
+
+.hud {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+
+  pointer-events: none;
+
+  font-family: var(--font-sign);
+  color: var(--ink);
+}
+
+.hud > * {
+  position: absolute;
+}
+
+/* ---------- Top-left: route sign ---------- */
+
+.hud-route {
+  top: 1rem;
+  left: 1rem;
+  width: 17rem;
+}
+
+.hud-route .sign-head {
+  padding: 0.3rem 0.8rem;
+  border-radius: 14px 14px 0 0;
+  font-size: 0.85rem;
+}
+
+.hud-route .sign-body {
+  padding: 0.25rem 0.3rem;
+  border-radius: 0 0 14px 14px;
+}
+
+.hud-route .sign-row {
+  grid-template-columns: 2.6rem 1fr auto auto;
+  min-height: 0;
+  font-size: 1.1rem;
+}
+
+.hud-route .sign-code {
+  font-size: 1.6rem;
+}
+
+.hud-distance {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Top-right: pursuer meter + labels ---------- */
+
+.hud-right {
+  top: 1rem;
+  right: 1rem;
+  width: 15rem;
+
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+.hud-tail {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.hud-tail .lockup {
+  transform: none;
+}
+
+.hud-tail .lk-rye {
+  font-size: 1.05rem;
+}
+
+.hud-tail .lk-slab {
+  min-width: 4.2rem;
+  justify-content: center;
+  font-size: 1.3rem;
+}
+
+.hud-tail-track {
+  width: 100%;
+  height: 28px;
+  margin-top: 6px;
+  padding: 3px;
+  box-sizing: border-box;
+
+  background: var(--sign-white);
+  border: 3px solid var(--ink);
+  border-radius: 10px;
+}
+
+.hud-tail-fill {
+  --chev: 10px;
+
+  width: 0%;
+  height: 100%;
+  border-radius: 6px;
+}
+
+.hud-labels {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ---------- Bottom-left: speed decal ---------- */
+
+.hud-speed {
+  left: 1rem;
+  bottom: 1rem;
+
+  min-width: 12rem;
+  padding: 0.5rem 1.2rem 0;
+}
+
+.hud-speed-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.hud-speed-value {
+  min-width: 2.2em;
+  text-align: right;
+  font-size: 3rem;
+}
+
+.hud-speed-unit {
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.hud-speed .decal-stripes {
+  margin: 0.4rem -1.2rem 0.4rem;
+}
+
+.hud-speed .decal-stripes i {
+  height: 0.4rem;
+}
+
+/* ---------- Bottom-right: roof load ---------- */
+
+.hud-roof {
+  right: 1rem;
+  bottom: 1rem;
+  width: 15rem;
+
+  overflow: hidden;
+  border: 4px solid var(--ink);
+  border-radius: 16px;
+}
+
+.hud-roof-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 0.3rem 0.8rem;
+
+  background: var(--mustard);
+  border-bottom: 4px solid var(--ink);
+
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+/* Maroon on mustard is ~3.1:1, so it stays large-text sized */
+.hud-roof-count {
+  color: var(--maroon);
+  font-family: var(--font-title);
+  font-size: 1.8rem;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.hud-roof-body {
+  padding: 0.55rem 0.8rem 0.5rem;
+  background: var(--cream);
+}
+
+.hud-roof-boxes {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.hud-roof-boxes i {
+  width: 1.6rem;
+  height: 1.15rem;
+
+  border: 3px solid var(--ink);
+  border-radius: 3px;
+}
+
+.hud-roof-boxes i.full {
+  background: var(--cargo);
+}
+
+.hud-roof-stats {
+  margin-top: 0.45rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-roof-status {
+  margin-top: 0.2rem;
+
+  color: var(--maroon);
+  font-family: var(--font-ornament);
+  font-size: 1.3rem;
+  text-transform: lowercase;
+}
+
+.hud-roof-status.secure {
+  color: var(--sign-green);
+}
+
+/* ---------- Bottom-centre: pause hint ---------- */
+
+.hud-hint {
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+}

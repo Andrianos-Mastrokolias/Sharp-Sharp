@@ -2,6 +2,15 @@
 import * as THREE from 'three';
 import './style.css';
 
+// UI fonts, bundled locally (no CDN at runtime)
+import '@fontsource/barlow/600.css';
+import '@fontsource/barlow/700.css';
+import '@fontsource/barlow/800.css';
+import '@fontsource/bungee';
+import '@fontsource/alfa-slab-one';
+import '@fontsource/rye';
+import './ui/theme.css';
+
 import { createTaxi } from './vehicle/Taxi.js';
 import { CargoSystem } from './vehicle/CargoSystem.js';
 import { VehicleController } from './vehicle/VehicleController.js';
@@ -17,7 +26,20 @@ import { LevelManager, LEVELS } from './world/LevelManager.js';
 import { createBox, MAIN_POTHOLES } from './world/environments/helpers.js';
 
 import { LoadingScreen } from './ui/LoadingScreen.js';
-import { levelSelectHTML, creditsHTML } from './ui/screens.js';
+import {
+  ROUTES,
+  lockup,
+  decalButton,
+  labelButton,
+  labelRow,
+  signStat,
+  controlsList,
+  menuBackdropHTML,
+  mainMenuHTML,
+  levelSelectHTML,
+  creditsHTML
+} from './ui/screens.js';
+import { Hud } from './ui/Hud.js';
 import { CREDITS } from './ui/credits.js';
 
 // ============================================================
@@ -135,7 +157,7 @@ const cargoSystem = new CargoSystem({
       phase === GamePhase.PLAYING &&
       event.remaining < MINIMUM_CARGO
     ) {
-      failLevel('Too much cargo was lost.');
+      failLevel('Eish, the load came off the roof. Too much cargo was lost.');
     }
   }
 });
@@ -195,146 +217,15 @@ function applyLevelVisuals(level) {
 }
 
 // ============================================================
-// SCREEN UI STYLING
-// ============================================================
-
-// Injected styles so this replacement works without requiring
-// changes to your existing style.css.
-const screenStyles = document.createElement('style');
-
-screenStyles.textContent = `
-  .ss-screen {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-
-    display: none;
-    align-items: center;
-    justify-content: center;
-
-    background: rgba(5, 12, 22, 0.82);
-    backdrop-filter: blur(10px);
-
-    font-family: Arial, Helvetica, sans-serif;
-    color: white;
-  }
-
-  .ss-screen.visible {
-    display: flex;
-  }
-
-  .ss-panel {
-    width: min(520px, calc(100vw - 40px));
-    max-height: calc(100vh - 40px);
-    overflow-y: auto;
-
-    padding: 35px;
-    box-sizing: border-box;
-
-    background: rgba(13, 25, 38, 0.97);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 18px;
-
-    box-shadow: 0 20px 70px rgba(0, 0, 0, 0.5);
-    text-align: center;
-  }
-
-  .ss-eyebrow {
-    color: #f5c84c;
-    font-size: 13px;
-    font-weight: bold;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-  }
-
-  .ss-title {
-    margin: 14px 0;
-    font-size: clamp(32px, 6vw, 52px);
-    line-height: 1.1;
-    font-weight: 900;
-  }
-
-  .ss-description {
-    margin: 15px 0 25px;
-    color: #c5d1db;
-    font-size: 16px;
-    line-height: 1.7;
-  }
-
-  .ss-stat {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 20px;
-
-    padding: 12px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    text-align: left;
-  }
-
-  .ss-stat span {
-    color: #aebdc8;
-  }
-
-  .ss-stat strong {
-    color: white;
-  }
-
-  .ss-button {
-    width: 100%;
-    display: block;
-    margin-top: 14px;
-    padding: 15px 20px;
-
-    border: 0;
-    border-radius: 10px;
-
-    background: #f5c84c;
-    color: #14202b;
-
-    font-size: 16px;
-    font-weight: 800;
-
-    cursor: pointer;
-  }
-
-  .ss-button:hover {
-    background: #ffdd72;
-  }
-
-  .ss-button.secondary {
-    background: #26394c;
-    color: white;
-  }
-
-  .ss-button.secondary:hover {
-    background: #344d66;
-  }
-
-  .ss-controls {
-    margin-top: 22px;
-    color: #93a8b8;
-    font-size: 13px;
-    line-height: 1.8;
-  }
-
-  .ss-good {
-    color: #4de09b;
-  }
-
-  .ss-bad {
-    color: #ff7785;
-  }
-`;
-
-document.head.appendChild(screenStyles);
-
-// ============================================================
 // SCREEN UI
 // ============================================================
 
+// Styled in ui/theme.css. The shop-front backdrop only shows on
+// the menu screens (data-variant="menu"); in-game screens get a
+// translucent scrim over the 3D scene instead.
 const screen = document.createElement('div');
 screen.className = 'ss-screen';
+screen.innerHTML = menuBackdropHTML();
 
 const panel = document.createElement('div');
 panel.className = 'ss-panel';
@@ -387,7 +278,7 @@ const screenActions = {
   // Menu sub-screens stay in the MENU phase, so Esc / P do
   // nothing here.
   levelSelect: () => {
-    showScreen(levelSelectHTML(LEVELS, LEVEL_DESCRIPTIONS));
+    showScreen(levelSelectHTML(LEVELS, LEVEL_DESCRIPTIONS), 'menu');
   },
 
   // All levels are unlocked; starts a fresh run from that level.
@@ -397,7 +288,7 @@ const screenActions = {
   },
 
   credits: () => {
-    showScreen(creditsHTML(CREDITS));
+    showScreen(creditsHTML(CREDITS), 'menu');
   },
 
   backToMenu: () => {
@@ -418,8 +309,12 @@ panel.addEventListener('click', event => {
   if (action) action(button.dataset);
 });
 
-function showScreen(html) {
+// variant: 'menu' (shop-front backdrop hides the scene) or
+// 'scrim' (in-game screens over the 3D scene).
+function showScreen(html, variant = 'scrim') {
   panel.innerHTML = html;
+  panel.scrollTop = 0;
+  screen.dataset.variant = variant;
   screen.classList.add('visible');
 }
 
@@ -427,52 +322,12 @@ function hideScreen() {
   screen.classList.remove('visible');
 }
 
-function statRow(label, value) {
-  return `
-    <div class="ss-stat">
-      <span>${label}</span>
-      <strong>${value}</strong>
-    </div>
-  `;
-}
-
 // ============================================================
 // MAIN MENU
 // ============================================================
 
 function showMainMenu() {
-  showScreen(`
-    <div class="ss-eyebrow">South African Taxi Simulator</div>
-
-    <h1 class="ss-title">SHARP-SHARP</h1>
-
-    <p class="ss-description">
-      Three levels. One taxi. Keep the cargo secure,
-      outrun danger and complete every delivery.
-    </p>
-
-    <button class="ss-button" data-action="startGame">
-      PLAY GAME
-    </button>
-
-    <button class="ss-button secondary" data-action="levelSelect">
-      SELECT LEVEL
-    </button>
-
-    <button class="ss-button secondary" data-action="credits">
-      CREDITS
-    </button>
-
-    <div class="ss-controls">
-      W / S — Accelerate / Brake<br>
-      A / D — Steer<br>
-      Space — Handbrake<br>
-      C — Change camera<br>
-      L — Headlights<br>
-      R — Retry current level<br>
-      Esc / P — Pause
-    </div>
-  `);
+  showScreen(mainMenuHTML(LEVELS), 'menu');
 }
 
 // ============================================================
@@ -481,34 +336,34 @@ function showMainMenu() {
 
 function showLevelIntro(level) {
   const config = LEVELS[level];
+  const route = ROUTES[level];
 
   showScreen(`
-    <div class="ss-eyebrow">
-      LEVEL ${level} OF ${LAST_LEVEL}
+    <div class="ss-column">
+      <div class="sign">
+        <div class="sign-head">LEVEL ${level} OF ${LAST_LEVEL}</div>
+
+        <div class="sign-body">
+          <div class="sign-row ss-intro-title">
+            <span class="sign-code">${route.code}</span>
+            <span class="sign-name">${config.name}</span>
+            <span class="sign-arrow" aria-hidden="true">${route.arrow}</span>
+          </div>
+
+          <p class="sign-text">${LEVEL_DESCRIPTIONS[level]}</p>
+
+          ${signStat('Objective', 'Reach the destination')}
+          ${signStat('Minimum cargo', MINIMUM_CARGO)}
+          ${signStat('Finish', 'Stop inside the delivery zone')}
+        </div>
+
+        <div class="sign-chevron chevron"></div>
+      </div>
+
+      ${decalButton('beginLevel', `START LEVEL ${level}`)}
+
+      ${labelRow(labelButton('mainMenu', 'MAIN MENU'))}
     </div>
-
-    <h1 class="ss-title">
-      ${config.name}
-    </h1>
-
-    <p class="ss-description">
-      ${LEVEL_DESCRIPTIONS[level]}
-    </p>
-
-    ${statRow('Objective', 'Reach the destination')}
-    ${statRow('Minimum cargo', MINIMUM_CARGO)}
-    ${statRow('Finish', 'Stop inside the delivery zone')}
-
-    <button class="ss-button" data-action="beginLevel">
-      START LEVEL ${level}
-    </button>
-
-    <button
-      class="ss-button secondary"
-      data-action="mainMenu"
-    >
-      MAIN MENU
-    </button>
   `);
 }
 
@@ -524,7 +379,10 @@ function completeLevel(event) {
   // Defensive check: a delivery only counts if enough cargo
   // actually reaches the destination.
   if (cargo.remaining < MINIMUM_CARGO) {
-    failLevel('You reached the destination without enough cargo.');
+    failLevel(
+      'Eish, the load came off the roof. ' +
+      'You reached the destination without enough cargo.'
+    );
     return;
   }
 
@@ -558,33 +416,29 @@ function completeLevel(event) {
   }
 
   showScreen(`
-    <div class="ss-eyebrow ss-good">
-      DELIVERY SUCCESSFUL
+    <div class="ss-column">
+      ${lockup([
+        [{ text: 'laduma!', bg: 'ink', font: 'rye' }],
+        [{ text: 'DELIVERED', bg: 'maroon', font: 'bungee' }]
+      ])}
+
+      <div class="sign">
+        <div class="sign-head">LEVEL ${currentLevel} COMPLETE</div>
+
+        <div class="sign-body">
+          ${signStat('Delivery time', `${event.time.toFixed(1)} s`)}
+          ${signStat('Cargo delivered', `${cargo.remaining} / ${cargo.total}`)}
+          ${signStat('Next destination', LEVELS[currentLevel + 1].name)}
+        </div>
+      </div>
+
+      ${decalButton('nextLevel', 'NEXT LEVEL →')}
+
+      ${labelRow(
+        labelButton('retryLevel', 'PLAY AGAIN'),
+        labelButton('mainMenu', 'MAIN MENU')
+      )}
     </div>
-
-    <h1 class="ss-title">
-      LEVEL ${currentLevel} COMPLETE!
-    </h1>
-
-    <p class="ss-description">
-      You completed ${LEVELS[currentLevel].name}.
-      Your next delivery is waiting.
-    </p>
-
-    ${statRow('Delivery time', `${event.time.toFixed(1)} s`)}
-    ${statRow('Cargo delivered', `${cargo.remaining} / ${cargo.total}`)}
-    ${statRow('Next destination', LEVELS[currentLevel + 1].name)}
-
-    <button class="ss-button" data-action="nextLevel">
-      NEXT LEVEL →
-    </button>
-
-    <button
-      class="ss-button secondary"
-      data-action="retryLevel"
-    >
-      REPLAY LEVEL
-    </button>
   `);
 }
 
@@ -592,7 +446,8 @@ function completeLevel(event) {
 // LEVEL FAILED
 // ============================================================
 
-function failLevel(reason) {
+// flavour: the Rye word in the GAME OVER lockup
+function failLevel(reason, flavour = 'eish') {
   if (phase !== GamePhase.PLAYING) return;
 
   phase = GamePhase.FAILED;
@@ -603,31 +458,27 @@ function failLevel(reason) {
   const cargo = cargoSystem.getState();
 
   showScreen(`
-    <div class="ss-eyebrow ss-bad">
-      DELIVERY FAILED
+    <div class="ss-column">
+      ${lockup([[
+        { text: flavour, bg: 'ink', font: 'rye' },
+        { text: 'GAME OVER', bg: 'maroon', font: 'bungee' }
+      ]])}
+
+      <p class="ss-reason">${reason}</p>
+
+      <div class="sign">
+        <div class="sign-head">DELIVERY FAILED</div>
+
+        <div class="sign-body">
+          ${signStat('Level', `${currentLevel} — ${LEVELS[currentLevel].name}`)}
+          ${signStat('Cargo remaining', `${cargo.remaining} / ${cargo.total}`)}
+        </div>
+      </div>
+
+      ${decalButton('retryLevel', 'RETRY LEVEL')}
+
+      ${labelRow(labelButton('mainMenu', 'MAIN MENU'))}
     </div>
-
-    <h1 class="ss-title">
-      GAME OVER
-    </h1>
-
-    <p class="ss-description">
-      ${reason}
-    </p>
-
-    ${statRow('Level', `${currentLevel} — ${LEVELS[currentLevel].name}`)}
-    ${statRow('Cargo remaining', `${cargo.remaining} / ${cargo.total}`)}
-
-    <button class="ss-button" data-action="retryLevel">
-      RETRY LEVEL
-    </button>
-
-    <button
-      class="ss-button secondary"
-      data-action="mainMenu"
-    >
-      MAIN MENU
-    </button>
   `);
 }
 
@@ -643,34 +494,27 @@ function pauseGame() {
   clearKeys();
 
   showScreen(`
-    <div class="ss-eyebrow">
-      LEVEL ${currentLevel} — ${LEVELS[currentLevel].name}
-    </div>
+    <div class="ss-column">
+      ${lockup([
+        [
+          { text: 'take a breather', bg: 'ink', font: 'rye' },
+          { text: 'PAUSED', bg: 'mustard', font: 'slab' }
+        ],
+        [{
+          text: `LEVEL ${currentLevel} · ${LEVELS[currentLevel].name.toUpperCase()}`,
+          bg: 'cream',
+          font: 'sign'
+        }]
+      ])}
 
-    <h1 class="ss-title">
-      PAUSED
-    </h1>
+      ${decalButton('resume', 'RESUME')}
 
-    <button class="ss-button" data-action="resume">
-      RESUME
-    </button>
+      ${labelRow(
+        labelButton('retryLevel', 'RETRY'),
+        labelButton('mainMenu', 'MAIN MENU')
+      )}
 
-    <button
-      class="ss-button secondary"
-      data-action="retryLevel"
-    >
-      RESTART LEVEL
-    </button>
-
-    <button
-      class="ss-button secondary"
-      data-action="mainMenu"
-    >
-      MAIN MENU
-    </button>
-
-    <div class="ss-controls">
-      Esc / P — Resume
+      ${controlsList()}
     </div>
   `);
 }
@@ -703,39 +547,36 @@ function finishGame() {
 
   const resultRows = results
     .sort((a, b) => a.level - b.level)
-    .map(result => statRow(
-      `Level ${result.level} — ${result.name}`,
+    .map(result => signStat(
+      `${ROUTES[result.level]?.code ?? `L${result.level}`} · ${result.name}`,
       `${result.time.toFixed(1)} s`
     ))
     .join('');
 
   showScreen(`
-    <div class="ss-eyebrow ss-good">
-      ALL DELIVERIES COMPLETE
+    <div class="ss-column">
+      ${lockup([
+        [{ text: 'ayoba!', bg: 'ink', font: 'rye' }],
+        [{ text: 'ALL DELIVERED', bg: 'maroon', font: 'bungee' }]
+      ])}
+
+      <p class="ss-reason">Sharp-sharp, driver. Every load delivered.</p>
+
+      <div class="sign">
+        <div class="sign-head">ALL DELIVERIES COMPLETE</div>
+
+        <div class="sign-body">
+          ${resultRows}
+          ${signStat('Total driving time', `${totalTime.toFixed(1)} s`)}
+        </div>
+
+        <div class="sign-chevron chevron"></div>
+      </div>
+
+      ${decalButton('playAgain', 'PLAY AGAIN')}
+
+      ${labelRow(labelButton('mainMenu', 'MAIN MENU'))}
     </div>
-
-    <h1 class="ss-title">
-      YOU WIN!
-    </h1>
-
-    <p class="ss-description">
-      Congratulations! You completed all three
-      Sharp-Sharp deliveries.
-    </p>
-
-    ${resultRows}
-    ${statRow('Total driving time', `${totalTime.toFixed(1)} s`)}
-
-    <button class="ss-button" data-action="playAgain">
-      PLAY AGAIN
-    </button>
-
-    <button
-      class="ss-button secondary"
-      data-action="mainMenu"
-    >
-      MAIN MENU
-    </button>
   `);
 }
 
@@ -762,7 +603,7 @@ const levelManager = new LevelManager({
 
   // Your existing pursuit system triggers this if caught.
   onCaptured: () => {
-    failLevel('You were caught by the pursuer.');
+    failLevel('Haibo! The pursuer caught you.', 'haibo!');
   }
 });
 
@@ -898,42 +739,8 @@ window.addEventListener('blur', clearKeys);
 // HUD
 // ============================================================
 
-const hud = document.createElement('div');
-hud.className = 'hud';
-
-hud.innerHTML = `
-  <h1>SHARP-SHARP</h1>
-
-  <p id="level-label"></p>
-  <div id="speed"></div>
-  <div id="camera-mode"></div>
-  <div id="headlights"></div>
-  <div id="cargo"></div>
-  <div id="straps"></div>
-  <div id="cargo-status"></div>
-
-  <div class="instructions">
-    W / S — Accelerate / Brake<br>
-    A / D — Steer<br>
-    Space — Handbrake<br>
-    C — Change camera<br>
-    L — Toggle headlights<br>
-    Mouse drag — Look around in chase view<br>
-    Mouse wheel — Chase camera zoom<br>
-    R — Retry current level<br>
-    Esc / P — Pause
-  </div>
-`;
-
-document.body.appendChild(hud);
-
-const levelLabel = document.getElementById('level-label');
-const speedDisplay = document.getElementById('speed');
-const cameraModeDisplay = document.getElementById('camera-mode');
-const headlightsDisplay = document.getElementById('headlights');
-const cargoDisplay = document.getElementById('cargo');
-const strapDisplay = document.getElementById('straps');
-const cargoStatusDisplay = document.getElementById('cargo-status');
+// Built once; updateHUD() feeds it the live state each frame.
+const hud = new Hud();
 
 // ============================================================
 // HUD HELPERS
@@ -953,56 +760,15 @@ function formatCameraName(mode) {
 }
 
 function updateHUD() {
-  const cargo = cargoSystem.getState();
-  const objective = levelManager.getState();
-
-  const levelName = LEVELS[currentLevel].name;
-
-  let objectiveText = '';
-
-  if (
-    phase === GamePhase.PLAYING &&
-    objective.status === 'driving'
-  ) {
-    const distance = Math.round(
-      objective.distanceToDestination
-    );
-
-    objectiveText = ` — ${distance} m to destination (stop in the zone)`;
-
-    const pursuit = objective.pursuit;
-
-    if (
-      pursuit?.state === 'chasing' &&
-      Number.isFinite(pursuit.distance)
-    ) {
-      objectiveText += ` | PURSUED ${Math.round(pursuit.distance)} m`;
-    } else if (pursuit?.state === 'searching') {
-      objectiveText += ' | Pursuer searching';
-    }
-  }
-
-  levelLabel.textContent =
-    `Level ${currentLevel} — ${levelName}${objectiveText}`;
-
-  speedDisplay.textContent =
-    `Speed: ${Math.round(Math.abs(vehicle.getSpeed()) * 3.6)} km/h`;
-
-  cameraModeDisplay.textContent =
-    `Camera: ${formatCameraName(cameraSystem.getMode())}`;
-
-  headlightsDisplay.textContent =
-    `Headlights: ${getHeadlightsEnabled() ? 'ON' : 'OFF'}`;
-
-  cargoDisplay.textContent =
-    `Cargo: ${cargo.remaining} / ${cargo.total} | ` +
-    `Stability: ${Math.round(cargo.stability)}%`;
-
-  strapDisplay.textContent =
-    `Straps: ${Math.round(cargo.straps)}%`;
-
-  cargoStatusDisplay.textContent =
-    `Load status: ${cargo.status}`;
+  hud.update({
+    level: currentLevel,
+    levelName: LEVELS[currentLevel].name,
+    objective: levelManager.getState(),
+    cargo: cargoSystem.getState(),
+    speedKmh: Math.abs(vehicle.getSpeed()) * 3.6,
+    cameraMode: formatCameraName(cameraSystem.getMode()),
+    headlightsOn: getHeadlightsEnabled()
+  });
 }
 
 // ============================================================
