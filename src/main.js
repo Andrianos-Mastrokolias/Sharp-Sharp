@@ -17,6 +17,8 @@ import { LevelManager, LEVELS } from './world/LevelManager.js';
 import { createBox, MAIN_POTHOLES } from './world/environments/helpers.js';
 
 import { LoadingScreen } from './ui/LoadingScreen.js';
+import { levelSelectHTML, creditsHTML } from './ui/screens.js';
+import { CREDITS } from './ui/credits.js';
 
 // ============================================================
 // GAME CONFIGURATION
@@ -380,6 +382,26 @@ const screenActions = {
     loadLevel(FIRST_LEVEL, { showIntro: false });
     phase = GamePhase.MENU;
     showMainMenu();
+  },
+
+  // Menu sub-screens stay in the MENU phase, so Esc / P do
+  // nothing here.
+  levelSelect: () => {
+    showScreen(levelSelectHTML(LEVELS, LEVEL_DESCRIPTIONS));
+  },
+
+  // All levels are unlocked; starts a fresh run from that level.
+  playLevel: ({ level }) => {
+    results.length = 0;
+    loadLevel(Number(level));
+  },
+
+  credits: () => {
+    showScreen(creditsHTML(CREDITS));
+  },
+
+  backToMenu: () => {
+    showMainMenu();
   }
 };
 
@@ -392,7 +414,8 @@ panel.addEventListener('click', event => {
 
   const action = screenActions[button.dataset.action];
 
-  if (action) action();
+  // data-* attributes (e.g. data-level) are passed through.
+  if (action) action(button.dataset);
 });
 
 function showScreen(html) {
@@ -430,6 +453,14 @@ function showMainMenu() {
 
     <button class="ss-button" data-action="startGame">
       PLAY GAME
+    </button>
+
+    <button class="ss-button secondary" data-action="levelSelect">
+      SELECT LEVEL
+    </button>
+
+    <button class="ss-button secondary" data-action="credits">
+      CREDITS
     </button>
 
     <div class="ss-controls">
