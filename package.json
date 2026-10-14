@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node tests/budget.mjs && node tests/environments.test.mjs && node tests/people.test.mjs && node tests/traffic.test.mjs && node tests/pursuit.test.mjs"
   },
   "devDependencies": {
     "vite": "^8.2.2"
