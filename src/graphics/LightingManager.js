@@ -5,6 +5,13 @@ import {
 } from 'three/examples/jsm/loaders/RGBELoader.js';
 
 
+// Level 3's night HDRI is applied through scene.environment, which lights
+// every surface at full strength by default. This scales it down so the
+// headlights carry the level. (Levels 1 and 2 use 1.)
+const L3_ENVIRONMENT_INTENSITY =
+  0.5;
+
+
 export class LightingManager {
 
   constructor({
@@ -483,6 +490,10 @@ export class LightingManager {
 
     this.renderer.toneMappingExposure =
       0.92;
+
+
+    this.scene.environmentIntensity =
+      1;
   }
 
 
@@ -559,6 +570,10 @@ export class LightingManager {
 
     this.renderer.toneMappingExposure =
       1.0;
+
+
+    this.scene.environmentIntensity =
+      1;
   }
 
 
@@ -635,6 +650,10 @@ export class LightingManager {
 
     this.renderer.toneMappingExposure =
       0.72;
+
+
+    this.scene.environmentIntensity =
+      L3_ENVIRONMENT_INTENSITY;
   }
 
 
