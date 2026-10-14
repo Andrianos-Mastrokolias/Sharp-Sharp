@@ -1,6 +1,9 @@
 // Headless pursuit test: node tests/pursuit.test.mjs
 import * as THREE from 'three';
 import assert from 'node:assert/strict';
+import { PerformanceObserver } from 'node:perf_hooks';
+import v8 from 'node:v8';
+import vm from 'node:vm';
 import { LevelManager, LEVELS } from '../src/world/LevelManager.js';
 import {
   createPursuerMesh, STANDOFF_DISTANCE, MIN_SEPARATION, CRUISE_GAP,
@@ -255,22 +258,23 @@ test('L3: pursuer starts 15 m behind the taxi (bounds clamp), idle until the del
   assert.equal(e.lm.pursuit.state, 'idle', 'start delay (1 s)');
 });
 
-test('L3: lights on is detected as the pursuer wakes (taxi at 28 m/s from the spawn)', () => {
+test('L3: lights on is detected as the pursuer wakes (taxi at 28 m/s from the spawn); the chase starts after the reaction', () => {
   const { e, wokeAt, distAtWake } = l3Wake(true, MAX_SPEED);
   assert.ok(wokeAt !== null, 'woke up');
-  assert.ok(wokeAt >= L3_CFG.startDelay && wokeAt < L3_CFG.startDelay + 3 * DT, `woke at ${wokeAt}`);
+  const chaseAt = L3_CFG.startDelay + L3_CFG.reactionTime;   // already stopped when it sights
+  assert.ok(wokeAt >= chaseAt && wokeAt < chaseAt + 3 * DT, `chasing at ${wokeAt}`);
   assert.ok(distAtWake < L3_CFG.detectionRadius, `${distAtWake} m`);
   assert.equal(e.lm.pursuit.state, 'chasing');
 });
 
-test('L3: lights off at the same positions stays idle', () => {
+test('L3: lights off at the same positions is never detected (patrols)', () => {
   const { e, wokeAt } = l3Wake(false, MAX_SPEED, 6);
   assert.equal(wokeAt, null);
-  assert.equal(e.lm.pursuit.state, 'idle');
+  assert.equal(e.lm.pursuit.state, 'patrolling');
   assert.ok(gap(e) > 100, 'taxi is long gone');
 });
 
-test('L3: realistic start (taxi accelerating at 13 m/s^2): on = detected, off = idle', () => {
+test('L3: realistic start (taxi accelerating at 13 m/s^2): on = detected, off = patrolling', () => {
   const run3 = (lights) => {
     const e = make();
     e.lm.load(3);
@@ -289,7 +293,7 @@ test('L3: realistic start (taxi accelerating at 13 m/s^2): on = detected, off = 
   const on = run3(true), off = run3(false);
   assert.equal(on.state, 'chasing');
   assert.ok(on.woke > 15 && on.woke < 120, `on: ${on.woke}`);
-  assert.equal(off.state, 'idle');
+  assert.equal(off.state, 'patrolling');
 });
 
 test('L3: lights on later, within 120 m, wakes it; beyond 120 m does not', () => {
@@ -298,13 +302,16 @@ test('L3: lights on later, within 120 m, wakes it; beyond 120 m does not', () =>
   e.setLights(false);
   e.taxi.position.set(0, 0, L3_PURSUER_Z + 130);
   step(e.lm, 2);
-  assert.equal(e.lm.pursuit.state, 'idle');
+  const p = e.lm.pursuit;
+  assert.equal(p.state, 'patrolling');
+  p.z = L3_PURSUER_Z; p.speed = 0;
   e.setLights(true);
-  step(e.lm, 0.5);
-  assert.equal(e.lm.pursuit.state, 'idle', '130 m: outside the 120 m radius');
+  e.lm.update(DT, 0);
+  assert.equal(p.state, 'patrolling', '130 m: outside the 120 m radius');
+  p.z = L3_PURSUER_Z; p.speed = 0;
   e.taxi.position.z = L3_PURSUER_Z + 115;
-  step(e.lm, DT * 2);
-  assert.equal(e.lm.pursuit.state, 'chasing', '115 m: inside it');
+  e.lm.update(DT, 0);
+  assert.equal(p.state, 'reacting', '115 m: inside it');
 
   // Lights off but close (<= 15 m) is still seen
   const f = make();
@@ -312,7 +319,7 @@ test('L3: lights on later, within 120 m, wakes it; beyond 120 m does not', () =>
   f.setLights(false);
   f.taxi.position.set(0, 0, L3_PURSUER_Z + 14);
   step(f.lm, 1.5);
-  assert.equal(f.lm.pursuit.state, 'chasing', 'lights off, 14 m');
+  assert.equal(f.lm.pursuit.state, 'reacting', 'lights off, 14 m');
 });
 
 test('L3: lights off and beyond 30 m for loseTime loses the taxi; lights on does not', () => {
@@ -360,7 +367,7 @@ test('activateAfterDelay option still wakes the pursuer on the timer (no level u
   e.setLights(false);
   e.taxi.position.set(0, 0, L3_PURSUER_Z + 150);
   step(e.lm, 1.2);
-  assert.equal(e.lm.pursuit.state, 'chasing');
+  assert.equal(e.lm.pursuit.state, 'reacting');
 });
 
 test('L2 / L1 pursuit unchanged: ignore headlights, same numbers', () => {
@@ -1361,9 +1368,244 @@ test('L2: pursuer wheels stay on the flyover surface along the whole structure',
   assert.ok(worstFloat <= 0.15, `wheel ${worstFloat.toFixed(3)} m above surface (${atFloat})`);
 });
 
+// ---- Level 3: patrol + reaction ------------------------------------
+// patrolSpeed / reactionTime are config options that default to off
+// (Levels 1 and 2 unchanged). Level 3 wakes the pursuer into a patrol
+// along +Z; first sighting makes it stop and flash for reactionTime.
+
+// Taxi speed model, a read-only copy of VehicleController's forward
+// speed step (acceleration 13, air resistance 0.012, clamp 28).
+function taxiStep(v, dt, cap = MAX_SPEED) {
+  v += 13 * dt;
+  v -= v * Math.abs(v) * 0.012 * dt;
+  return Math.min(v, cap, MAX_SPEED);
+}
+
+// Level 3 with the taxi at full throttle (capped at `cap`) driving +Z.
+// lightsAt(t) -> boolean. Returns first-sighting time and gaps.
+function l3Drive({ lightsAt, cap = MAX_SPEED, seconds = 14 }) {
+  const e = make();
+  e.lm.load(3);
+  e.taxi.position.set(0, 0, L3_SPAWN_Z);
+  const p = e.lm.pursuit;
+  let v = 0, sighted = null, minGap = Infinity, within12 = null;
+  for (let t = 0; t < seconds; t += DT) {
+    v = taxiStep(v, DT, cap);
+    e.setSpeed(v);
+    e.setLights(lightsAt(t));
+    e.taxi.position.z += v * DT;
+    e.lm.update(DT, t);
+    minGap = Math.min(minGap, gap(e));
+    if (sighted === null && (p.state === 'reacting' || p.state === 'chasing')) sighted = t;
+    if (within12 === null && gap(e) <= 12) within12 = t;
+  }
+  return { e, sighted, minGap, within12, finalGap: gap(e) };
+}
+
+test('patrol/reaction: Level 3 config uses the named constants; Levels 1 and 2 default to off', () => {
+  assert.equal(L3_CFG.patrolSpeed, 17);
+  assert.equal(L3_CFG.reactionTime, 1.5);
+  for (const n of [1, 2]) {
+    assert.equal(LEVELS[n].pursuit.patrolSpeed, undefined);
+    assert.equal(LEVELS[n].pursuit.reactionTime, undefined);
+    const e = make();
+    e.lm.load(n);
+    assert.equal(e.lm.pursuit.config.patrolSpeed, 0);
+    assert.equal(e.lm.pursuit.config.reactionTime, 0);
+  }
+});
+
+test('patrol: idle until the wake delay, then drives along +Z at patrolSpeed and stops at destination - 40', () => {
+  const e = make();
+  e.lm.load(3);
+  e.setLights(false);
+  e.taxi.position.set(0, 0, 145);          // 20 m past the patrol's end (125), outside the delivery zone
+  const p = e.lm.pursuit;
+  step(e.lm, 0.9);
+  assert.equal(p.state, 'idle');
+  assert.equal(p.z, L3_PURSUER_Z, 'not moving before the delay');
+  step(e.lm, 0.3);
+  assert.equal(p.state, 'patrolling');
+  let top = 0;
+  for (let t = 0; t < 30; t += DT) {
+    const before = p.z;
+    e.lm.update(DT, t);
+    top = Math.max(top, p.speed);
+    assert.ok(p.z >= before - 1e-9, 'never reverses');
+    assert.ok(Math.abs(p.x) < 1e-9, 'stays in its lane');
+    assert.ok(['patrolling', 'idle'].includes(p.state), p.state);
+  }
+  assert.ok(Math.abs(top - 17) < 1e-6, `top speed ${top}`);
+  assert.equal(p.state, 'idle');
+  assert.ok(Math.abs(p.z - 125) < 1, `stopped at ${p.z}`);
+  assert.equal(p.speed, 0);
+  step(e.lm, 3);
+  assert.ok(Math.abs(p.z - 125) < 1, 'stays put, does not patrol again');
+  assert.equal(p.state, 'idle');
+});
+
+test('patrol: lights off, a taxi at full throttle is never detected', () => {
+  const r = l3Drive({ lightsAt: () => false });
+  assert.equal(r.sighted, null);
+  assert.ok(r.minGap > 15, `min gap ${r.minGap}`);
+  assert.ok(r.finalGap > 100, `final gap ${r.finalGap}`);
+  assert.equal(r.e.captured.length, 0);
+});
+
+test('patrol: lights off, a taxi capped at 12 m/s is detected', () => {
+  const r = l3Drive({ lightsAt: () => false, cap: 12 });
+  assert.ok(r.sighted !== null && r.sighted > 1, `sighted at ${r.sighted}`);
+});
+
+test('reaction: from the first sighting it brakes to a stop, holds still flashing for reactionTime, then chases', () => {
+  const e = make();
+  e.lm.load(3);
+  e.setLights(false);
+  e.taxi.position.set(0, 0, -50);            // parked ahead: the patrol runs into it
+  const p = e.lm.pursuit;
+  let t = 0, maxDecel = 0;
+  while (p.state === 'patrolling' || p.state === 'idle') {
+    e.lm.update(DT, t); t += DT;
+    assert.ok(t < 10, 'never sighted');
+  }
+  assert.equal(p.state, 'reacting');
+  assert.ok(gap(e) <= 15 + 1, `sighted at ${gap(e)}`);
+  assert.ok(p.speed > 1, 'still rolling on the first frame');
+  const lit = new Set();
+  let holdZ = null, held = 0;
+  while (p.state === 'reacting') {
+    const prev = p.speed;
+    e.lm.update(DT, t); t += DT;
+    maxDecel = Math.max(maxDecel, (prev - p.speed) / DT);
+    lit.add(p.mesh.children.find(c => c.material?.emissiveIntensity === 2.5)?.material.color.getHex());
+    assert.equal(e.captured.length, 0);
+    if (p.state !== 'reacting') { break; }
+    assert.equal(p.captureTimer, 0);
+    assert.equal(p.pressure, 0);
+    if (p.speed === 0) { holdZ ??= p.z; held += DT; assert.equal(p.z, holdZ, 'holds still'); }
+    assert.ok(t < 20);
+  }
+  assert.ok(maxDecel <= 24 + 1e-6, `braking ${maxDecel} (limit 24)`);
+  assert.ok(holdZ !== null, 'came to a stop');
+  assert.ok(Math.abs(held - 1.5) < 3 * DT, `held ${held} s`);
+  assert.equal(lit.size, 2, 'light bar alternates red/blue');
+  assert.equal(p.state, 'chasing');
+});
+
+test('reaction: no capture while it holds, even with the taxi inside capture range', () => {
+  const e = make();
+  e.lm.load(3);
+  e.setLights(true);
+  e.taxi.position.set(0, 0, L3_PURSUER_Z + 5);   // parked, lit, inside capture range
+  const p = e.lm.pursuit;
+  step(e.lm, 1.0 + 1.4);                      // wake delay + just under reactionTime
+  assert.equal(p.state, 'reacting');
+  assert.equal(p.speed, 0);
+  assert.equal(p.z, L3_PURSUER_Z);
+  assert.equal(e.captured.length, 0);
+  step(e.lm, 0.3);
+  assert.equal(p.state, 'chasing');
+});
+
+test('reaction: lights on at the start leave the taxi free running', () => {
+  const r = l3Drive({ lightsAt: () => true });
+  const movedAt = 1 + 1.5;                    // wake delay + hold (it is already stopped)
+  assert.ok(r.within12 === null || r.within12 - movedAt >= 4.5, `within 12 m at ${r.within12}`);
+});
+
+test('reaction: re-acquisition after lost has no reaction', () => {
+  const e = make();
+  e.lm.load(3);
+  e.setLights(true);
+  e.taxi.position.set(0, 0, L3_PURSUER_Z + 60);
+  const p = e.lm.pursuit;
+  step(e.lm, 3);
+  assert.equal(p.state, 'chasing');
+  p.setState('searching');
+  e.taxi.position.set(0, 0, p.z + 40);
+  e.lm.update(DT, 0);
+  assert.equal(p.state, 'chasing');
+  p.setState('lost');
+  e.lm.update(DT, 0);
+  assert.equal(p.state, 'chasing', 'lost -> chasing with no reaction');
+});
+
+test('patrol/reaction: reset, reload and level switches clear the state', () => {
+  const e = make();
+  const p = e.lm.pursuit;
+  for (const midState of ['patrolling', 'reacting', 'ended']) {
+    e.lm.load(3);
+    e.setLights(false);
+    e.taxi.position.set(0, 0, midState === 'ended' ? 145 : -50);
+    const reached = () => (midState === 'ended' ? p.patrolEnded : p.state === midState);
+    for (let t = 0; t < 40 && !reached(); t += DT) e.lm.update(DT, t);
+    assert.ok(reached(), `reached ${midState}`);
+    e.lm.reset();
+    assert.equal(p.state, 'idle');
+    assert.equal(p.speed, 0);
+    assert.equal(p.patrolEnded, false);
+    assert.equal(p.reactTimer, 0);
+    assert.equal(p.z, L3_PURSUER_Z);
+    e.lm.load(3);
+    assert.equal(p.state, 'idle');
+    assert.equal(p.patrolEnded, false);
+    assert.equal(p.reactTimer, 0);
+  }
+  // Switch to Level 2 mid-patrol: no patrol or reaction there
+  e.lm.load(3);
+  e.setLights(false);
+  e.taxi.position.set(0, 0, 145);
+  step(e.lm, 2);
+  assert.equal(p.state, 'patrolling');
+  e.lm.load(2);
+  assert.equal(p.config.patrolSpeed, 0);
+  assert.equal(p.state, 'idle');
+  e.setLights(false);
+  step(e.lm, 10);
+  assert.ok(!['patrolling', 'reacting'].includes(p.state), `L2 state ${p.state}`);
+  // and Level 3 patrols again afterwards
+  e.lm.load(3);
+  e.setLights(false);
+  e.taxi.position.set(0, 0, 145);
+  step(e.lm, 2);
+  assert.equal(p.state, 'patrolling');
+});
+
+test('patrol and reaction frames do not allocate (no GC over 200k frames)', async () => {
+  // Math.hypot is a variadic builtin that allocates a number per call on
+  // V8 (the existing per-frame distance checks use it). It is swapped for
+  // an equivalent here so the test sees only this change's allocations.
+  const hypot = Math.hypot;
+  Math.hypot = (a, b) => Math.sqrt(a * a + b * b);
+  try {
+  const e = make();
+  e.lm.load(3);
+  const p = e.lm.pursuit;
+  const cycle = (n) => {
+    for (let i = 0; i < n; i++) {
+      if (i % 2000 === 0) { p.reset(); e.setLights(false); e.taxi.position.set(0, 0, -60); }
+      p.update(DT);
+    }
+  };
+  cycle(100000);
+  v8.setFlagsFromString('--expose-gc');   // collect the earlier tests' garbage first
+  vm.runInNewContext('gc')();
+  let gcs = 0;
+  const observer = new PerformanceObserver((list) => { gcs += list.getEntries().length; });
+  observer.observe({ entryTypes: ['gc'] });
+  await new Promise((r) => setTimeout(r, 20));
+  gcs = 0;
+  cycle(200000);
+  await new Promise((r) => setTimeout(r, 50));
+  gcs += observer.takeRecords().length;
+  observer.disconnect();
+  assert.equal(gcs, 0, `${gcs} GC events`);
+  } finally { Math.hypot = hypot; }
+});
+
 let failed = 0;
 for (const [name, fn] of tests) {
-  try { fn(); console.log('PASS', name); }
+  try { await fn(); console.log('PASS', name); }
   catch (err) { failed++; console.log('FAIL', name, '\n  ', err.message); }
 }
 console.log(failed ? `${failed} FAILED` : 'ALL PASSED');

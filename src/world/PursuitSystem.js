@@ -10,6 +10,14 @@ import * as THREE from 'three';
 // States:
 //   idle       - not chasing yet (trigger not reached, start
 //                delay running, or taxi not detected)
+//   patrolling - (patrolSpeed > 0) woke without seeing the taxi:
+//                drives along its lane in the level's direction at
+//                patrolSpeed to PATROL_END_MARGIN short of the
+//                destination, then idles (patrolEnded)
+//   reacting   - (reactionTime > 0) first sighting: brakes to a
+//                stop, holds still with the light bar flashing for
+//                reactionTime, then chases. Re-acquisition after
+//                'lost' skips this
 //   chasing    - heads for the taxi; if it stays out of sight
 //                for loseTime it is lost
 //   lost       - stops briefly, confused
@@ -39,6 +47,8 @@ const SHARP_TURN_SPEED_SCALE = 0.6;
 const PRESSURE_RANGE = 60;      // distance at which pressure hits 0
 export const ELEVATED_Y = 1;    // taxi above this is "on the flyover"
 const LIGHT_FLASH_RATE = 3;     // Hz: red/blue cycles per second
+const PATROL_END_MARGIN = 40;    // m: the patrol stops this far short of the destination
+const PATROL_END_RADIUS = 0.5;  // m: "reached" the patrol's end point
 const LIGHT_BAR_ON = 2.5;       // lens emissiveIntensity when lit
 
 // Following distances (centre to centre) behind the taxi.
@@ -136,6 +146,13 @@ const DEFAULT_CONFIG = {
   triggerProgress: 0.66,
   spawnDistance: 30,        // behind the taxi / the spawn point
   startDelay: 3,
+
+  // Off by default (Levels 1 and 2). patrolSpeed (m/s): when woken
+  // without seeing the taxi, drive along the lane x = 0 in the level's
+  // direction instead of waiting. reactionTime (s): on first sighting
+  // stop and flash for this long before the chase starts.
+  patrolSpeed: 0,
+  reactionTime: 0,
 
   // Fraction of vehicle.settings.maxForwardSpeed
   speedFraction: 0.85,
@@ -643,6 +660,8 @@ export class PursuitSystem {
     this.lungeTimer = 0;
     this.sinceStart = 0;
     this.flashTime = 0;
+    this.reactTimer = 0;       // seconds held still while 'reacting'
+    this.patrolEnded = false;  // patrol reached its end and idled
     this.spawned = false;
     this.captured = false;
     this.reachable = true;
@@ -711,6 +730,8 @@ export class PursuitSystem {
     this.lungeTimer = 0;
     this.sinceStart = 0;
     this.flashTime = 0;
+    this.reactTimer = 0;
+    this.patrolEnded = false;
     this.speed = 0;
     this.spawned = false;
     this.captured = false;
@@ -1031,6 +1052,14 @@ export class PursuitSystem {
         this.updateIdle(visible, detection);
         break;
 
+      case 'patrolling':
+        this.updatePatrolling(dt, visible, detection);
+        break;
+
+      case 'reacting':
+        this.updateReacting(dt);
+        break;
+
       case 'chasing':
         this.updateChasing(dt, tx, tz, visible, reachable, loseRange, topSpeed);
         break;
@@ -1106,7 +1135,67 @@ export class PursuitSystem {
         this.distance <= detection
       )
     ) {
+      this.sight();
+    } else if (
+      this.config.patrolSpeed > 0 &&
+      !this.patrolEnded &&
+      this.sinceStart >= this.config.startDelay
+    ) {
+      this.updateRouteDirection();
+      this.setState('patrolling');
+    }
+  }
+
+
+  // Patrol: along the lane (x = 0) in the level's direction at
+  // patrolSpeed, same detection rules as idle. Stops (and idles for
+  // good) PATROL_END_MARGIN short of the destination.
+  updatePatrolling(dt, visible, detection) {
+
+    if (visible && this.distance <= detection) {
+      this.sight();
+      return;
+    }
+
+    const endZ =
+      this.level.destination.z - Math.sign(this.dirZ) * PATROL_END_MARGIN;
+
+    this.drive(dt, 0, endZ, this.config.patrolSpeed);
+
+    if (Math.abs(endZ - this.z) <= PATROL_END_RADIUS && Math.abs(this.x) <= PATROL_END_RADIUS) {
+      this.speed = 0;
+      this.patrolEnded = true;
+      this.setState('idle');
+    }
+  }
+
+
+  // First sighting (idle or patrolling): react first if the level
+  // asks for it, otherwise chase straight away.
+  sight() {
+
+    if (this.config.reactionTime > 0) {
+      this.reactTimer = 0;
+      this.setState('reacting');
+    } else {
       this.beginChase();
+    }
+  }
+
+
+  // Brakes to a stop, holds still for reactionTime, then chases. No
+  // gap, pressure, pounce or capture logic runs here.
+  updateReacting(dt) {
+
+    this.captureTimer = 0;
+    this.drive(dt, this.x, this.z, 0);
+
+    if (this.speed <= 0) {
+      this.reactTimer += dt;
+
+      if (this.reactTimer >= this.config.reactionTime) {
+        this.beginChase();
+      }
     }
   }
 
