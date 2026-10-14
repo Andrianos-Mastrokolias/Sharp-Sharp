@@ -16,6 +16,8 @@ import { SkyManager } from './graphics/SkyManager.js';
 import { LevelManager, LEVELS } from './world/LevelManager.js';
 import { createBox, MAIN_POTHOLES } from './world/environments/helpers.js';
 
+import { LoadingScreen } from './ui/LoadingScreen.js';
+
 // ============================================================
 // GAME CONFIGURATION
 // ============================================================
@@ -35,6 +37,7 @@ const GamePhase = Object.freeze({
   MENU: 'menu',
   INTRO: 'intro',
   PLAYING: 'playing',
+  PAUSED: 'paused',
   COMPLETE: 'complete',
   FAILED: 'failed',
   FINISHED: 'finished'
@@ -43,6 +46,17 @@ const GamePhase = Object.freeze({
 let phase = GamePhase.MENU;
 let currentLevel = FIRST_LEVEL;
 const results = [];
+
+// ============================================================
+// LOADING SCREEN
+// ============================================================
+
+// Must exist before the graphics systems and taxi below start
+// their loaders. The main menu only appears once everything has
+// loaded.
+new LoadingScreen({
+  onComplete: () => showMainMenu()
+});
 
 // ============================================================
 // THREE.JS SCENE
@@ -94,6 +108,7 @@ const {
   wheels,
   frontWheelPivots,
   cargoItems,
+  setHeadlightsEnabled,
   toggleHeadlights,
   getHeadlightsEnabled,
   updateVisualEffects
@@ -355,10 +370,15 @@ const screenActions = {
     loadLevel(FIRST_LEVEL);
   },
 
+  resume: () => {
+    resumeGame();
+  },
+
   mainMenu: () => {
+    // Rebuild Level 1 behind the menu so the previous level
+    // isn't left on screen.
+    loadLevel(FIRST_LEVEL, { showIntro: false });
     phase = GamePhase.MENU;
-    vehicle.setEnabled(false);
-    clearKeys();
     showMainMenu();
   }
 };
@@ -418,7 +438,8 @@ function showMainMenu() {
       Space — Handbrake<br>
       C — Change camera<br>
       L — Headlights<br>
-      R — Retry current level
+      R — Retry current level<br>
+      Esc / P — Pause
     </div>
   `);
 }
@@ -580,6 +601,62 @@ function failLevel(reason) {
 }
 
 // ============================================================
+// PAUSE
+// ============================================================
+
+function pauseGame() {
+  if (phase !== GamePhase.PLAYING) return;
+
+  phase = GamePhase.PAUSED;
+  vehicle.setEnabled(false);
+  clearKeys();
+
+  showScreen(`
+    <div class="ss-eyebrow">
+      LEVEL ${currentLevel} — ${LEVELS[currentLevel].name}
+    </div>
+
+    <h1 class="ss-title">
+      PAUSED
+    </h1>
+
+    <button class="ss-button" data-action="resume">
+      RESUME
+    </button>
+
+    <button
+      class="ss-button secondary"
+      data-action="retryLevel"
+    >
+      RESTART LEVEL
+    </button>
+
+    <button
+      class="ss-button secondary"
+      data-action="mainMenu"
+    >
+      MAIN MENU
+    </button>
+
+    <div class="ss-controls">
+      Esc / P — Resume
+    </div>
+  `);
+}
+
+function resumeGame() {
+  if (phase !== GamePhase.PAUSED) return;
+
+  phase = GamePhase.PLAYING;
+  hideScreen();
+  clearKeys();
+  vehicle.setEnabled(true);
+
+  // Discard the paused time so physics doesn't jump.
+  clock.getDelta();
+}
+
+// ============================================================
 // ALL LEVELS COMPLETED
 // ============================================================
 
@@ -662,7 +739,7 @@ const levelManager = new LevelManager({
 // LOAD A LEVEL
 // ============================================================
 
-function loadLevel(level) {
+function loadLevel(level, { showIntro = true } = {}) {
   if (!LEVELS[level]) {
     console.error(`Level ${level} does not exist.`);
     return;
@@ -699,7 +776,12 @@ function loadLevel(level) {
   // Remove any particles left over from the previous level.
   dustSystem.reset();
 
-  showLevelIntro(level);
+  // Every level starts with the headlights off.
+  setHeadlightsEnabled(false);
+
+  if (showIntro) {
+    showLevelIntro(level);
+  }
 }
 
 // ============================================================
@@ -734,6 +816,20 @@ window.addEventListener('keydown', event => {
 
   if (movementKeys.includes(event.code)) {
     event.preventDefault();
+  }
+
+  // Esc / P toggle pause, only from gameplay or the pause panel.
+  if (
+    (event.code === 'Escape' || event.code === 'KeyP') &&
+    !event.repeat
+  ) {
+    if (phase === GamePhase.PLAYING) {
+      pauseGame();
+    } else if (phase === GamePhase.PAUSED) {
+      resumeGame();
+    }
+
+    return;
   }
 
   // Only movement/gameplay keys are stored while playing.
@@ -779,7 +875,6 @@ hud.innerHTML = `
 
   <p id="level-label"></p>
   <div id="speed"></div>
-  <div id="physics"></div>
   <div id="camera-mode"></div>
   <div id="headlights"></div>
   <div id="cargo"></div>
@@ -794,7 +889,8 @@ hud.innerHTML = `
     L — Toggle headlights<br>
     Mouse drag — Look around in chase view<br>
     Mouse wheel — Chase camera zoom<br>
-    R — Retry current level
+    R — Retry current level<br>
+    Esc / P — Pause
   </div>
 `;
 
@@ -802,7 +898,6 @@ document.body.appendChild(hud);
 
 const levelLabel = document.getElementById('level-label');
 const speedDisplay = document.getElementById('speed');
-const physicsDisplay = document.getElementById('physics');
 const cameraModeDisplay = document.getElementById('camera-mode');
 const headlightsDisplay = document.getElementById('headlights');
 const cargoDisplay = document.getElementById('cargo');
@@ -862,10 +957,6 @@ function updateHUD() {
   speedDisplay.textContent =
     `Speed: ${Math.round(Math.abs(vehicle.getSpeed()) * 3.6)} km/h`;
 
-  physicsDisplay.textContent =
-    `Height: ${taxi.position.y.toFixed(2)} m | ` +
-    (vehicle.isGrounded() ? 'Grounded' : 'Airborne');
-
   cameraModeDisplay.textContent =
     `Camera: ${formatCameraName(cameraSystem.getMode())}`;
 
@@ -906,8 +997,9 @@ function animate() {
     if (phase === GamePhase.PLAYING) {
       levelManager.update(dt, elapsedTime);
     }
-  } else {
+  } else if (phase !== GamePhase.PAUSED) {
     // Allows already-detached cargo to continue falling.
+    // Frozen while paused, like the rest of the simulation.
     cargoSystem.updateDetached(dt);
   }
 
@@ -954,5 +1046,6 @@ levelManager.load(FIRST_LEVEL);
 // The vehicle must not move until PLAY GAME → START LEVEL.
 vehicle.setEnabled(false);
 
-showMainMenu();
+// The main menu is shown by the loading screen once every
+// asset has loaded.
 animate();
