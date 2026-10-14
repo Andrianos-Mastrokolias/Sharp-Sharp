@@ -72,12 +72,17 @@ const L2_PURSUIT_LANE_MAX_X = 2;           // ground lane; flyover starts at x 3
 
 // Level 3: detection range is the stealth tradeoff against
 // the unlit potholes (lights on = seen from far away).
-const L3_PURSUIT_START_DELAY = 4;
+// The taxi spawns at z -170 and the pursuer's 30 m spawn offset is
+// clamped by the world bounds to ~15 m behind it. The 1 s start delay
+// and the 120 m lights-on radius mean a taxi that starts with its
+// lights on is always inside the radius when the pursuer wakes (no
+// activateAfterDelay needed), while lights off (15 m) stays unseen.
+const L3_PURSUIT_START_DELAY = 1;
 const L3_PURSUIT_SPAWN_DISTANCE = 30;      // behind the spawn
 const L3_PURSUIT_SPEED = 1.15;
-const L3_PURSUIT_DETECTION_LIGHTS_ON = 70;
+const L3_PURSUIT_DETECTION_LIGHTS_ON = 120;
 const L3_PURSUIT_DETECTION_LIGHTS_OFF = 15;
-const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 110;
+const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 170;
 const L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF = 30;
 const L3_PURSUIT_LOSE_TIME = 4;
 const L3_PURSUIT_CAPTURE_DISTANCE = 6.4;
@@ -392,21 +397,20 @@ export const LEVELS = {
       maxDeliverSpeed: 4
     },
 
-    // Level 3 uses the same pursuit and capture tuning as Level 2.
-    // The taxi spawns close to the -Z world boundary, so the police
-    // may be clipped closer than intended or miss its first detection
-    // window. Activate after the delay to avoid an idle pursuer.
+    // Headlight stealth: lights on = seen from far away, lights off =
+    // only up close (see L3_PURSUIT_* above). No activateAfterDelay.
     pursuit: {
       mode: 'immediate',
-      startDelay: L2_PURSUIT_START_DELAY,
-      spawnDistance: L2_PURSUIT_SPAWN_DISTANCE,
-      speedFraction: L2_PURSUIT_SPEED,
-      detectionRadius: L2_PURSUIT_DETECTION_RADIUS,
-      loseRange: L2_PURSUIT_LOSE_RANGE,
-      loseTime: L2_PURSUIT_LOSE_TIME,
-      captureDistance: L2_PURSUIT_CAPTURE_DISTANCE,
-      captureTime: L2_PURSUIT_CAPTURE_TIME,
-      activateAfterDelay: true
+      startDelay: L3_PURSUIT_START_DELAY,
+      spawnDistance: L3_PURSUIT_SPAWN_DISTANCE,
+      speedFraction: L3_PURSUIT_SPEED,
+      detectionRadius: L3_PURSUIT_DETECTION_LIGHTS_ON,
+      detectionRadiusDark: L3_PURSUIT_DETECTION_LIGHTS_OFF,
+      loseRange: L3_PURSUIT_LOSE_RANGE_LIGHTS_ON,
+      loseRangeDark: L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF,
+      loseTime: L3_PURSUIT_LOSE_TIME,
+      captureDistance: L3_PURSUIT_CAPTURE_DISTANCE,
+      captureTime: L3_PURSUIT_CAPTURE_TIME
     },
 
     // Night: the unlit spawn bay and destination ring would glare

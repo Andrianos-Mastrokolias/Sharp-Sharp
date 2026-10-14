@@ -199,33 +199,193 @@ test('ignoreElevated option still hides a taxi on the flyover (other levels)', (
   assert.ok(sawLost);
 });
 
-test('L3: detection radius depends on headlights', () => {
+// ---- Level 3: headlight stealth ------------------------------------
+// The taxi spawns at z -170 facing +Z; the pursuer's 30 m offset is
+// clamped by the bounds (minZ -190 + 5) to z -185, i.e. 15 m behind.
+
+const L3_SPAWN_Z = -170;
+const L3_PURSUER_Z = -185;
+const L3_CFG = LEVELS[3].pursuit;
+
+// Level 3 loaded, taxi at its spawn, driving +Z at `speed` from the
+// first frame. Returns the first sim time the pursuer is chasing
+// (null if it never does within `seconds`) and the taxi's distance
+// from it on that frame.
+function l3Wake(lights, speed, seconds = 3) {
   const e = make();
   e.lm.load(3);
-  e.taxi.position.set(0, 0, -170 + 50);   // 80 m from pursuer (z -200 -> clamped -185)
-  e.lm.pursuit.z = -185;
-  e.setLights(false);
-  step(e.lm, 5);
-  assert.equal(e.lm.pursuit.state, 'idle', 'lights off: not seen at ~65 m');
+  e.taxi.position.set(0, 0, L3_SPAWN_Z);
+  e.setLights(lights);
+  e.setSpeed(speed);
+  const p = e.lm.pursuit;
+  let wokeAt = null, distAtWake = null;
+  for (let t = 0; t < seconds && wokeAt === null; t += DT) {
+    e.taxi.position.z += speed * DT;
+    e.lm.update(DT, t);
+    if (p.state === 'chasing') { wokeAt = p.sinceStart; distAtWake = gap(e); }
+  }
+  return { e, wokeAt, distAtWake };
+}
 
+test('L3: own stealth config (L3_PURSUIT_* numbers), no activateAfterDelay', () => {
+  assert.equal(L3_CFG.mode, 'immediate');
+  assert.equal(L3_CFG.startDelay, 1);
+  assert.equal(L3_CFG.detectionRadius, 120);
+  assert.equal(L3_CFG.detectionRadiusDark, 15);
+  assert.equal(L3_CFG.loseRange, 170);
+  assert.equal(L3_CFG.loseRangeDark, 30);
+  assert.equal(L3_CFG.loseTime, 4);
+  assert.equal(L3_CFG.speedFraction, 1.15);
+  assert.equal(L3_CFG.captureDistance, 6.4);
+  assert.equal(L3_CFG.captureTime, 1.5);
+  assert.notEqual(L3_CFG.activateAfterDelay, true);
+  for (const n of [1, 2, 3]) {
+    assert.notEqual(LEVELS[n].pursuit.activateAfterDelay, true, `level ${n}`);
+  }
+});
+
+test('L3: pursuer starts 15 m behind the taxi (bounds clamp), idle until the delay', () => {
+  const e = make();
+  e.lm.load(3);
+  assert.equal(e.lm.pursuit.z, L3_PURSUER_Z);
+  assert.equal(e.lm.pursuit.state, 'idle');
+  e.taxi.position.set(0, 0, L3_SPAWN_Z);
+  e.setLights(true);
+  step(e.lm, 0.9);
+  assert.equal(e.lm.pursuit.state, 'idle', 'start delay (1 s)');
+});
+
+test('L3: lights on is detected as the pursuer wakes (taxi at 28 m/s from the spawn)', () => {
+  const { e, wokeAt, distAtWake } = l3Wake(true, MAX_SPEED);
+  assert.ok(wokeAt !== null, 'woke up');
+  assert.ok(wokeAt >= L3_CFG.startDelay && wokeAt < L3_CFG.startDelay + 3 * DT, `woke at ${wokeAt}`);
+  assert.ok(distAtWake < L3_CFG.detectionRadius, `${distAtWake} m`);
+  assert.equal(e.lm.pursuit.state, 'chasing');
+});
+
+test('L3: lights off at the same positions stays idle', () => {
+  const { e, wokeAt } = l3Wake(false, MAX_SPEED, 6);
+  assert.equal(wokeAt, null);
+  assert.equal(e.lm.pursuit.state, 'idle');
+  assert.ok(gap(e) > 100, 'taxi is long gone');
+});
+
+test('L3: realistic start (taxi accelerating at 13 m/s^2): on = detected, off = idle', () => {
+  const run3 = (lights) => {
+    const e = make();
+    e.lm.load(3);
+    e.taxi.position.set(0, 0, L3_SPAWN_Z);
+    e.setLights(lights);
+    let v = 0, woke = null;
+    for (let t = 0; t < 4 && woke === null; t += DT) {
+      v = Math.min(v + 13 * DT, MAX_SPEED);
+      e.setSpeed(v);
+      e.taxi.position.z += v * DT;
+      e.lm.update(DT, t);
+      if (e.lm.pursuit.state === 'chasing') woke = gap(e);
+    }
+    return { woke, state: e.lm.pursuit.state };
+  };
+  const on = run3(true), off = run3(false);
+  assert.equal(on.state, 'chasing');
+  assert.ok(on.woke > 15 && on.woke < 120, `on: ${on.woke}`);
+  assert.equal(off.state, 'idle');
+});
+
+test('L3: lights on later, within 120 m, wakes it; beyond 120 m does not', () => {
+  const e = make();
+  e.lm.load(3);
+  e.setLights(false);
+  e.taxi.position.set(0, 0, L3_PURSUER_Z + 130);
+  step(e.lm, 2);
+  assert.equal(e.lm.pursuit.state, 'idle');
+  e.setLights(true);
+  step(e.lm, 0.5);
+  assert.equal(e.lm.pursuit.state, 'idle', '130 m: outside the 120 m radius');
+  e.taxi.position.z = L3_PURSUER_Z + 115;
+  step(e.lm, DT * 2);
+  assert.equal(e.lm.pursuit.state, 'chasing', '115 m: inside it');
+
+  // Lights off but close (<= 15 m) is still seen
   const f = make();
   f.lm.load(3);
-  f.taxi.position.set(0, 0, -170 + 50);
-  f.lm.pursuit.z = -185;
-  f.setLights(true);
-  step(f.lm, 5);
-  assert.equal(f.lm.pursuit.state, 'chasing', 'lights on: seen at ~65 m');
-
-  // Lights switched off mid-chase, taxi beyond dark lose range -> lost
   f.setLights(false);
-  f.taxi.position.set(0, 0, f.lm.pursuit.z + 60);
+  f.taxi.position.set(0, 0, L3_PURSUER_Z + 14);
+  step(f.lm, 1.5);
+  assert.equal(f.lm.pursuit.state, 'chasing', 'lights off, 14 m');
+});
+
+test('L3: lights off and beyond 30 m for loseTime loses the taxi; lights on does not', () => {
+  const chaseWith = (lightsAfter) => {
+    const { e } = l3Wake(true, MAX_SPEED);
+    assert.equal(e.lm.pursuit.state, 'chasing');
+    e.setLights(lightsAfter);
+    const p = e.lm.pursuit;
+    let lostAt = null, t = 0;
+    for (; t < 8; t += DT) {
+      e.taxi.position.z = p.z + 60;         // keep 60 m ahead of it
+      e.lm.update(DT, t);
+      if (lostAt === null && p.state === 'lost') lostAt = t;
+    }
+    return lostAt;
+  };
+  const off = chaseWith(false);
+  assert.ok(off !== null, 'lost with lights off');
+  assert.ok(off >= L3_CFG.loseTime - 3 * DT && off < L3_CFG.loseTime + 3 * DT, `lost after ${off} s`);
+  assert.equal(chaseWith(true), null, '60 m < 170 m lights-on lose range');
+});
+
+test('L3: lights-on lose range is 170 m', () => {
+  const { e } = l3Wake(true, MAX_SPEED);
+  const p = e.lm.pursuit;
   let lost = false;
-  for (let t = 0; t < 8; t += DT) {
-    f.taxi.position.z = f.lm.pursuit.z + 60;  // keep ahead
-    f.lm.update(DT, t);
-    lost ||= f.lm.pursuit.state === 'lost';
+  for (let t = 0; t < 6; t += DT) {
+    e.taxi.position.z = p.z + 160;
+    e.lm.update(DT, t);
+    lost ||= p.state === 'lost';
   }
-  assert.ok(lost);
+  assert.equal(lost, false, '160 m still seen');
+  for (let t = 0; t < 6; t += DT) {
+    e.taxi.position.z = p.z + 180;
+    e.lm.update(DT, t);
+    lost ||= p.state === 'lost';
+  }
+  assert.ok(lost, '180 m is out of sight');
+});
+
+test('activateAfterDelay option still wakes the pursuer on the timer (no level uses it)', () => {
+  const e = make();
+  e.lm.load(3);
+  e.lm.pursuit.config.activateAfterDelay = true;
+  e.setLights(false);
+  e.taxi.position.set(0, 0, L3_PURSUER_Z + 150);
+  step(e.lm, 1.2);
+  assert.equal(e.lm.pursuit.state, 'chasing');
+});
+
+test('L2 / L1 pursuit unchanged: ignore headlights, same numbers', () => {
+  const c2 = LEVELS[2].pursuit;
+  assert.equal(c2.startDelay, 3);
+  assert.equal(c2.detectionRadius, 80);
+  assert.equal(c2.loseRange, 120);
+  assert.equal(c2.loseTime, 3);
+  assert.equal(c2.speedFraction, 1.1);
+  assert.equal(c2.detectionRadiusDark, undefined);
+  assert.equal(c2.loseRangeDark, undefined);
+  const c1 = LEVELS[1].pursuit;
+  assert.equal(c1.mode, 'trigger');
+  assert.equal(c1.triggerProgress, 0.66);
+  assert.equal(c1.loseRange, 120);
+  assert.equal(c1.loseTime, 5);
+  assert.equal(c1.speedFraction, 1.15);
+
+  // L2 with lights off still sees the taxi at 60 m (no dark range)
+  const e = make();
+  e.lm.load(2);
+  e.setLights(false);
+  e.taxi.position.set(0, 0, e.lm.pursuit.z - 60);
+  step(e.lm, 3.3);
+  assert.equal(e.lm.pursuit.state, 'chasing');
 });
 
 test('stays on road and inside bounds', () => {
