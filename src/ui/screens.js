@@ -3,7 +3,7 @@
 // ============================================================
 
 // HTML builders for the overlay screens. The components below
-// (road sign, taxi decal button, bilingual label, lettering
+// (road sign, taxi decal button, label, lettering
 // lockup, shop band) are styled in theme.css; main.js and the
 // loading screen build their screens from them. Buttons use
 // data-action like the rest of the overlay.
