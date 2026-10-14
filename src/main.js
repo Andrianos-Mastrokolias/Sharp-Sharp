@@ -435,7 +435,7 @@ function completeLevel(event) {
       ${decalButton('nextLevel', 'NEXT LEVEL →')}
 
       ${labelRow(
-        labelButton('retryLevel', 'PLAY AGAIN'),
+        labelButton('retryLevel', 'REPLAY LEVEL'),
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
@@ -540,6 +540,40 @@ function finishGame() {
   vehicle.setEnabled(false);
   clearKeys();
 
+  // A run started from level select only contains the levels
+  // that were played, so don't claim every load was delivered.
+  const allLevelsDone = Object.keys(LEVELS)
+    .every(level => results.some(item => item.level === Number(level)));
+
+  if (!allLevelsDone) {
+    const result = results.find(item => item.level === LAST_LEVEL);
+
+    showScreen(`
+    <div class="ss-column">
+      ${lockup([
+        [{ text: 'laduma!', bg: 'ink', font: 'rye' }],
+        [{ text: 'DELIVERED', bg: 'maroon', font: 'bungee' }]
+      ])}
+
+      <div class="sign">
+        <div class="sign-head">LEVEL ${LAST_LEVEL} COMPLETE</div>
+
+        <div class="sign-body">
+          ${signStat('Delivery time', `${result.time.toFixed(1)} s`)}
+          ${signStat('Cargo delivered', `${result.cargo} / ${result.totalCargo}`)}
+        </div>
+      </div>
+      ${decalButton('retryLevel', `REPLAY LEVEL ${LAST_LEVEL}`)}
+
+      ${labelRow(
+        labelButton('playAgain', 'PLAY ALL FROM LEVEL 1'),
+        labelButton('mainMenu', 'MAIN MENU')
+      )}
+    </div>
+  `);
+    return;
+  }
+
   const totalTime = results.reduce(
     (sum, result) => sum + result.time,
     0
@@ -573,9 +607,12 @@ function finishGame() {
         <div class="sign-chevron chevron"></div>
       </div>
 
-      ${decalButton('playAgain', 'PLAY AGAIN')}
+      ${decalButton('playAgain', 'PLAY ALL AGAIN')}
 
-      ${labelRow(labelButton('mainMenu', 'MAIN MENU'))}
+      ${labelRow(
+        labelButton('retryLevel', `REPLAY LEVEL ${LAST_LEVEL}`),
+        labelButton('mainMenu', 'MAIN MENU')
+      )}
     </div>
   `);
 }
