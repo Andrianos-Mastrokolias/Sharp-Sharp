@@ -77,21 +77,55 @@ const L2_PURSUIT_LANE_MAX_X = 2;           // ground lane; flyover starts at x 3
 // and the 120 m lights-on radius mean a taxi that starts with its
 // lights on is always inside the radius when the pursuer wakes (no
 // activateAfterDelay needed), while lights off (15 m) stays unseen.
-const L3_PURSUIT_START_DELAY = 1;
-const L3_PURSUIT_SPAWN_DISTANCE = 30;      // behind the spawn
-const L3_PURSUIT_SPEED = 1.15;
-const L3_PURSUIT_DETECTION_LIGHTS_ON = 120;
+const L3_PURSUIT_START_DELAY = 3.5;
+
+// Distance behind taxi when created
+const L3_PURSUIT_SPAWN_DISTANCE = 30;
+
+// Slightly slower than before so the player
+// has a fair chance to create distance
+const L3_PURSUIT_SPEED = 1.05;
+
+
+// --------------------------------------------------
+// HEADLIGHT DETECTION
+// --------------------------------------------------
+
+// Lights ON = easier for pursuer to see you,
+// but not from almost the entire level.
+const L3_PURSUIT_DETECTION_LIGHTS_ON = 55;
+
+// Lights OFF = very difficult to detect.
 const L3_PURSUIT_DETECTION_LIGHTS_OFF = 15;
-const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 170;
+
+
+// --------------------------------------------------
+// LOSING THE PURSUER
+// --------------------------------------------------
+
+const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 100;
 const L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF = 30;
-const L3_PURSUIT_LOSE_TIME = 4;
+
+const L3_PURSUIT_LOSE_TIME = 3;
+
+
+// --------------------------------------------------
+// CAPTURE
+// --------------------------------------------------
+
 const L3_PURSUIT_CAPTURE_DISTANCE = 6.4;
 const L3_PURSUIT_CAPTURE_TIME = 1.5;
-// Patrol: woken without seeing the taxi, it drives +Z down its lane at
-// this speed (a blind taxi above it pulls away, one below it is caught
-// up) and stops 40 m short of the destination. Reaction: first sighting
-// makes it stop and flash this long before the chase starts.
-const L3_PURSUIT_PATROL_SPEED = 17;
+
+
+// --------------------------------------------------
+// PATROL
+// --------------------------------------------------
+
+// Slower patrol so it doesn't immediately close
+// the gap before the player understands the level.
+const L3_PURSUIT_PATROL_SPEED = 14;
+
+// Gives the player a visible warning before chase.
 const L3_PURSUIT_REACTION_TIME = 1.5;
 
 
@@ -270,6 +304,19 @@ export const LEVELS = {
       }
     ],
 
+    // Level 2 physical speed bump.
+    // Matches the visible bump on the ground route.
+    speedBumps: [
+    {
+      x: 0,
+      z: 25,
+      width: 14,
+      depth: 3,
+      height: 0.35,
+      heading: 0
+    }
+    ],
+
     // Raised sections, fed to the vehicle through
     // setGroundHeightProvider() (see getGroundHeight()). The
     // deck runs between zEntry and zExit (z decreases as you
@@ -366,14 +413,14 @@ export const LEVELS = {
     // Drives the road the other way round (+Z), so heading is PI.
     spawn: {
       x: 0,
-      z: -170,
+      z: -150,
       heading: Math.PI
     },
 
     // A back road: wanders across the carriageway rather than
     // running straight. Guide only - nothing enforces it.
     route: [
-      { x: 0, z: -170 },
+      { x: 0, z: -150 },
       { x: 0, z: -130 },
       { x: 5, z: -100 },
       { x: 5, z: -70 },
@@ -513,8 +560,8 @@ export class LevelManager {
     // headlight beam picks it out at night.
     this.hazardMaterial =
       new THREE.MeshStandardMaterial({
-        color: 0x0b0b0c,
-        roughness: 1
+        color: 0x18181b,
+        roughness: 0.95
       });
 
     this.concreteMaterial =
@@ -576,6 +623,20 @@ export class LevelManager {
             this.getGroundHeight(x, z, baseHeight)
         : null
     );
+
+    // --------------------------------------------------
+// Register level-specific speed bumps
+// --------------------------------------------------
+
+if (
+  typeof this.vehicle.setLevelSpeedBumps === 'function'
+) {
+  this.vehicle.setLevelSpeedBumps(
+    this.config.speedBumps ?? []
+  );
+}
+
+
 
     this.buildMarkers();
     this.buildElevated();
