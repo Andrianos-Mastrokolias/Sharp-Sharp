@@ -41,6 +41,15 @@ import {
 } from './ui/screens.js';
 import { Hud } from './ui/Hud.js';
 import { CREDITS } from './ui/credits.js';
+import { GameAudio } from './audio/GameAudio.js';
+import { readPreferences, savePreferences, applyQuality } from './game/preferences.js';
+import { settingsHTML } from './ui/settings.js';
+
+let preferenceStorage;
+try { preferenceStorage = window.localStorage; } catch { /* Storage is optional. */ }
+let preferences = readPreferences(preferenceStorage);
+const audio = new GameAudio();
+audio.setVolume(preferences.muted ? 0 : preferences.volume);
 
 // ============================================================
 // GAME CONFIGURATION
@@ -101,7 +110,7 @@ const renderer = new THREE.WebGLRenderer({
 });
 
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+applyQuality(renderer, preferences.quality, window.devicePixelRatio);
 
 document.body.appendChild(renderer.domElement);
 
@@ -152,6 +161,7 @@ const cargoSystem = new CargoSystem({
   gravity: -22,
 
   onCargoLost: event => {
+    if (phase === GamePhase.PLAYING) audio.cue('cargo');
     // Don't trigger a second failure after the level has ended.
     if (
       phase === GamePhase.PLAYING &&
@@ -173,7 +183,10 @@ const vehicle = new VehicleController({
   frontWheelPivots,
   cargoSystem,
   collidableObjects,
-  potholes
+  potholes,
+  onCollision: speed => {
+    if (phase === GamePhase.PLAYING && speed > 1) audio.cue('impact');
+  }
 });
 
 vehicle.setLevel(FIRST_LEVEL);
@@ -293,6 +306,19 @@ const screenActions = {
 
   backToMenu: () => {
     showMainMenu();
+  },
+
+  settings: () => {
+    if (phase !== GamePhase.MENU && phase !== GamePhase.PAUSED) return;
+    showScreen(settingsHTML(preferences), phase === GamePhase.MENU ? 'menu' : 'scrim');
+  },
+
+  closeSettings: () => {
+    if (phase === GamePhase.PAUSED) {
+      pauseGame();
+    } else {
+      showMainMenu();
+    }
   }
 };
 
@@ -306,12 +332,28 @@ panel.addEventListener('click', event => {
   const action = screenActions[button.dataset.action];
 
   // data-* attributes (e.g. data-level) are passed through.
-  if (action) action(button.dataset);
+  if (action) {
+    void audio.unlock();
+    action(button.dataset);
+  }
+});
+
+panel.addEventListener('input', event => {
+  const input = event.target;
+  if (!['volume', 'muted', 'quality'].includes(input.name)) return;
+  const value = input.name === 'volume' ? Number(input.value) / 100
+    : input.name === 'muted' ? input.checked : input.value;
+  preferences = savePreferences(preferenceStorage, { ...preferences, [input.name]: value });
+  audio.setVolume(preferences.muted ? 0 : preferences.volume);
+  applyQuality(renderer, preferences.quality, window.devicePixelRatio);
+  const output = panel.querySelector('output');
+  if (output) output.value = `${Math.round(preferences.volume * 100)}%`;
 });
 
 // variant: 'menu' (shop-front backdrop hides the scene) or
 // 'scrim' (in-game screens over the 3D scene).
 function showScreen(html, variant = 'scrim') {
+  audio.setActive(false);
   panel.innerHTML = html;
   panel.scrollTop = 0;
   screen.dataset.variant = variant;
@@ -487,7 +529,7 @@ function failLevel(reason, flavour = 'eish') {
 // ============================================================
 
 function pauseGame() {
-  if (phase !== GamePhase.PLAYING) return;
+  if (phase !== GamePhase.PLAYING && phase !== GamePhase.PAUSED) return;
 
   phase = GamePhase.PAUSED;
   vehicle.setEnabled(false);
@@ -508,6 +550,7 @@ function pauseGame() {
       ])}
 
       ${decalButton('resume', 'RESUME')}
+      ${labelButton('settings', 'SETTINGS')}
 
       ${labelRow(
         labelButton('retryLevel', 'RETRY'),
@@ -655,6 +698,7 @@ function loadLevel(level, { showIntro = true } = {}) {
   }
 
   // Disable gameplay while transitioning.
+  audio.setActive(false);
   phase = GamePhase.INTRO;
   vehicle.setEnabled(false);
   clearKeys();
@@ -723,6 +767,8 @@ window.addEventListener('keydown', event => {
     'Space'
   ];
 
+  if (event.target.matches?.('input, select, textarea')) return;
+
   if (movementKeys.includes(event.code)) {
     event.preventDefault();
   }
@@ -743,6 +789,8 @@ window.addEventListener('keydown', event => {
 
   // Only movement/gameplay keys are stored while playing.
   if (phase !== GamePhase.PLAYING) return;
+
+  if (!event.repeat) void audio.unlock();
 
   keys[event.code] = true;
 
@@ -770,7 +818,11 @@ window.addEventListener('keyup', event => {
   keys[event.code] = false;
 });
 
-window.addEventListener('blur', clearKeys);
+window.addEventListener('blur', () => { clearKeys(); pauseGame(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) pauseGame();
+});
+window.addEventListener('pagehide', () => audio.dispose());
 
 // ============================================================
 // HUD
@@ -850,6 +902,9 @@ function animate() {
 
   updateHUD();
 
+  audio.setActive(phase === GamePhase.PLAYING && !document.hidden);
+  audio.update(dt, vehicle.getSpeed(), levelManager.getState().pursuit.state, keys.Space);
+
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
@@ -859,6 +914,7 @@ function animate() {
 // ============================================================
 
 window.addEventListener('resize', () => {
+  applyQuality(renderer, preferences.quality, window.devicePixelRatio);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 

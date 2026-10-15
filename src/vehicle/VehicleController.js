@@ -8,9 +8,11 @@ export class VehicleController {
     frontWheelPivots,
     cargoSystem,
     collidableObjects,
-    potholes
+    potholes,
+    onCollision = null
   }) {
     this.taxi = taxi;
+    this.onCollision = onCollision;
 
     this.chassis = chassis;
 
@@ -731,6 +733,7 @@ isOnSpeedBump(
 
 
         this.speed *= -0.2;
+        this.onCollision?.(impactSpeed);
 
 
         this.suspensionVelocity -=
