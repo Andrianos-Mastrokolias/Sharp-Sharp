@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/budget.mjs && node tests/environments.test.mjs && node tests/people.test.mjs && node tests/traffic.test.mjs && node tests/pursuit.test.mjs"
+    "test": "node --test tests/audio-settings.test.mjs && node tests/budget.mjs && node tests/environments.test.mjs && node tests/people.test.mjs && node tests/traffic.test.mjs && node tests/pursuit.test.mjs",
+    "test:audio": "node --test tests/audio-settings.test.mjs",
+    "test:audio:smoke": "node tests/tools/audio-settings-smoke.mjs"
   },
   "devDependencies": {
     "vite": "^8.2.2"

@@ -8,9 +8,11 @@ export class VehicleController {
     frontWheelPivots,
     cargoSystem,
     collidableObjects,
-    potholes
+    potholes,
+    onCollision = null
   }) {
     this.taxi = taxi;
+    this.onCollision = onCollision;
     this.chassis = chassis;
     this.wheels = wheels;
     this.frontWheelPivots = frontWheelPivots;
@@ -588,6 +590,7 @@ isOnLevelSpeedBump(x, z) {
         this.speed *= -0.2;
         this.lateralVelocity *= -0.25;
         this.suspensionVelocity -= 0.6;
+        this.onCollision?.(impactSpeed);
 
         this.cargoSystem.applyStress(
           THREE.MathUtils.clamp(
