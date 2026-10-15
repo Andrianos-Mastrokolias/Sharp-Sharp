@@ -148,6 +148,47 @@ Level 2 routes), real target-browser/device performance and trailer capture rema
   persistence. This automated publication pass did not assess audible quality,
   full driving routes or hosted LAMP behaviour.
 
+### Main integration review (2026-10-15, uncommitted)
+
+The final remote check after the publication validation above found a new main
+commit. Publishing was stopped. The approved local feature commit is
+`e701f1bc3351a317e696a4ec673f650be5932f78`; the verified backup branch
+`backup/audio-graphics-pre-merge` points to it.
+
+`origin/main` at `03139b5334a56fb2907d1dc73ced22bf175f209e` (PR #28) has now
+been merged with `--no-commit --no-ff`. No merge commit or push has been made.
+Only `VehicleController.js` conflicted: its callback assignment and collision
+response. The resolution keeps incoming vehicle physics and adds the optional
+collision callback, using impact speed captured before the bounce. Incoming
+lateral recoil and suspension response are retained. `CargoSystem.js`, `Taxi.js`
+and `LevelManager.js` match main exactly. Audio, settings, menus, shaders and
+graphics implementation files retain the approved feature-branch versions.
+
+- All eight focused audio/settings tests pass. The collision regression now
+  checks lateral recoil and suspension response; a real cargo-detachment
+  regression checks one cargo cue and pause cleanup.
+- The complete suite passes budget, environment, people and traffic checks,
+  but reports 17 Level 3 pursuit failures. A clean export of the exact main
+  commit, reusing the existing dependencies without installing anything,
+  reproduces the same 17 failures.
+- Incoming Level 3 tuning includes a 3.5-second start delay (previously 1),
+  lights-on detection radius 55 (previously 120), patrol speed 14 (previously
+  17), and taxi spawn Z -150 (previously -170). Existing pursuit tests retain
+  older expectations. Neither the incoming tuning nor those tests were altered
+  to make this integration pass.
+- Production build passes, with the existing large-chunk warning
+  (approximately 796 kB before gzip).
+- Existing headless Edge smoke passes with 44 resources, no missing files or
+  runtime errors, and all three scripted delivery transitions. These are not
+  manual route playthroughs or an audible assessment.
+- The separate recording-browser check passes all six decoded assets, 30 rapid
+  pause/resume cycles, 300 updates without duplicate loops, the eight-effect
+  limit, mute, and cleanup during pending loading. Its combined offline mix
+  remains below clipping.
+- All six audio recordings still match their production copies. Whitespace
+  checks pass. Integration approval must account for the upstream pursuit-test
+  failures; the merge remains pending review.
+
 An earlier `npm audit --json` snapshot reported one high-severity advisory in the existing locked
 `source-map-js` dependency: GHSA-68fv-2mgg-jv7q (indexed source-map section offsets
 can cause event-loop denial of service). Dependency versions and the lockfile

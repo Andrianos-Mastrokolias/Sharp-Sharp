@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { GameAudio } from '../src/audio/GameAudio.js';
 import * as THREE from 'three';
 import { VehicleController } from '../src/vehicle/VehicleController.js';
+import { CargoSystem } from '../src/vehicle/CargoSystem.js';
 import { normalizePreferences, readPreferences, savePreferences, applyQuality } from '../src/game/preferences.js';
 
 function audioContext() {
@@ -139,14 +140,14 @@ test('preferences tolerate invalid storage and persist volume, mute and real pix
   }
 });
 
-test('actual obstacle collision reports impact speed without changing bounce or cargo stress', () => {
+test('actual obstacle collision reports impact speed and preserves updated physics and cargo stress', () => {
   const taxi = new THREE.Group();
   const obstacle = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2));
   obstacle.updateMatrixWorld();
   const impacts = [];
   const stresses = [];
   const vehicle = Object.assign(Object.create(VehicleController.prototype), {
-    taxi, collidableObjects: [obstacle], speed: 10, suspensionVelocity: 0,
+    taxi, collidableObjects: [obstacle], speed: 10, lateralVelocity: 4, suspensionVelocity: 0,
     taxiBox: new THREE.Box3(), obstacleBox: new THREE.Box3(),
     localTaxiCollisionBox: new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1)),
     cargoSystem: { applyStress: value => stresses.push(value) },
@@ -155,9 +156,42 @@ test('actual obstacle collision reports impact speed without changing bounce or 
   assert.equal(vehicle.checkCollisions(new THREE.Vector3(0, 0, 5)), true);
   assert.deepEqual(impacts, [10]);
   assert.equal(vehicle.speed, -2);
+  assert.equal(vehicle.lateralVelocity, -1);
+  assert.equal(vehicle.suspensionVelocity, -0.6);
   assert.deepEqual(stresses, [6]);
   assert.equal(vehicle.checkCollisions(taxi.position.clone()), false);
   assert.deepEqual(impacts, [10]);
   obstacle.geometry.dispose();
   obstacle.material.dispose();
+});
+
+test('updated cargo detachment emits one audio cue and pause stops it', async () => {
+  const audio = new GameAudio(() => audioContext());
+  await audio.unlock();
+  audio.setActive(true);
+  const scene = new THREE.Scene();
+  const taxi = new THREE.Group();
+  const chassis = new THREE.Group();
+  const luggage = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+  scene.add(taxi);
+  taxi.add(chassis);
+  chassis.add(luggage);
+  const events = [];
+  const cargo = new CargoSystem({
+    scene, taxi, chassis,
+    cargoItems: [{ name: 'luggage', mesh: luggage, vulnerability: 1 }],
+    onCargoLost: event => { events.push(event); audio.cue('cargo'); }
+  });
+  cargo.detach(cargo.items[0], 10);
+  cargo.detach(cargo.items[0], 10);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].name, 'luggage');
+  assert.equal(events[0].remaining, 0);
+  assert.equal(luggage.parent, scene);
+  assert.equal(audio.voices.size, 1);
+  audio.setActive(false);
+  assert.equal(audio.voices.size, 0);
+  audio.dispose();
+  luggage.geometry.dispose();
+  luggage.material.dispose();
 });
