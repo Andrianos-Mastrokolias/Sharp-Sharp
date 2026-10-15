@@ -613,8 +613,8 @@ export function createTaxi(
 
   headlightTarget.position.set(
     0,
-    0.45,
-    -28
+    0.25,
+    -24
   );
 
 
@@ -623,57 +623,36 @@ export function createTaxi(
   );
 
 
-  function createHeadlight(
-    x
-  ) {
+  
+function createHeadlight(x) {
+  const light = new THREE.SpotLight(
+    0xfff1d5,                      // Warm-white headlights
+    420,                           // Increased from 120
+    65,                            // Increased from 45
+    THREE.MathUtils.degToRad(28),  // Slightly wider beam
+    0.65,                          // Softer spotlight edges
+    1.25                           // Less aggressive distance falloff
+  );
 
-    const light =
-      new THREE.SpotLight(
+  light.position.set(
+    x,
+    1.05,
+    -2.15
+  );
 
-        0xfff1c7,
+  light.castShadow = true;
+  light.shadow.mapSize.set(1024, 1024);
 
-        120,
+  light.shadow.bias = -0.0001;
+  light.shadow.normalBias = 0.02;
 
-        45,
+  light.target = headlightTarget;
 
-        THREE.MathUtils.degToRad(
-          25
-        ),
+  chassis.add(light);
 
-        0.6,
+  return light;
+}
 
-        1.7
-      );
-
-
-    light.position.set(
-      x,
-      0.95,
-      -2.15
-    );
-
-
-    light.castShadow =
-      true;
-
-
-    light.shadow.mapSize.set(
-      1024,
-      1024
-    );
-
-
-    light.target =
-      headlightTarget;
-
-
-    chassis.add(
-      light
-    );
-
-
-    return light;
-  }
 
 
   const leftHeadlight =
@@ -750,60 +729,82 @@ export function createTaxi(
     );
 
 
+  
   // ==================================================
   // CUSTOM HEADLIGHT BEAMS
   // ==================================================
 
-  const beamLength =
-    20;
+  const beamLength = 16;
 
+  function createBeam(x) {
 
-  function createBeam(
-    x
-  ) {
+    // Two intersecting, softly shaded planes.
+    // These avoid the visible triangular surfaces
+    // caused by ConeGeometry.
 
-    const beam =
-      new THREE.Mesh(
+    const geometry = new THREE.BufferGeometry();
 
-        new THREE.ConeGeometry(
-          5.5,
-          beamLength,
-          32,
-          1,
-          true
-        ),
+    const nearZ = 0;
+    const farZ = -beamLength;
 
-        createHeadlightBeamMaterial()
-      );
+    const positions = new Float32Array([
+      // Horizontal beam (left and right)
+      -0.10, 0, nearZ,
+       0.10, 0, nearZ,
+      -2.20, 0, farZ,
+       2.20, 0, farZ,
 
+      // Vertical beam (up and down)
+       0, -0.06, nearZ,
+       0,  0.06, nearZ,
+       0, -0.75, farZ,
+       0,  0.75, farZ
+    ]);
 
-    beam.rotation.x =
-      Math.PI / 2;
+    const uvs = new Float32Array([
+      0, 0,
+      1, 0,
+      0, 1,
+      1, 1,
 
+      0, 0,
+      1, 0,
+      0, 1,
+      1, 1
+    ]);
 
-    beam.position.set(
+    const indices = [
+      0, 2, 1,
+      1, 2, 3,
 
-      x,
+      4, 6, 5,
+      5, 6, 7
+    ];
 
-      0.85,
-
-      -2.15 -
-      beamLength / 2
+    geometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(positions, 3)
     );
 
-
-    beam.renderOrder =
-      2;
-
-
-    beam.frustumCulled =
-      false;
-
-
-    chassis.add(
-      beam
+    geometry.setAttribute(
+      'uv',
+      new THREE.BufferAttribute(uvs, 2)
     );
 
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    const beam = new THREE.Mesh(
+      geometry,
+      createHeadlightBeamMaterial()
+    );
+
+    beam.position.set(x, 0.95, -2.20);
+
+    beam.renderOrder = 2;
+    beam.frustumCulled = false;
+
+    chassis.add(beam);
 
     return beam;
   }
@@ -825,37 +826,25 @@ export function createTaxi(
   // HEADLIGHT CONTROL
   // ==================================================
 
-  function setHeadlightsEnabled(
-    enabled
-  ) {
+  
+  function setHeadlightsEnabled(enabled) {
+    headlightsEnabled = Boolean(enabled);
 
-    headlightsEnabled =
-      enabled;
+    leftHeadlight.visible = headlightsEnabled;
+    rightHeadlight.visible = headlightsEnabled;
 
+    leftGlow.visible = headlightsEnabled;
+    rightGlow.visible = headlightsEnabled;
 
-    leftHeadlight.visible =
-      enabled;
+    leftBeam.visible = headlightsEnabled;
+    rightBeam.visible = headlightsEnabled;
 
+    const intensity = headlightsEnabled ? 1.0 : 0.0;
 
-    rightHeadlight.visible =
-      enabled;
-
-
-    leftGlow.visible =
-      enabled;
-
-
-    rightGlow.visible =
-      enabled;
-
-
-    leftBeam.visible =
-      enabled;
-
-
-    rightBeam.visible =
-      enabled;
+    leftBeam.material.uniforms.uIntensity.value = intensity;
+    rightBeam.material.uniforms.uIntensity.value = intensity;
   }
+
 
 
   function toggleHeadlights() {
@@ -875,19 +864,30 @@ export function createTaxi(
   }
 
 
-  function updateVisualEffects(
-    elapsedTime
-  ) {
+  
+  
 
-    leftBeam.material.uniforms
-      .uTime.value =
-        elapsedTime;
+function updateVisualEffects(elapsedTime) {
+  const leftUniforms = leftBeam.material.uniforms;
+  const rightUniforms = rightBeam.material.uniforms;
+
+  leftUniforms.uTime.value = elapsedTime;
+  rightUniforms.uTime.value = elapsedTime;
+
+  const subtleFlicker =
+    0.98 +
+    Math.sin(elapsedTime * 6.0) * 0.01;
+
+  const intensity = headlightsEnabled
+    ? subtleFlicker
+    : 0;
+
+  leftUniforms.uIntensity.value = intensity;
+  rightUniforms.uIntensity.value = intensity;
+}
 
 
-    rightBeam.material.uniforms
-      .uTime.value =
-        elapsedTime;
-  }
+
 
 
   setHeadlightsEnabled(
