@@ -5,13 +5,9 @@
 // Shown by the CREDITS screen (screens.js creditsHTML). Edit
 // this list, not the screen code. Every file in public/assets
 // must be listed here with its source and licence.
-//
-// Entries still marked 'Source: TODO' have no source recorded
-// anywhere in the repo (code, commits or PRs). Replace them
-// with the real source and licence before submission.
 
 const POLY_HAVEN = 'Poly Haven (polyhaven.com) — CC0';
-const TODO = 'Source: TODO';
+const POLY_HAVEN_HDRI = 'Poly Haven (polyhaven.com) — CC0 1.0';
 
 export const CREDITS = [
   {
@@ -30,7 +26,7 @@ export const CREDITS = [
     entries: [
       {
         name: 'three.js r185',
-        detail: 'MIT licence — includes the GLTFLoader and RGBELoader add-ons'
+        detail: 'MIT'
       },
       {
         name: 'Vite 8',
@@ -118,9 +114,9 @@ export const CREDITS = [
   {
     heading: 'HDRI skies',
     entries: [
-      { name: 'Level 1 day sky', detail: TODO, files: ['hdri/level1_day.hdr'] },
-      { name: 'Level 2 midday sky', detail: TODO, files: ['hdri/level2_midday.hdr'] },
-      { name: 'Level 3 night sky', detail: TODO, files: ['hdri/level3_night.hdr'] }
+      { name: 'Level 1 day sky', detail: POLY_HAVEN_HDRI, files: ['hdri/level1_day.hdr'] },
+      { name: 'Level 2 midday sky', detail: POLY_HAVEN_HDRI, files: ['hdri/level2_midday.hdr'] },
+      { name: 'Level 3 night sky', detail: POLY_HAVEN_HDRI, files: ['hdri/level3_night.hdr'] }
     ]
   },
 
@@ -129,12 +125,55 @@ export const CREDITS = [
     entries: [
       {
         name: 'Sesfikile minibus taxi',
-        detail: TODO,
+        detail:
+          "Toyota HiAce 'Sesfikile' minibus model — downloaded from SketchUp 3D Warehouse, " +
+          'original author unknown; modified and exported in Blender.',
         files: ['models/sesfikile.glb']
       },
       {
         name: 'Pursuer, traffic cars, pedestrians and street props',
         detail: 'Built in code by the team'
+      }
+    ]
+  },
+
+  {
+    heading: 'Adapted code',
+    entries: [
+      {
+        name: 'GLTFLoader',
+        detail: 'three.js — MIT',
+        files: ['src/vehicle/Taxi.js']
+      },
+      {
+        name: 'RGBELoader',
+        detail: 'three.js — MIT',
+        files: ['src/graphics/LightingManager.js']
+      },
+      {
+        name: 'RoundedBoxGeometry',
+        detail: 'three.js — MIT',
+        files: ['src/vehicle/Taxi.js']
+      },
+      {
+        name: 'BufferGeometryUtils',
+        detail: 'three.js — MIT',
+        files: [
+          'src/world/environments/helpers.js',
+          'src/world/environments/props.js',
+          'src/world/environments/props/people.js',
+          'src/world/environments/props/vehicles.js'
+        ]
+      },
+      {
+        name: 'GLSL hash fract(sin(dot(...)) * 43758.5453)',
+        detail:
+          'Common GLSL pseudo-random hash snippet ' +
+          '(widely used; popularised by The Book of Shaders)',
+        files: [
+          'src/shaders/HeadlightBeamShader.js',
+          'src/shaders/HeatHazeShader.js'
+        ]
       }
     ]
   }
