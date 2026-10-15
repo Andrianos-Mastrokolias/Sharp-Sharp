@@ -1,201 +1,85 @@
+
 import * as THREE from 'three';
 
-
 export function createHeadlightBeamMaterial() {
-
   return new THREE.ShaderMaterial({
-
     transparent: true,
-
     depthWrite: false,
-
+    depthTest: true,
     side: THREE.DoubleSide,
-
-    blending:
-      THREE.AdditiveBlending,
-
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
 
     uniforms: {
-
-      uTime: {
-        value: 0
-      },
-
-
-      uIntensity: {
-        value: 1
-      },
-
-
+      uTime: { value: 0 },
+      uIntensity: { value: 0 },
       uColor: {
-        value:
-          new THREE.Color(
-            0xffedc2
-          )
+        value: new THREE.Color(0xffeac8)
       }
     },
 
-
     vertexShader: `
-      varying vec3 vLocalPosition;
       varying vec2 vUv;
+      varying vec3 vPosition;
 
       void main() {
-
-        vLocalPosition =
-          position;
-
-        vUv =
-          uv;
-
+        vUv = uv;
+        vPosition = position;
 
         gl_Position =
           projectionMatrix *
           modelViewMatrix *
-          vec4(
-            position,
-            1.0
-          );
+          vec4(position, 1.0);
       }
     `,
-
 
     fragmentShader: `
       uniform float uTime;
       uniform float uIntensity;
       uniform vec3 uColor;
 
-      varying vec3 vLocalPosition;
       varying vec2 vUv;
-
-
-      float hash(vec2 p) {
-
-        return fract(
-          sin(
-            dot(
-              p,
-              vec2(
-                127.1,
-                311.7
-              )
-            )
-          ) *
-          43758.5453123
-        );
-      }
-
+      varying vec3 vPosition;
 
       void main() {
+        // UV X: centre of beam = 0.5.
+        // UV Y: headlight = 0, far end = 1.
 
-        // --------------------------------------------
-        // EDGE FADE
-        // --------------------------------------------
+        float sideDistance = abs(vUv.x - 0.5) * 2.0;
 
-        float centreFade =
+        // Soft symmetrical edges.
+        float edgeFade =
+          1.0 - smoothstep(0.0, 1.0, sideDistance);
 
-          1.0 -
+        edgeFade = pow(edgeFade, 1.8);
 
-          abs(
-            vUv.x -
-            0.5
-          ) *
+        // Beam fades in just outside the lamp.
+        float nearFade =
+          smoothstep(0.0, 0.12, vUv.y);
 
-          2.0;
+        // Dissipates gradually before the far end.
+        float farFade =
+          1.0 - smoothstep(0.08, 1.0, vUv.y);
 
-
-        centreFade =
-          clamp(
-            centreFade,
-            0.0,
-            1.0
+        // Very slight atmospheric variation.
+        float atmosphere =
+          0.96 +
+          0.04 * sin(
+            uTime * 1.5 + vPosition.z * 0.5
           );
-
-
-        centreFade =
-          pow(
-            centreFade,
-            1.6
-          );
-
-
-        // --------------------------------------------
-        // DISTANCE FADE
-        // --------------------------------------------
-
-        float lengthFade =
-
-          1.0 -
-          vUv.y;
-
-
-        lengthFade =
-          clamp(
-            lengthFade,
-            0.0,
-            1.0
-          );
-
-
-        // --------------------------------------------
-        // ANIMATED DUST / FOG
-        // --------------------------------------------
-
-        vec2 noiseUv =
-
-          vec2(
-
-            vLocalPosition.x *
-            0.7 +
-
-            uTime *
-            0.12,
-
-
-            vLocalPosition.y *
-            0.7 -
-
-            uTime *
-            0.08
-          );
-
-
-        float noise =
-          hash(
-            floor(
-              noiseUv *
-              4.0
-            )
-          );
-
-
-        noise =
-          0.65 +
-          noise *
-          0.35;
-
-
-        // --------------------------------------------
-        // FINAL ALPHA
-        // --------------------------------------------
 
         float alpha =
+          edgeFade *
+          nearFade *
+          farFade *
+          atmosphere *
+          0.035 *
+          clamp(uIntensity, 0.0, 1.2);
 
-          centreFade *
-          lengthFade *
-          noise *
-          0.22 *
-          uIntensity;
-
-
-        gl_FragColor =
-
-          vec4(
-
-            uColor,
-
-            alpha
-          );
+        gl_FragColor = vec4(
+          uColor,
+          clamp(alpha, 0.0, 1.0)
+        );
       }
     `
   });
