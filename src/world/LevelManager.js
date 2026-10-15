@@ -77,56 +77,28 @@ const L2_PURSUIT_LANE_MAX_X = 2;           // ground lane; flyover starts at x 3
 // and the 120 m lights-on radius mean a taxi that starts with its
 // lights on is always inside the radius when the pursuer wakes (no
 // activateAfterDelay needed), while lights off (15 m) stays unseen.
-const L3_PURSUIT_START_DELAY = 3.5;
 
-// Distance behind taxi when created
+const L3_PURSUIT_START_DELAY = 1;
 const L3_PURSUIT_SPAWN_DISTANCE = 30;
+const L3_PURSUIT_SPEED = 1.15;
 
-// Slightly slower than before so the player
-// has a fair chance to create distance
-const L3_PURSUIT_SPEED = 1.05;
-
-
-// --------------------------------------------------
 // HEADLIGHT DETECTION
-// --------------------------------------------------
-
-// Lights ON = easier for pursuer to see you,
-// but not from almost the entire level.
-const L3_PURSUIT_DETECTION_LIGHTS_ON = 55;
-
-// Lights OFF = very difficult to detect.
+const L3_PURSUIT_DETECTION_LIGHTS_ON = 120;
 const L3_PURSUIT_DETECTION_LIGHTS_OFF = 15;
 
-
-// --------------------------------------------------
 // LOSING THE PURSUER
-// --------------------------------------------------
-
-const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 100;
+const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 170;
 const L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF = 30;
+const L3_PURSUIT_LOSE_TIME = 4;
 
-const L3_PURSUIT_LOSE_TIME = 3;
-
-
-// --------------------------------------------------
 // CAPTURE
-// --------------------------------------------------
-
 const L3_PURSUIT_CAPTURE_DISTANCE = 6.4;
 const L3_PURSUIT_CAPTURE_TIME = 1.5;
 
-
-// --------------------------------------------------
-// PATROL
-// --------------------------------------------------
-
-// Slower patrol so it doesn't immediately close
-// the gap before the player understands the level.
-const L3_PURSUIT_PATROL_SPEED = 14;
-
-// Gives the player a visible warning before chase.
+// PATROL AND REACTION
+const L3_PURSUIT_PATROL_SPEED = 17;
 const L3_PURSUIT_REACTION_TIME = 1.5;
+
 
 
 // ==================================================
@@ -413,7 +385,7 @@ export const LEVELS = {
     // Drives the road the other way round (+Z), so heading is PI.
     spawn: {
       x: 0,
-      z: -150,
+      z: -170,
       heading: Math.PI
     },
 
