@@ -6,6 +6,7 @@ import {
 } from './PursuitSystem.js';
 import { TrafficSystem } from './TrafficSystem.js';
 import { buildEnvironment } from './environments/index.js';
+import { ROADS, vehicleBounds } from './roads.js';
 
 // ==================================================
 // LEVEL DEFINITIONS
@@ -20,16 +21,13 @@ import { buildEnvironment } from './environments/index.js';
 // VehicleController.reset()).
 // ==================================================
 
-// Sent to vehicle.setBounds() on load. Level 2 is still squeezed
-// into the old +-30 / +-190 box; give a level its own numbers
-// here when it needs more room - warnIfRouteOutOfBounds() will
-// flag any route that outgrows them.
-const VEHICLE_BOUNDS = {
-  minX: -30,
-  maxX: 30,
-  minZ: -190,
-  maxZ: 190
-};
+// A level's length is data: its road (z range) lives in roads.js,
+// and what is sent to vehicle.setBounds() on load (x +-30 and the
+// road's z range less a 10 m margin at each end) is derived from it.
+// warnIfRouteOutOfBounds() flags any route that outgrows them.
+const L1_ROAD = ROADS[1];
+const L2_ROAD = ROADS[2];
+const L3_ROAD = ROADS[3];
 
 // A raised section only lifts the taxi if it is already near the
 // deck surface (or at the ramp toe), so driving on the ground
@@ -47,7 +45,9 @@ const VEHICLE_BOUNDS = {
 // PursuitSystem.js.
 // ==================================================
 
-// Level 1: appears near the end of the run
+// Level 1: appears near the end of the run. 0.66 of the 900 m run is z -424,
+// about 300 m before the goal (it was 71 m before it on the old 210 m run);
+// the next stage replaces the fraction with an explicit z.
 const L1_PURSUIT_TRIGGER_PROGRESS = 0.66;  // along spawn -> destination
 const L1_PURSUIT_SPAWN_DISTANCE = 30;      // behind the taxi
 const L1_PURSUIT_SPEED = 1.15;
@@ -72,8 +72,8 @@ const L2_PURSUIT_LANE_MAX_X = 2;           // ground lane; flyover starts at x 3
 
 // Level 3: detection range is the stealth tradeoff against
 // the unlit potholes (lights on = seen from far away).
-// The taxi spawns at z -170 and the pursuer's 30 m spawn offset is
-// clamped by the world bounds to ~15 m behind it. The 1 s start delay
+// The taxi spawns at z -600 and the pursuer's 30 m spawn offset fits
+// inside the world bounds (road z -660, bounds -650). The 1 s start delay
 // and the 120 m lights-on radius mean a taxi that starts with its
 // lights on is always inside the radius when the pursuer wakes (no
 // activateAfterDelay needed), while lights off (15 m) stays unseen.
@@ -108,7 +108,7 @@ const L3_PURSUIT_REACTION_TIME = 1.5;
 // +1 = oncoming), speed (m/s, constant), count, variants (any of
 // hatchback / sedan / bakkie / minibus). At most 10 cars a level.
 // Lanes run across the whole road (zLo..zHi, inside the vehicle's
-// z +-190): cars enter at one end and leave at the other, far from
+// z bounds): cars enter at one end and leave at the other, far from
 // the spawn. The clearances only shape the initial layout. See
 // TrafficSystem.js. Level 3 (stealth) has no traffic.
 //
@@ -117,9 +117,23 @@ const L3_PURSUIT_REACTION_TIME = 1.5;
 // taxi, and ~3.5 m to the road edge (x +-9).
 // ==================================================
 
-// The stretch of road the lanes run on
-const TRAFFIC_LANE_Z_LO = -185;
-const TRAFFIC_LANE_Z_HI = 185;
+// The stretch of road the lanes run on: the vehicle's z bounds less 5 m
+// at each end (the original -185..185)
+const TRAFFIC_LANE_END_MARGIN = 5;
+
+const trafficLaneRange = road => {
+  const bounds = vehicleBounds(road);
+
+  return {
+    zLo: bounds.minZ + TRAFFIC_LANE_END_MARGIN,
+    zHi: bounds.maxZ - TRAFFIC_LANE_END_MARGIN
+  };
+};
+
+// Cars per metre as on the original 370 m lanes (Level 1: 4 + 4,
+// Level 2: 3 + 4), so the count follows the road: Level 1's lanes
+// are 930 m (10 + 10 cars). Level 2's are 1130 m; its cap is 16
+// (7 + 9), a little under the original density.
 
 // At the start nobody is this close to the spawn bay / the delivery zone
 const TRAFFIC_SPAWN_CLEARANCE = 40;
@@ -128,20 +142,22 @@ const TRAFFIC_DESTINATION_CLEARANCE = 35;
 const L1_TRAFFIC_SEED = 1101;
 const L1_TRAFFIC_SAME_X = -4.5;
 const L1_TRAFFIC_SAME_SPEED = 9;
-const L1_TRAFFIC_SAME_COUNT = 4;
+const L1_TRAFFIC_SAME_COUNT = 10;
 const L1_TRAFFIC_ONCOMING_X = 4.5;
 const L1_TRAFFIC_ONCOMING_SPEED = 12;
-const L1_TRAFFIC_ONCOMING_COUNT = 4;
+const L1_TRAFFIC_ONCOMING_COUNT = 10;
+const L1_TRAFFIC_MAX_CARS = 20;
 
 // Level 2: same direction only. Flyover footprint is x >= 3 (traffic
 // must stay at x < 2), so both lanes sit on the ground side.
 const L2_TRAFFIC_SEED = 2202;
 const L2_TRAFFIC_LANE_A_X = 0;
 const L2_TRAFFIC_LANE_A_SPEED = 13;
-const L2_TRAFFIC_LANE_A_COUNT = 3;
+const L2_TRAFFIC_LANE_A_COUNT = 7;
 const L2_TRAFFIC_LANE_B_X = -3.6;
 const L2_TRAFFIC_LANE_B_SPEED = 17;
-const L2_TRAFFIC_LANE_B_COUNT = 4;
+const L2_TRAFFIC_LANE_B_COUNT = 9;
+const L2_TRAFFIC_MAX_CARS = 16;
 
 
 // Spawn bay / destination ring / beam are unlit (MeshBasicMaterial), so
@@ -165,22 +181,25 @@ export const LEVELS = {
   1: {
     name: 'Rank to CBD',
 
+    road: L1_ROAD,
+
+    // 900 m run towards -z from the top of the road
     spawn: {
       x: 0,
-      z: 60,
+      z: 170,
       heading: 0
     },
 
     // Waypoints are for the route guide / future traffic
     // and pursuit paths. The last one is the destination.
     route: [
-      { x: 0, z: 60 },
-      { x: 0, z: -150 }
+      { x: 0, z: 170 },
+      { x: 0, z: -730 }
     ],
 
     destination: {
       x: 0,
-      z: -150,
+      z: -730,
       radius: 8,
 
       // Taxi must be (nearly) stopped inside the zone
@@ -203,8 +222,8 @@ export const LEVELS = {
 
     traffic: {
       seed: L1_TRAFFIC_SEED,
-      zLo: TRAFFIC_LANE_Z_LO,
-      zHi: TRAFFIC_LANE_Z_HI,
+      maxCars: L1_TRAFFIC_MAX_CARS,
+      ...trafficLaneRange(L1_ROAD),
       spawnClearance: TRAFFIC_SPAWN_CLEARANCE,
       destinationClearance: TRAFFIC_DESTINATION_CLEARANCE,
       lanes: [
@@ -227,17 +246,21 @@ export const LEVELS = {
 
     markerBrightness: 1,
 
-    // The vehicle also hard-clamps to x +-30, z +-190
-    boundaries: VEHICLE_BOUNDS
+    // The vehicle also hard-clamps to x +-30 and the road's z range
+    boundaries: vehicleBounds(L1_ROAD)
   },
 
 
   2: {
     name: 'The Highway',
 
+    road: L2_ROAD,
+
     // Midday visuals/speed tuning are applied elsewhere
     // (applyLevelVisuals / vehicle.setLevel).
 
+    // 1100 m run towards -z; the speed bump (z 25), the potholes
+    // (z 5, -20, -50) and the flyover (z 10..-110) are where they were
     spawn: {
       x: 0,
       z: 170,
@@ -247,7 +270,7 @@ export const LEVELS = {
     // Default guide route (the ground lane).
     route: [
       { x: 0, z: 170 },
-      { x: 0, z: -165 }
+      { x: 0, z: -930 }
     ],
 
     // Route choice: both end at the same destination.
@@ -260,7 +283,7 @@ export const LEVELS = {
         id: 'ground',
         waypoints: [
           { x: 0, z: 170 },
-          { x: 0, z: -165 }
+          { x: 0, z: -930 }
         ]
       },
       {
@@ -271,7 +294,7 @@ export const LEVELS = {
           { x: 6.2, z: 15 },
           { x: 6.2, z: -105 },
           { x: 0, z: -135 },
-          { x: 0, z: -165 }
+          { x: 0, z: -930 }
         ]
       }
     ],
@@ -318,7 +341,7 @@ export const LEVELS = {
 
     destination: {
       x: 0,
-      z: -165,
+      z: -930,
       radius: 8,
       maxDeliverSpeed: 4
     },
@@ -345,8 +368,8 @@ export const LEVELS = {
     // of the flyover footprint (checked by TrafficSystem.configure).
     traffic: {
       seed: L2_TRAFFIC_SEED,
-      zLo: TRAFFIC_LANE_Z_LO,
-      zHi: TRAFFIC_LANE_Z_HI,
+      maxCars: L2_TRAFFIC_MAX_CARS,
+      ...trafficLaneRange(L2_ROAD),
       spawnClearance: TRAFFIC_SPAWN_CLEARANCE,
       destinationClearance: TRAFFIC_DESTINATION_CLEARANCE,
       lanes: [
@@ -369,10 +392,7 @@ export const LEVELS = {
 
     markerBrightness: 1,
 
-    // TODO(setBounds): shared with every level for now - see
-    // VEHICLE_BOUNDS. This route is squeezed into the road
-    // (x +-9) and z +-170 purely because of that clamp.
-    boundaries: VEHICLE_BOUNDS
+    boundaries: vehicleBounds(L2_ROAD)
   },
 
 
@@ -382,16 +402,22 @@ export const LEVELS = {
     // Night visuals (fog, sun, HDRI) come from the graphics
     // managers via applyLevelVisuals(3).
 
+    road: L3_ROAD,
+
     // Drives the road the other way round (+Z), so heading is PI.
+    // 900 m run from z -600 to +300.
     spawn: {
       x: 0,
-      z: -170,
+      z: -600,
       heading: Math.PI
     },
 
     // A back road: wanders across the carriageway rather than
-    // running straight. Guide only - nothing enforces it.
+    // running straight. Guide only - nothing enforces it. The
+    // wander (and the three hidden potholes below) stays where it was;
+    // the road runs straight before and after it.
     route: [
+      { x: 0, z: -600 },
       { x: 0, z: -150 },
       { x: 0, z: -130 },
       { x: 5, z: -100 },
@@ -401,7 +427,8 @@ export const LEVELS = {
       { x: 3, z: 50 },
       { x: 3, z: 90 },
       { x: 0, z: 125 },
-      { x: 0, z: 165 }
+      { x: 0, z: 165 },
+      { x: 0, z: 300 }
     ],
 
     // Unlit potholes on the route. They are registered with the
@@ -417,7 +444,7 @@ export const LEVELS = {
 
     destination: {
       x: 0,
-      z: 165,
+      z: 300,
       radius: 8,
       maxDeliverSpeed: 4
     },
@@ -443,7 +470,7 @@ export const LEVELS = {
     // Night: the unlit spawn bay and destination ring would glare
     markerBrightness: 0.5,
 
-    boundaries: VEHICLE_BOUNDS
+    boundaries: vehicleBounds(L3_ROAD)
   }
 };
 

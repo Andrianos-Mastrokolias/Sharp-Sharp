@@ -5,7 +5,7 @@ import { PerformanceObserver } from 'node:perf_hooks';
 import { LevelManager, LEVELS } from '../src/world/LevelManager.js';
 import {
   TrafficSystem, MIN_CAR_GAP, TRAFFIC_VARIANTS, GHOST_ZONE_RADIUS,
-  CONTACT_MARGIN, HOLD_TIME, RESUME_TIME
+  CONTACT_MARGIN, HOLD_TIME, RESUME_TIME, MAX_TRAFFIC_CARS, MAX_TRAFFIC_CARS_CEILING
 } from '../src/world/TrafficSystem.js';
 import { createTrafficCar } from '../src/world/environments/props.js';
 
@@ -146,12 +146,17 @@ test('createTrafficCar: 4 variants, <400 tris, ground origin, faces -Z, emissive
   assert.equal(new Set(colours).size, colours.length, 'one material per colour');
 });
 
-test('per-level config: L1 two lanes (4+4), L2 same-direction lanes (3+4), L3 none, <= 10 cars, whole-road range', () => {
+// The cars follow the road's length at the original density: the original lanes were
+// 370 m (L1: 4 + 4 cars, L2: 3 + 4); L1's are 930 m now (10 + 10, cap 20) and L2's
+// 1130 m (7 + 9, cap 16: a little under the original density)
+test('per-level config: L1 two lanes (10+10), L2 same-direction lanes (7+9), L3 none, per-level car caps, whole-road range', () => {
   const l1 = LEVELS[1].traffic.lanes;
   assert.deepEqual(l1.map(({ x, dir, speed, count }) => ({ x, dir, speed, count })), [
-    { x: -4.5, dir: -1, speed: 9, count: 4 },
-    { x: 4.5, dir: 1, speed: 12, count: 4 }
+    { x: -4.5, dir: -1, speed: 9, count: 10 },
+    { x: 4.5, dir: 1, speed: 12, count: 10 }
   ]);
+  assert.equal(LEVELS[1].traffic.maxCars, 20);
+  assert.equal(LEVELS[2].traffic.maxCars, 16);
   for (const level of [1, 2]) {
     const { zLo, zHi } = LEVELS[level].traffic;
     const b = LEVELS[level].boundaries;
@@ -160,17 +165,21 @@ test('per-level config: L1 two lanes (4+4), L2 same-direction lanes (3+4), L3 no
   }
   const l2 = LEVELS[2].traffic.lanes;
   assert.deepEqual(l2.map(({ x, dir, speed, count }) => ({ x, dir, speed, count })), [
-    { x: 0, dir: -1, speed: 13, count: 3 },
-    { x: -3.6, dir: -1, speed: 17, count: 4 }
+    { x: 0, dir: -1, speed: 13, count: 7 },
+    { x: -3.6, dir: -1, speed: 17, count: 9 }
   ]);
   assert.equal(LEVELS[3].traffic, undefined);
   for (const level of [1, 2]) {
-    assert.ok(LEVELS[level].traffic.lanes.reduce((n, l) => n + l.count, 0) <= 10);
+    const { lanes, maxCars } = LEVELS[level].traffic;
+    assert.ok(lanes.reduce((n, l) => n + l.count, 0) <= maxCars);
+    assert.ok(maxCars <= MAX_TRAFFIC_CARS_CEILING);
   }
+  // a level that sets no cap of its own keeps the original 10
+  assert.equal(MAX_TRAFFIC_CARS, 10);
 });
 
 test('every car is a childless Mesh in the collidables, sharing geometry/material per variant', () => {
-  for (const [level, expected] of [[1, 8], [2, 7]]) {
+  for (const [level, expected] of [[1, 20], [2, 16]]) {
     const { lm, collidables, scene } = make();
     lm.load(level);
     assert.equal(lm.traffic.cars.length, expected);
@@ -334,7 +343,7 @@ test('lane ranges: enter at one end, leave at the other; wraps only at the ends,
     assert.ok(wraps.every((n) => n >= 1), `level ${level}: every car wrapped at least once ${wraps}`);
 
     // Distance from the wrap points to the spawn and the destination. The rule is 120 m; the
-    // vehicle clamps to z +-190, so a wrap (the lane ends 5 m inside the bound, at the centre of a
+    // vehicle clamps to the road's bounds, so a wrap (the lane ends 5 m inside the bound, at the centre of a
     // car of up to 5.2 m, and a frame of travel) can only be so far from a point near that end of
     // the road. Assert 120 m wherever it is possible, and otherwise that the lane uses all the room
     // the bounds leave.
@@ -345,7 +354,7 @@ test('lane ranges: enter at one end, leave at the other; wraps only at the ends,
       const room = nearestBound(point);
       const want = room >= 128 ? 120 : room - 5 - 2.6 - 0.5;
       assert.ok(got >= want - 1e-6, `level ${level}: nearest wrap is ${got.toFixed(1)} m from the ${name}, wanted >= ${want.toFixed(1)}`);
-      rows.push(`level ${level} ${name} z=${point.z}: nearest wrap ${got.toFixed(1)} m` + (got < 120 ? ` (below 120 m: only ${room.toFixed(0)} m of road inside the +-190 bounds)` : ''));
+      rows.push(`level ${level} ${name} z=${point.z}: nearest wrap ${got.toFixed(1)} m` + (got < 120 ? ` (below 120 m: only ${room.toFixed(0)} m of road inside the vehicle bounds)` : ''));
     }
     for (const lane of lm.traffic.lanes) {
       const enter = lane.dir < 0 ? lane.zHi : lane.zLo;
@@ -399,7 +408,7 @@ test('1 -> 2 -> 3 -> 1 cycles leave no duplicates or leaks, even while cars are 
   };
   const seen = { 1: null, 2: null, 3: null };
   const disposedGeometries = [];
-  const expected = { 1: 8, 2: 7, 3: 0 };
+  const expected = { 1: 20, 2: 16, 3: 0 };
 
   for (let cycle = 0; cycle < 3; cycle++) {
     for (const level of [1, 2, 3, 1]) {
@@ -867,7 +876,7 @@ test('the hold is wired through LevelManager.update (vehicle step, then traffic)
   const car = lm.traffic.cars.find((c) => lm.traffic.lanes[c.laneIndex].dir > 0);
   const lane = lm.traffic.lanes[car.laneIndex];
   isolate(lm, car);
-  car.u = 100;
+  car.u = -80 - lane.centreLo;                  // z = -80, short of where Level 1's pursuer wakes (z -424)
   lm.traffic.place(car);
   parkTaxi(taxi, lane.x, car.mesh.position.z + 8);
   for (let t = 0; t < 3; t += DT) lm.update(DT, t);

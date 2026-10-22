@@ -64,8 +64,11 @@ export { TRAFFIC_VARIANTS };
 // Bumper-to-bumper gap no two cars of a lane ever get below (m)
 export const MIN_CAR_GAP = 8;
 
-// Hard cap per level (collidables are box-tested every frame)
+// Cap per level (collidables are box-tested every frame): 10 unless the
+// level's traffic config sets its own `maxCars`, which a longer road
+// needs to keep the same cars per metre, and never more than the ceiling
 export const MAX_TRAFFIC_CARS = 10;
+export const MAX_TRAFFIC_CARS_CEILING = 24;
 
 // A lane may not come within this of an elevated section's footprint
 // (x, in metres): flyover xMin 3 -> traffic stays at x < 2
@@ -165,9 +168,14 @@ export class TrafficSystem {
 
     const total = config.lanes.reduce((n, lane) => n + lane.count, 0);
 
-    if (total > MAX_TRAFFIC_CARS) {
+    const limit = Math.min(
+      config.maxCars ?? MAX_TRAFFIC_CARS,
+      MAX_TRAFFIC_CARS_CEILING
+    );
+
+    if (total > limit) {
       throw new Error(
-        `traffic: ${total} cars is over the limit of ${MAX_TRAFFIC_CARS}`
+        `traffic: ${total} cars is over the limit of ${limit}`
       );
     }
 

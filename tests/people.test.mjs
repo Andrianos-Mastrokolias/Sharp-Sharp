@@ -15,9 +15,14 @@ import {
   createZebraCrossing
 } from '../src/world/environments/props.js';
 import { LIFE_DENSITY, createLife } from '../src/world/environments/life.js';
+import { ROADS, roadLength } from '../src/world/roads.js';
 import { makeLibrary } from './tools/fake-library.mjs';
 
-const MAX_PEOPLE = 220;               // the Stage 1 instance cap
+// The instance cap grows with the road: 216 per 400 m, as the original street
+// (the original stretch keeps its own 216, the stretch added to it gets the rest)
+const ROAD = ROADS[1];
+const MAX_PEOPLE = Math.round(216 * roadLength(ROAD) / 400) + 1;
+const SIDE_STREETS = 11;              // the original 4, then the pattern repeated every ten slots
 const MIN_ABS_X = 11;                 // people keep off the road and the kerb side of the sidewalk
 const ROAD_HALF_WIDTH = 9;
 
@@ -159,8 +164,8 @@ for (const mesh of meshes) {
 }
 
 const all = instances(meshes);
-assert.ok(all.length >= 150 && all.length <= MAX_PEOPLE, `${all.length} instances`);
-assert.ok(all.length <= LIFE_DENSITY[1].maxInstances, 'density cap');
+assert.ok(all.length >= 150 * roadLength(ROAD) / 400 && all.length <= MAX_PEOPLE, `${all.length} instances`);
+assert.ok(all.length > LIFE_DENSITY[1].maxInstances, 'the longer road has more people than the original cap');
 
 // Every variant is used, each with a single material per mesh; per-variant
 // geometry stays under the triangle limit once placed
@@ -188,7 +193,7 @@ for (const p of all) {
     assert.ok(Math.abs(x) >= MIN_ABS_X, `person at |x| ${Math.abs(x).toFixed(2)} (needs >= ${MIN_ABS_X})`);
     assert.ok(Math.abs(x) > ROAD_HALF_WIDTH, 'on the carriageway');
     assert.ok(Math.abs(x) <= 16, `person off the verge at |x| ${Math.abs(x).toFixed(2)}`);
-    assert.ok(Math.abs(z) <= 190, 'inside the street');
+    assert.ok(z >= ROAD.zMin && z <= ROAD.zMax, 'inside the street');
 
     for (const box of buildings) {
       assert.ok(!box.containsPoint(new THREE.Vector3(x, 1, z)), `person inside a building at (${x.toFixed(2)}, ${z.toFixed(2)})`);
@@ -214,9 +219,9 @@ for (const p of all) {
   }
 }
 
-assert.equal(crossers, 4 * LIFE_DENSITY[1].crossersPerStreet, 'crossers on each of the 4 side streets');
-assert.ok(walkers >= 20, `${walkers} walkers`);
-assert.ok(standing >= 80, `${standing} standing`);
+assert.equal(crossers, SIDE_STREETS * LIFE_DENSITY[1].crossersPerStreet, `crossers on each of the ${SIDE_STREETS} side streets`);
+assert.ok(walkers >= 20 * roadLength(ROAD) / 400, `${walkers} walkers`);
+assert.ok(standing >= 80 * roadLength(ROAD) / 400, `${standing} standing`);
 
 // Each mesh's sphere holds all of its paths (so culling never hides someone)
 for (const mesh of meshes) {
@@ -233,9 +238,21 @@ for (const mesh of meshes) {
   }
 }
 
-// Instances are chunked by 60 m and side, so far ones are culled
+// Instances are chunked by 120 m and side, so far ones are culled
 for (const mesh of meshes) {
-  assert.ok(mesh.boundingSphere.radius < 60, `culling sphere radius ${mesh.boundingSphere.radius}`);
+  assert.ok(mesh.boundingSphere.radius < 120, `culling sphere radius ${mesh.boundingSphere.radius}`);
+}
+
+// The original stretch of the street keeps its own people: they come from
+// a layout and a seed of their own, so a longer road does not move them
+{
+  const original = buildEnvironment(1, { materials: makeLibrary(), road: { zMin: -200, zMax: 200 } });
+  const was = instances(people(original)).filter((p) => p.z > -200);
+  const now = all.filter((p) => p.z > -200);
+  const key = (p) => [p.x, p.y, p.z, p.dx, p.dz, p.speed, p.length, p.phase, p.scale].map((v) => v.toFixed(5)).join(',');
+  const nowKeys = new Set(now.map(key));
+  assert.ok(was.every((p) => nowKeys.has(key(p))), 'an original person moved or vanished');
+  original.dispose();
 }
 
 // The walk: the only per-frame work is writing one number into uTime
@@ -251,7 +268,7 @@ for (const mesh of meshes) {
 }
 
 // Nothing of the people is registered with the vehicle
-assert.equal(env.collidables.length, 26, 'level 1 collidables unchanged');
+assert.equal(env.collidables.length, 64, 'level 1 collidables: the original 26 buildings and 38 more');
 assert.ok(env.collidables.every((m) => !m.isInstancedMesh && m.children.length === 0));
 
 // Deterministic: a second build is identical

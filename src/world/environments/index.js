@@ -1,6 +1,7 @@
 import { createCityStreet } from './cityStreet.js';
 import { createMotorway } from './motorway.js';
 import { createTownship } from './township.js';
+import { roadFor } from '../roads.js';
 
 
 // ==================================================
@@ -14,8 +15,13 @@ import { createTownship } from './township.js';
 //
 // Contract (for the 3D model team):
 //
-//   factory({ materials }) -> { group, collidables, dispose }
+//   factory({ materials, road }) -> { group, collidables, dispose }
 //
+//   road         { zMin, zMax }: where the road runs along z. The
+//                level's own entry in ../roads.js unless the caller
+//                passes one. The stretch -200..200 is always built
+//                exactly as it was; a longer road adds more of the
+//                same beyond it.
 //   materials    the shared MaterialLibrary. Its create*Material()
 //                calls return new materials with cloned textures
 //                that belong to the environment; never dispose
@@ -34,7 +40,8 @@ import { createTownship } from './township.js';
 //                helpers.js does this for the whole group).
 //
 // Rules every level follows:
-//   - The road runs along z at x = 0 (18 m wide, z -200..200).
+//   - The road runs along z at x = 0 (18 m wide, z -200..200 or
+//     longer, see roads.js).
 //     The speed bump (z 25) and the three potholes (helpers.js:
 //     SPEED_BUMP / MAIN_POTHOLES) feed the vehicle's physics and
 //     must be drawn at exactly those positions; restyle only.
@@ -66,7 +73,13 @@ export function buildEnvironment(
     ] ?? createCityStreet;
 
 
-  return factory(
-    context
-  );
+  return factory({
+    ...context,
+
+    road:
+      context.road ??
+      roadFor(
+        levelId
+      )
+  });
 }

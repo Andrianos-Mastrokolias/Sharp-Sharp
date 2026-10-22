@@ -4,11 +4,20 @@ import {
   createBox,
   createTexturedBox,
   prepareAO,
+  scaleLengthUV,
   createGeometryCache,
   MAIN_POTHOLES,
+  ROAD_TILE_LENGTH,
   SPEED_BUMP,
   disposeObjectTree
 } from './helpers.js';
+
+import {
+  DEFAULT_ROAD,
+  alignedFrom,
+  roadCentre,
+  roadLength
+} from '../roads.js';
 
 import {
   createRandom,
@@ -44,12 +53,21 @@ import {
 //      10.1 .. 10.4   fence / low wall (collidable)
 //      >= 11          houses and shacks (collidable bodies)
 //
-// Collidables (all childless single Meshes):
-//   2 fences + 8 house-body chunks + 12 wrecks + 10 bins.
+// Collidables (all childless single Meshes), per 100 m of road:
+//   2 fence chunks + 2 house-body chunks + 3 wrecks + 2.5 bins
+//   (the original 400 m: 8 fences + 8 houses + 12 wrecks + 10 bins).
+//
+// The road is z -200..200 or longer (roads.js). The original
+// stretch is built exactly as it always was; a longer road adds
+// stretches of the same kind of township, each with seeds of its
+// own, so nothing in the original stretch moves.
 // ==================================================
 
-const ROAD_LENGTH = 400;
 const ROAD_HALF_WIDTH = 9;
+
+// House bodies, roofs and fences are merged per chunk this long,
+// on a grid anchored at z -200
+const CHUNK_LENGTH = 100;
 
 export const CORRIDOR_HALF_WIDTH = 7.5;
 
@@ -78,7 +96,6 @@ const LAMP_X = 9.6;
 
 const WRECK_COUNT = 12;
 const BIN_COUNT = 10;
-const CHUNKS_PER_SIDE = 4;
 const MAX_CANDLES = 6;
 
 // Rusty / faded township paint
@@ -101,7 +118,54 @@ function pick(
 }
 
 
-export function createTownship({ materials }) {
+export function createTownship({
+  materials,
+  road: roadExtent = DEFAULT_ROAD
+}) {
+
+  const ROAD_Z_MIN =
+    roadExtent.zMin;
+
+  const ROAD_Z_MAX =
+    roadExtent.zMax;
+
+  const ROAD_LENGTH =
+    roadLength(
+      roadExtent
+    );
+
+  const ROAD_CENTRE =
+    roadCentre(
+      roadExtent
+    );
+
+  // The original road, then whatever was added below and above it
+  const STRETCHES =
+    [
+      { index: 0, from: -200, to: 200 }
+    ];
+
+  if (
+    ROAD_Z_MIN < -200
+  ) {
+
+    STRETCHES.push({
+      index: 1,
+      from: ROAD_Z_MIN,
+      to: -200
+    });
+  }
+
+  if (
+    ROAD_Z_MAX > 200
+  ) {
+
+    STRETCHES.push({
+      index: 2,
+      from: 200,
+      to: ROAD_Z_MAX
+    });
+  }
 
   const group =
     new THREE.Group();
@@ -133,13 +197,17 @@ export function createTownship({ materials }) {
     createTexturedBox(
       400,
       0.2,
-      400,
-      dirtMaterial
+      ROAD_LENGTH,
+      dirtMaterial,
+      ROAD_TILE_LENGTH
     );
 
 
   ground.position.y =
     -0.2;
+
+  ground.position.z =
+    ROAD_CENTRE;
 
 
   group.add(
@@ -161,12 +229,16 @@ export function createTownship({ materials }) {
       ROAD_HALF_WIDTH * 2,
       0.05,
       ROAD_LENGTH,
-      roadMaterial
+      roadMaterial,
+      ROAD_TILE_LENGTH
     );
 
 
   road.position.y =
     -0.05;
+
+  road.position.z =
+    ROAD_CENTRE;
 
 
   group.add(
@@ -188,12 +260,16 @@ export function createTownship({ materials }) {
 
 
   const shoulderGeometry =
-    prepareAO(
-      new THREE.BoxGeometry(
-        3.3,
-        0.04,
-        ROAD_LENGTH
-      )
+    scaleLengthUV(
+      prepareAO(
+        new THREE.BoxGeometry(
+          3.3,
+          0.04,
+          ROAD_LENGTH
+        )
+      ),
+      ROAD_LENGTH,
+      ROAD_TILE_LENGTH
     );
 
 
@@ -212,7 +288,7 @@ export function createTownship({ materials }) {
     shoulder.position.set(
       side * 10.35,
       -0.005,
-      0
+      ROAD_CENTRE
     );
 
 
@@ -232,11 +308,16 @@ export function createTownship({ materials }) {
       xs:
         [0],
 
+      // dashes keep the original phase (z -200 + 14 k)
       zFrom:
-        -ROAD_LENGTH / 2,
+        alignedFrom(
+          -200,
+          14,
+          ROAD_Z_MIN
+        ),
 
       zTo:
-        ROAD_LENGTH / 2,
+        ROAD_Z_MAX,
 
       period:
         14,
@@ -276,47 +357,60 @@ export function createTownship({ materials }) {
   );
 
 
-  const patches =
-    createRoadPatches({
-      count:
-        26,
+  // Added stretches get their own patches (the same density, a
+  // seed of their own), so the original ones stay where they were
+  for (
+    const stretch
+    of STRETCHES
+  ) {
 
-      seed:
-        99,
+    const patches =
+      createRoadPatches({
+        count:
+          stretch.index === 0
+            ? 26
+            : Math.round(
+                26 *
+                (stretch.to - stretch.from - 10) /
+                390
+              ),
 
-      xRange:
-        [-8, 8],
+        seed:
+          99 + stretch.index,
 
-      zRange:
-        [-195, 195],
+        xRange:
+          [-8, 8],
 
-      albedo:
-        ROAD_ALBEDO,
+        zRange:
+          [stretch.from + 5, stretch.to - 5],
 
-      shadeRange:
-        PATCH_SHADE_RANGE,
+        albedo:
+          ROAD_ALBEDO,
 
-      // white: each instance carries its own (road-like) colour
-      material:
-        new THREE.MeshStandardMaterial({
+        shadeRange:
+          PATCH_SHADE_RANGE,
 
-          color:
-            0xffffff,
+        // white: each instance carries its own (road-like) colour
+        material:
+          new THREE.MeshStandardMaterial({
 
-          roughness:
-            1
-        })
-    });
+            color:
+              0xffffff,
+
+            roughness:
+              1
+          })
+      });
 
 
-  patches.name =
-    'township-patches';
+    patches.name =
+      'township-patches';
 
 
-  group.add(
-    patches
-  );
-
+    group.add(
+      patches
+    );
+  }
 
   // ----------------------------------------------
   // SPEED BUMP AND POTHOLES
@@ -450,12 +544,35 @@ export function createTownship({ materials }) {
   // ----------------------------------------------
   // HOUSES AND SHACKS
   // ----------------------------------------------
+  // Laid out stretch by stretch (see STRETCHES): the original
+  // road's houses come first and are exactly the ones the
+  // township always had; each added stretch has its own seeds.
+  // Bodies, roofs and door / window patches are merged per 100 m
+  // chunk on a grid anchored at z -200, so culling still drops
+  // the far ones.
 
-  const roofParts =
-    [];
+  const chunkOf =
+    (z) =>
+      Math.floor(
+        (z + 200) /
+        CHUNK_LENGTH
+      );
 
-  const detailParts =
-    [];
+  const sortedChunks =
+    (map) =>
+      [...map.entries()]
+        .sort(
+          (a, b) => a[0] - b[0]
+        )
+        .map(
+          ([, value]) => value
+        );
+
+  const roofChunks =
+    new Map();
+
+  const detailChunks =
+    new Map();
 
   const candleSpots =
     [];
@@ -469,182 +586,235 @@ export function createTownship({ materials }) {
 
 
   for (
-    const side
-    of [-1, 1]
+    const stretch
+    of STRETCHES
   ) {
 
-    const random =
-      createRandom(
-        side === -1
-          ? 1337
-          : 7331
+    // The candle landmarks keep their density per metre
+    const maxCandles =
+      Math.round(
+        MAX_CANDLES *
+        (stretch.to - stretch.from) /
+        400
       );
 
-
-    const chunks =
-      Array.from(
-        { length: CHUNKS_PER_SIDE },
-        () => ({ block: [], iron: [] })
-      );
+    let candles =
+      0;
 
 
-    let z =
-      -196 +
-      random() * 3;
-
-
-    while (
-      true
+    for (
+      const side
+      of [-1, 1]
     ) {
 
-      const length =
-        6 +
-        random() * 4;
+      const random =
+        createRandom(
+          (
+            side === -1
+              ? 1337
+              : 7331
+          ) +
+          stretch.index * 100000
+        );
 
 
-      if (
-        z + length > 198
+      const chunks =
+        new Map();
+
+
+      let z =
+        stretch.from + 4 +
+        random() * 3;
+
+
+      while (
+        true
       ) {
 
-        break;
-      }
+        const length =
+          6 +
+          random() * 4;
 
 
-      // Some plots are empty
-      if (
-        random() < 0.12
-      ) {
+        if (
+          z + length > stretch.to - 2
+        ) {
+
+          break;
+        }
+
+
+        // Some plots are empty
+        if (
+          random() < 0.12
+        ) {
+
+          z +=
+            length +
+            1.5;
+
+          continue;
+        }
+
+
+        const kind =
+          random() < 0.55
+            ? 'block'
+            : 'shack';
+
+
+        const house =
+          createTownshipHouse({
+
+            side,
+
+            front:
+              11.4 +
+              random() * 1.6,
+
+            z,
+
+            length,
+
+            depth:
+              4 +
+              random() * 2.5,
+
+            height:
+              2.3 +
+              random() * 0.7,
+
+            kind,
+
+            wallColor:
+              pick(
+                random,
+                kind === 'block'
+                  ? WALL_BLOCK
+                  : WALL_IRON
+              ),
+
+            roofColor:
+              pick(
+                random,
+                WALL_IRON
+              ),
+
+            roofDrop:
+              0.45 +
+              random() * 0.3,
+
+            slopeToRoad:
+              random() < 0.5,
+
+            annex:
+              random() < 0.4
+                ? {
+                    at: random() < 0.5 ? 0.3 : 0.7,
+
+                    color:
+                      pick(
+                        random,
+                        WALL_IRON
+                      )
+                  }
+                : null
+          });
+
+
+        const index =
+          chunkOf(
+            z + length / 2
+          );
+
+
+        if (
+          !chunks.has(
+            index
+          )
+        ) {
+
+          chunks.set(
+            index,
+            { block: [], iron: [] }
+          );
+        }
+
+
+        const chunk =
+          chunks.get(
+            index
+          );
+
+
+        chunk.block.push(
+          ...house.blockWalls
+        );
+
+
+        chunk.iron.push(
+          ...house.ironWalls
+        );
+
+
+        for (
+          const [map, parts]
+          of [
+            [roofChunks, house.roofs],
+            [detailChunks, house.details]
+          ]
+        ) {
+
+          if (
+            !map.has(
+              index
+            )
+          ) {
+
+            map.set(
+              index,
+              []
+            );
+          }
+
+          map.get(
+            index
+          ).push(
+            ...parts
+          );
+        }
+
+
+        if (
+          houseNumber % 11 === 4 &&
+          candles < maxCandles
+        ) {
+
+          candleSpots.push({
+            ...house.window,
+            side
+          });
+
+          candles++;
+        }
+
+
+        houseNumber++;
+
 
         z +=
           length +
-          1.5;
-
-        continue;
+          1.2 +
+          random() * 2.2;
       }
 
 
-      const kind =
-        random() < 0.55
-          ? 'block'
-          : 'shack';
-
-
-      const house =
-        createTownshipHouse({
-
-          side,
-
-          front:
-            11.4 +
-            random() * 1.6,
-
-          z,
-
-          length,
-
-          depth:
-            4 +
-            random() * 2.5,
-
-          height:
-            2.3 +
-            random() * 0.7,
-
-          kind,
-
-          wallColor:
-            pick(
-              random,
-              kind === 'block'
-                ? WALL_BLOCK
-                : WALL_IRON
-            ),
-
-          roofColor:
-            pick(
-              random,
-              WALL_IRON
-            ),
-
-          roofDrop:
-            0.45 +
-            random() * 0.3,
-
-          slopeToRoad:
-            random() < 0.5,
-
-          annex:
-            random() < 0.4
-              ? {
-                  at: random() < 0.5 ? 0.3 : 0.7,
-
-                  color:
-                    pick(
-                      random,
-                      WALL_IRON
-                    )
-                }
-              : null
-        });
-
-
-      const chunk =
-        chunks[
-          Math.min(
-            CHUNKS_PER_SIDE - 1,
-            Math.floor(
-              (z + length / 2 + ROAD_LENGTH / 2) /
-              (ROAD_LENGTH / CHUNKS_PER_SIDE)
-            )
-          )
-        ];
-
-
-      chunk.block.push(
-        ...house.blockWalls
+      bodyChunks.push(
+        ...sortedChunks(
+          chunks
+        )
       );
-
-
-      chunk.iron.push(
-        ...house.ironWalls
-      );
-
-
-      roofParts.push(
-        ...house.roofs
-      );
-
-
-      detailParts.push(
-        ...house.details
-      );
-
-
-      if (
-        houseNumber % 11 === 4 &&
-        candleSpots.length < MAX_CANDLES
-      ) {
-
-        candleSpots.push({
-          ...house.window,
-          side
-        });
-      }
-
-
-      houseNumber++;
-
-
-      z +=
-        length +
-        1.2 +
-        random() * 2.2;
     }
-
-
-    bodyChunks.push(
-      ...chunks
-    );
   }
 
 
@@ -653,16 +823,6 @@ export function createTownship({ materials }) {
     const chunk
     of bodyChunks
   ) {
-
-    if (
-      chunk.block.length +
-      chunk.iron.length ===
-      0
-    ) {
-
-      continue;
-    }
-
 
     const bodies =
       createTwoMaterialMesh({
@@ -694,49 +854,65 @@ export function createTownship({ materials }) {
   }
 
 
-  // Roofs and door / window patches: one merged Mesh each
-  const roofs =
-    new THREE.Mesh(
-      mergeParts(
-        roofParts
-      ),
-      ironMaterial
+  // Roofs and door / window patches: one merged Mesh per chunk
+  for (
+    const parts
+    of sortedChunks(
+      roofChunks
+    )
+  ) {
+
+    const roofs =
+      new THREE.Mesh(
+        mergeParts(
+          parts
+        ),
+        ironMaterial
+      );
+
+
+    roofs.name =
+      'township-roofs';
+
+
+    roofs.castShadow =
+      true;
+
+
+    roofs.receiveShadow =
+      true;
+
+
+    group.add(
+      roofs
     );
+  }
 
 
-  roofs.name =
-    'township-roofs';
+  for (
+    const parts
+    of sortedChunks(
+      detailChunks
+    )
+  ) {
+
+    const details =
+      new THREE.Mesh(
+        mergeParts(
+          parts
+        ),
+        plainMaterial
+      );
 
 
-  roofs.castShadow =
-    true;
+    details.name =
+      'township-details';
 
 
-  roofs.receiveShadow =
-    true;
-
-
-  group.add(
-    roofs
-  );
-
-
-  const details =
-    new THREE.Mesh(
-      mergeParts(
-        detailParts
-      ),
-      plainMaterial
+    group.add(
+      details
     );
-
-
-  details.name =
-    'township-details';
-
-
-  group.add(
-    details
-  );
+  }
 
 
   // Candle glow landmarks (emissive only, no lights)
@@ -774,145 +950,174 @@ export function createTownship({ materials }) {
 
 
   // ----------------------------------------------
-  // FENCES AND LOW WALLS (one collidable per side)
+  // FENCES AND LOW WALLS (one collidable per side per chunk)
   // ----------------------------------------------
 
   for (
-    const side
-    of [-1, 1]
+    const stretch
+    of STRETCHES
   ) {
 
-    const random =
-      createRandom(
-        side === -1
-          ? 4242
-          : 2424
-      );
-
-
-    const blockParts =
-      [];
-
-    const ironParts =
-      [];
-
-
-    const SECTION =
-      3;
-
-    let runLeft =
-      0;
-
-    let runKind =
-      'iron';
-
-
     for (
-      let z = -ROAD_LENGTH / 2 + SECTION / 2;
-      z < ROAD_LENGTH / 2;
-      z += SECTION
+      const side
+      of [-1, 1]
     ) {
 
-      if (
-        runLeft === 0
+      const random =
+        createRandom(
+          (
+            side === -1
+              ? 4242
+              : 2424
+          ) +
+          stretch.index * 100000
+        );
+
+
+      const chunks =
+        new Map();
+
+
+      const SECTION =
+        3;
+
+      let runLeft =
+        0;
+
+      let runKind =
+        'iron';
+
+
+      for (
+        let z = stretch.from + SECTION / 2;
+        z < stretch.to;
+        z += SECTION
       ) {
 
-        runLeft =
-          3 +
-          Math.floor(
-            random() * 6
+        if (
+          runLeft === 0
+        ) {
+
+          runLeft =
+            3 +
+            Math.floor(
+              random() * 6
+            );
+
+
+          runKind =
+            random() < 0.35
+              ? 'block'
+              : 'iron';
+        }
+
+
+        runLeft--;
+
+
+        const section =
+          createFenceSection({
+
+            x:
+              side * FENCE_X,
+
+            z,
+
+            length:
+              SECTION,
+
+            kind:
+              runKind,
+
+            height:
+              runKind === 'block'
+                ? 1 + random() * 0.4
+                : 1.1 + random() * 0.7,
+
+            color:
+              runKind === 'block'
+                ? pick(
+                    random,
+                    WALL_BLOCK
+                  )
+                : pick(
+                    random,
+                    WALL_IRON
+                  )
+          });
+
+
+        const index =
+          chunkOf(
+            z
           );
 
 
-        runKind =
-          random() < 0.35
-            ? 'block'
-            : 'iron';
+        if (
+          !chunks.has(
+            index
+          )
+        ) {
+
+          chunks.set(
+            index,
+            { block: [], iron: [] }
+          );
+        }
+
+
+        (
+          section.material === 'block'
+            ? chunks.get(index).block
+            : chunks.get(index).iron
+        ).push(
+          ...section.parts
+        );
       }
 
 
-      runLeft--;
+      for (
+        const chunk
+        of sortedChunks(
+          chunks
+        )
+      ) {
+
+        const fence =
+          createTwoMaterialMesh({
+
+            blockParts:
+              chunk.block,
+
+            ironParts:
+              chunk.iron,
+
+            blockMaterial,
+
+            ironMaterial
+          });
 
 
-      const section =
-        createFenceSection({
-
-          x:
-            side * FENCE_X,
-
-          z,
-
-          length:
-            SECTION,
-
-          kind:
-            runKind,
-
-          height:
-            runKind === 'block'
-              ? 1 + random() * 0.4
-              : 1.1 + random() * 0.7,
-
-          color:
-            runKind === 'block'
-              ? pick(
-                  random,
-                  WALL_BLOCK
-                )
-              : pick(
-                  random,
-                  WALL_IRON
-                )
-        });
+        fence.name =
+          'township-fence';
 
 
-      (
-        section.material === 'block'
-          ? blockParts
-          : ironParts
-      ).push(
-        ...section.parts
-      );
+        group.add(
+          fence
+        );
+
+
+        collidables.push(
+          fence
+        );
+      }
     }
-
-
-    const fence =
-      createTwoMaterialMesh({
-
-        blockParts,
-
-        ironParts,
-
-        blockMaterial,
-
-        ironMaterial
-      });
-
-
-    fence.name =
-      'township-fence';
-
-
-    group.add(
-      fence
-    );
-
-
-    collidables.push(
-      fence
-    );
   }
 
 
   // ----------------------------------------------
   // WRECKS AND BINS (collidable, on the shoulders)
   // ----------------------------------------------
-
-  const props =
-    createRandom(
-      555
-    );
-
 
   const wreckMaterial =
     new THREE.MeshStandardMaterial({
@@ -939,84 +1144,9 @@ export function createTownship({ materials }) {
     });
 
 
+  // Everything taken so far, so no two props (or a lamp) overlap
   const taken =
     [];
-
-
-  for (
-    let i = 0;
-    i < WRECK_COUNT;
-    i++
-  ) {
-
-    const side =
-      props() < 0.5
-        ? -1
-        : 1;
-
-
-    const z =
-      -180 +
-      i * 32 +
-      props() * 10;
-
-
-    const colour =
-      i % WRECK_COLOURS.length;
-
-
-    const wheels =
-      (i * 7) % 4;
-
-
-    const wreck =
-      createWreckMesh({
-
-        geometry:
-          geo(
-            `wreck-${colour}-${wheels}`,
-            () => createWreckGeometry({
-              color: WRECK_COLOURS[colour],
-              wheels
-            })
-          ),
-
-        material:
-          wreckMaterial
-      });
-
-
-    wreck.name =
-      'township-wreck';
-
-
-    wreck.position.set(
-      side * SHOULDER_X,
-      0,
-      z
-    );
-
-
-    // Parked roughly parallel to the road
-    wreck.rotation.y =
-      (props() - 0.5) *
-      0.16;
-
-
-    group.add(
-      wreck
-    );
-
-
-    collidables.push(
-      wreck
-    );
-
-
-    taken.push(
-      { side, z }
-    );
-  }
 
 
   const clearOf =
@@ -1031,92 +1161,202 @@ export function createTownship({ materials }) {
 
 
   for (
-    let i = 0, tries = 0;
-    i < BIN_COUNT && tries < 200;
-    tries++
+    const stretch
+    of STRETCHES
   ) {
 
-    const side =
-      props() < 0.5
-        ? -1
-        : 1;
+    const length =
+      stretch.to -
+      stretch.from;
+
+    const props =
+      createRandom(
+        555 +
+        stretch.index * 1000
+      );
+
+    // Same number per metre as the original 12 and 10 in 400 m
+    const wreckCount =
+      Math.round(
+        WRECK_COUNT *
+        length /
+        400
+      );
+
+    const binCount =
+      Math.round(
+        BIN_COUNT *
+        length /
+        400
+      );
 
 
-    const z =
-      -185 +
-      props() * 370;
-
-
-    if (
-      !clearOf(
-        side,
-        z,
-        4
-      )
+    for (
+      let i = 0;
+      i < wreckCount;
+      i++
     ) {
 
-      continue;
+      const side =
+        props() < 0.5
+          ? -1
+          : 1;
+
+
+      const z =
+        stretch.from + 20 +
+        i * 32 +
+        props() * 10;
+
+
+      const colour =
+        i % WRECK_COLOURS.length;
+
+
+      const wheels =
+        (i * 7) % 4;
+
+
+      const wreck =
+        createWreckMesh({
+
+          geometry:
+            geo(
+              `wreck-${colour}-${wheels}`,
+              () => createWreckGeometry({
+                color: WRECK_COLOURS[colour],
+                wheels
+              })
+            ),
+
+          material:
+            wreckMaterial
+        });
+
+
+      wreck.name =
+        'township-wreck';
+
+
+      wreck.position.set(
+        side * SHOULDER_X,
+        0,
+        z
+      );
+
+
+      // Parked roughly parallel to the road
+      wreck.rotation.y =
+        (props() - 0.5) *
+        0.16;
+
+
+      group.add(
+        wreck
+      );
+
+
+      collidables.push(
+        wreck
+      );
+
+
+      taken.push(
+        { side, z }
+      );
     }
 
 
-    const colour =
-      i % BIN_COLOURS.length;
+    for (
+      let i = 0, tries = 0;
+      i < binCount && tries < 200;
+      tries++
+    ) {
+
+      const side =
+        props() < 0.5
+          ? -1
+          : 1;
 
 
-    const bin =
-      createBinMesh({
-
-        geometry:
-          geo(
-            `bin-${colour}`,
-            () => createBinGeometry({
-              color: BIN_COLOURS[colour]
-            })
-          ),
-
-        material:
-          binMaterial
-      });
+      const z =
+        stretch.from + 15 +
+        props() * (length - 30);
 
 
-    bin.name =
-      'township-bin';
+      if (
+        !clearOf(
+          side,
+          z,
+          4
+        )
+      ) {
+
+        continue;
+      }
 
 
-    bin.position.set(
-      side * 9.45,
-      0,
-      z
-    );
+      const colour =
+        i % BIN_COLOURS.length;
 
 
-    bin.rotation.y =
-      (props() - 0.5) *
-      0.8;
+      const bin =
+        createBinMesh({
+
+          geometry:
+            geo(
+              `bin-${colour}`,
+              () => createBinGeometry({
+                color: BIN_COLOURS[colour]
+              })
+            ),
+
+          material:
+            binMaterial
+        });
 
 
-    group.add(
-      bin
-    );
+      bin.name =
+        'township-bin';
 
 
-    collidables.push(
-      bin
-    );
+      bin.position.set(
+        side * 9.45,
+        0,
+        z
+      );
 
 
-    taken.push(
-      { side, z }
-    );
+      bin.rotation.y =
+        (props() - 0.5) *
+        0.8;
 
 
-    i++;
+      group.add(
+        bin
+      );
+
+
+      collidables.push(
+        bin
+      );
+
+
+      taken.push(
+        { side, z }
+      );
+
+
+      i++;
+    }
   }
 
 
   // ----------------------------------------------
   // DEAD STREET LAMPS (no emissive, no light)
   // ----------------------------------------------
+  // z -160 + 40 k along the whole road (the original ones are the
+  // same as before)
 
   const stations =
     [];
@@ -1127,8 +1367,13 @@ export function createTownship({ materials }) {
 
 
   for (
-    let z = -160;
-    z <= 160;
+    let z = alignedFrom(
+      -160,
+      40,
+      ROAD_Z_MIN +
+      40
+    );
+    z <= ROAD_Z_MAX - 40;
     z += 40
   ) {
 

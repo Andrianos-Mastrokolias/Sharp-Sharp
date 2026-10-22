@@ -228,11 +228,20 @@ const dustSystem = new DustSystem({
 // LEVEL VISUALS
 // ============================================================
 
+// Nothing is visible beyond the fog's far distance, so the camera does not
+// draw further than that (plus a margin): on the long roads a far plane of
+// 1000 m would draw most of the level at once. The sky is scaled to fit.
+const VIEW_DISTANCE_MARGIN = 40;
+
 function applyLevelVisuals(level) {
   lighting.setLevel(level);
   effects.setLevel(level);
   dustSystem.setLevel(level);
   skyManager.setLevel(level);
+
+  camera.far = scene.fog.far + VIEW_DISTANCE_MARGIN;
+  camera.updateProjectionMatrix();
+  skyManager.setViewDistance(camera.far);
 }
 
 // ============================================================
@@ -1067,7 +1076,7 @@ function animate() {
 
   effects.update(elapsedTime);
 
-  skyManager.update(elapsedTime);
+  skyManager.update(elapsedTime, taxi.position);
 
   if (phase === GamePhase.PLAYING) {
     dustSystem.update(dt);
