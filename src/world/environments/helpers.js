@@ -41,6 +41,12 @@ export const MAIN_POTHOLES = [
 ];
 
 
+// The original road was 400 m long and its boxes' textures were laid
+// out over that length: longer boxes stretch their UVs to match (see
+// scaleLengthUV)
+export const ROAD_TILE_LENGTH = 400;
+
+
 export const SPEED_BUMP = {
   x: 0,
   z: 25,
@@ -117,21 +123,115 @@ export function createBox(
 }
 
 
+// A BoxGeometry's UVs run 0..1 over each face, so a longer box
+// stretches the texture. This stretches the UVs back: afterwards
+// the faces that run along z repeat the material `length /
+// tileLength` times as often, which is what a box of `tileLength`
+// metres had. Only those faces change (the sides' u, the top and
+// bottom's v); the ends are untouched.
+export function scaleLengthUV(
+  geometry,
+  length,
+  tileLength
+) {
+
+  const factor =
+    length /
+    tileLength;
+
+
+  if (
+    factor === 1
+  ) {
+
+    return geometry;
+  }
+
+
+  const uv =
+    geometry.attributes.uv;
+
+  const uv1 =
+    geometry.attributes.uv1;
+
+
+  // Three.js box faces: +x, -x, +y, -y, +z, -z, four vertices each
+  for (
+    const attribute
+    of new Set([uv, uv1])
+  ) {
+
+    if (
+      !attribute
+    ) {
+
+      continue;
+    }
+
+
+    for (
+      let v = 0;
+      v < 16;
+      v++
+    ) {
+
+      if (
+        v < 8
+      ) {
+
+        attribute.setX(
+          v,
+          attribute.getX(v) *
+          factor
+        );
+      }
+
+      else {
+
+        attribute.setY(
+          v,
+          attribute.getY(v) *
+          factor
+        );
+      }
+    }
+
+    attribute.needsUpdate =
+      true;
+  }
+
+
+  return geometry;
+}
+
+
+// `tileLength`: how many metres of z one 0..1 UV span stands for
+// (the default, the box's own depth, leaves the UVs as they are).
+// The long road boxes pass 400, so the texture is as dense per
+// metre as on the original 400 m road.
 export function createTexturedBox(
   width,
   height,
   depth,
-  material
+  material,
+  tileLength = depth
 ) {
 
   const geometry =
-    prepareAO(
+    scaleLengthUV(
 
-      new THREE.BoxGeometry(
-        width,
-        height,
-        depth
-      )
+      prepareAO(
+
+        new THREE.BoxGeometry(
+          width,
+          height,
+          depth
+        )
+      ),
+
+      depth,
+
+      tileLength
     );
 
 

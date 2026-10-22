@@ -28,7 +28,7 @@ import { MaterialLibrary } from '/src/graphics/MaterialLibrary.js';
 import { buildEnvironment } from '/src/world/environments/index.js';
 import { TrafficSystem } from '/src/world/TrafficSystem.js';
 import { LEVELS } from '/src/world/LevelManager.js';
-import { cameras, FOV, ASPECT } from '/tests/tools/cameras.mjs';
+import { cameras, FOV, ASPECT, VIEW_DISTANCE, taxiFocus } from '/tests/tools/cameras.mjs';
 
 const W = 1280, H = 720;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -39,7 +39,7 @@ renderer.setPixelRatio(1);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(FOV, ASPECT, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(FOV, ASPECT, 0.1, VIEW_DISTANCE[1]);
 const lighting = new LightingManager({ scene, renderer });
 const sky = new SkyManager({ scene, renderer });
 const materials = new MaterialLibrary(renderer);
@@ -54,6 +54,10 @@ window.loadLevel = async (level, trafficSeconds = 0) => {
   if (traffic) { traffic.dispose(); traffic = null; }
   lighting.setLevel(level);
   sky.setLevel(level);
+  // as the game does (main.js): the far plane is the level's fog distance plus 40 m
+  camera.far = VIEW_DISTANCE[level];
+  camera.updateProjectionMatrix();
+  sky.setViewDistance(camera.far);
   env = buildEnvironment(level, { materials });
   scene.add(env.group);
   traffic = new TrafficSystem({ parent: scene });
@@ -72,6 +76,11 @@ window.shot = async (level, index) => {
   camera.position.set(...c.at);
   camera.lookAt(...c.to);
   camera.updateMatrixWorld(true);
+  // the sun's shadow camera and the sky dome follow the taxi, which stands 8 m in front of the camera
+  const [fx, fz] = taxiFocus(c);
+  const focus = new THREE.Vector3(fx, 0, fz);
+  lighting.updateShadowTracking({ position: focus });
+  sky.update(0, focus);
   let last = null;
   for (let i = 0; i < 40; i++) {
     renderer.render(scene, camera);

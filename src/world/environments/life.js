@@ -70,8 +70,10 @@ export const LIFE_DENSITY = {
     maxInstances:
       216,
 
+    // one InstancedMesh per variant per chunk: 120 m keeps the draw
+    // calls of a long street down (it was 60 m on the 400 m one)
     chunkSize:
-      60,
+      120,
 
     // |x| ranges (the sidewalk is |x| 9..16; people keep to >= 11)
     standX:

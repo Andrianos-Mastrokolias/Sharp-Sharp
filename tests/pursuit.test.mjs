@@ -15,6 +15,15 @@ import {
 } from '../src/world/PursuitSystem.js';
 
 const MAX_SPEED = 28;
+
+// Level 1 is a 900 m run from z 170 to the goal at -730; its pursuer is
+// triggered at 0.66 of the way, so the positions below are where the taxi is
+// at a given fraction of the run (they were z 0 and -80 on the 210 m run)
+const L1 = LEVELS[1];
+const L1_AT = (progress) => L1.spawn.z + progress * (L1.destination.z - L1.spawn.z);
+const L1_EARLY_Z = L1_AT(0.29);             // before the trigger
+const L1_TRIGGER_Z = L1_AT(0.67);           // just past it
+const L1_END_Z = L1.boundaries.minZ + 5;    // as far down the road as the pursuer may go
 const TOUCHING_DISTANCE = 5.35;   // model centres this far apart = bumpers touch
 const DT = 1 / 60;
 
@@ -70,11 +79,11 @@ test('L1: idle until trigger, spawns behind taxi, then chases', () => {
   assert.equal(e.lm.getState().pursuit.state, 'idle');
   assert.equal(e.lm.getState().pursuit.distance, null);
 
-  e.taxi.position.set(0, 0, 0);        // progress ~0.29
+  e.taxi.position.set(0, 0, L1_EARLY_Z);   // progress ~0.29
   step(e.lm, 1);
   assert.equal(e.lm.pursuit.state, 'idle');
 
-  e.taxi.position.set(0, 0, -80);      // progress ~0.67
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);   // progress ~0.67
   step(e.lm, DT * 2);
   const p = e.lm.getState().pursuit;
   assert.equal(p.state, 'chasing');
@@ -85,12 +94,12 @@ test('L1: idle until trigger, spawns behind taxi, then chases', () => {
 test('L1: chasing -> lost -> searching -> chasing; speed cap from vehicle', () => {
   const e = make();
   e.lm.load(1);
-  e.taxi.position.set(0, 0, -80);
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(e.lm, DT * 2);
   assert.equal(e.lm.pursuit.state, 'chasing');
 
   // Teleport far out of lose range (>120) and keep it there
-  e.taxi.position.set(0, 0, -185);
+  e.taxi.position.set(0, 0, L1_END_Z);
   e.lm.pursuit.x = 0; e.lm.pursuit.z = 180;
   let maxSpeed = 0;
   let sawLost = false, sawSearching = false;
@@ -114,7 +123,7 @@ test('L1: chasing -> lost -> searching -> chasing; speed cap from vehicle', () =
 test('capture fires exactly once, status captured, update stops', () => {
   const e = make();
   e.lm.load(1);
-  e.taxi.position.set(0, 0, -80);
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(e.lm, DT * 2);
   // Park the pursuer on the taxi
   e.lm.pursuit.x = 0; e.lm.pursuit.z = e.taxi.position.z + 2;
@@ -132,7 +141,7 @@ test('capture fires exactly once, status captured, update stops', () => {
 test('capture needs continuous contact', () => {
   const e = make();
   e.lm.load(1);
-  e.taxi.position.set(0, 0, -80);
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(e.lm, DT * 2);
   for (let i = 0; i < 6; i++) {
     e.lm.pursuit.x = 0; e.lm.pursuit.z = e.taxi.position.z + 2;
@@ -147,7 +156,7 @@ test('capture needs continuous contact', () => {
 test('reset restores idle / not captured, update works again', () => {
   const e = make();
   e.lm.load(1);
-  e.taxi.position.set(0, 0, -80);
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(e.lm, DT * 2);
   e.lm.pursuit.z = e.taxi.position.z + 2;
   step(e.lm, 4);
@@ -203,11 +212,13 @@ test('ignoreElevated option still hides a taxi on the flyover (other levels)', (
 });
 
 // ---- Level 3: headlight stealth ------------------------------------
-// The taxi spawns at z -170 facing +Z; the pursuer's 30 m offset is
-// clamped by the bounds (minZ -190 + 5) to z -185, i.e. 15 m behind.
+// The taxi spawns at z -600 facing +Z; the pursuer's 30 m offset fits inside
+// the bounds (minZ -650 + 5), so it starts at z -630, 30 m behind. Its patrol
+// runs to 40 m short of the destination (z 300), at 260.
 
-const L3_SPAWN_Z = -170;
-const L3_PURSUER_Z = -185;
+const L3_SPAWN_Z = LEVELS[3].spawn.z;
+const L3_PURSUER_Z = L3_SPAWN_Z - 30;
+const L3_PATROL_END = LEVELS[3].destination.z - 40;
 const L3_CFG = LEVELS[3].pursuit;
 
 // Level 3 loaded, taxi at its spawn, driving +Z at `speed` from the
@@ -247,7 +258,7 @@ test('L3: own stealth config (L3_PURSUIT_* numbers), no activateAfterDelay', () 
   }
 });
 
-test('L3: pursuer starts 15 m behind the taxi (bounds clamp), idle until the delay', () => {
+test('L3: pursuer starts 30 m behind the taxi, idle until the delay', () => {
   const e = make();
   e.lm.load(3);
   assert.equal(e.lm.pursuit.z, L3_PURSUER_Z);
@@ -398,13 +409,13 @@ test('L2 / L1 pursuit unchanged: ignore headlights, same numbers', () => {
 test('stays on road and inside bounds', () => {
   const e = make();
   e.lm.load(1);
-  e.taxi.position.set(0, 0, -80);
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(e.lm, DT * 2);
-  e.taxi.position.set(25, 0, -400);
+  e.taxi.position.set(25, 0, L1_END_Z - 100);
   for (let t = 0; t < 20; t += DT) {
     e.lm.update(DT, t);
     assert.ok(Math.abs(e.lm.pursuit.x) <= 9 + 1e-9);
-    assert.ok(Math.abs(e.lm.pursuit.z) <= 185 + 1e-9);
+    assert.ok(e.lm.pursuit.z >= L1.boundaries.minZ + 5 - 1e-9 && e.lm.pursuit.z <= L1.boundaries.maxZ - 5 + 1e-9);
   }
 });
 
@@ -454,7 +465,7 @@ test('standoff: settles behind a stopped taxi, in capture range, never closer th
   assert.ok(MIN_SEPARATION <= STANDOFF_DISTANCE);
   const e = make();
   e.lm.load(1);
-  e.taxi.position.set(0, 0, -80);
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(e.lm, DT * 2);
   let minGap = Infinity;
   run(e, 8, 0, () => { minGap = Math.min(minGap, gap(e)); });
@@ -469,7 +480,7 @@ test('standoff: settles behind a stopped taxi, in capture range, never closer th
 test('separation never drops below minimum when the taxi brakes hard; capture once; stops', () => {
   const e = make();
   e.lm.load(1);
-  e.taxi.position.set(0, 0, -80);
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(e.lm, DT * 2);
   let minGap = Infinity;
   const watch = () => { minGap = Math.min(minGap, gap(e)); };
@@ -488,7 +499,7 @@ test('separation never drops below minimum when the taxi brakes hard; capture on
 test('separation holds when the taxi reverses into the pursuer', () => {
   const e = make();
   e.lm.load(1);
-  e.taxi.position.set(0, 0, -80);
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(e.lm, DT * 2);
   // captureTime raised so this test keeps probing separation, not capture
   e.lm.pursuit.config.captureTime = 100;
@@ -503,7 +514,7 @@ test('separation holds when the taxi reverses into the pursuer', () => {
 test('catch-up: boosted when far behind, never above speedFraction up close', () => {
   const far = make();
   far.lm.load(1);
-  far.taxi.position.set(0, 0, -80);
+  far.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(far.lm, DT * 2);
   far.lm.pursuit.z = far.taxi.position.z + 60;
   let farMax = 0;
@@ -513,7 +524,7 @@ test('catch-up: boosted when far behind, never above speedFraction up close', ()
 
   const near = make();
   near.lm.load(1);
-  near.taxi.position.set(0, 0, -80);
+  near.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(near.lm, DT * 2);
   near.lm.pursuit.z = near.taxi.position.z + 24;
   let nearMax = 0;
@@ -529,7 +540,7 @@ test('catch-up: boosted when far behind, never above speedFraction up close', ()
 function chase(speed, gapNow = CRUISE_GAP, startZ = 170) {
   const e = make();
   e.lm.load(1);
-  e.taxi.position.set(0, 0, -80);
+  e.taxi.position.set(0, 0, L1_TRIGGER_Z);
   step(e.lm, DT * 2);
   e.taxi.position.set(0, 0, startZ);    // room to drive ~340 m down the road
   e.lm.pursuit.z = startZ + gapNow;
@@ -1419,7 +1430,7 @@ test('patrol: idle until the wake delay, then drives along +Z at patrolSpeed and
   const e = make();
   e.lm.load(3);
   e.setLights(false);
-  e.taxi.position.set(0, 0, 145);          // 20 m past the patrol's end (125), outside the delivery zone
+  e.taxi.position.set(0, 0, L3_PATROL_END + 20);   // 20 m past the patrol's end, outside the delivery zone
   const p = e.lm.pursuit;
   step(e.lm, 0.9);
   assert.equal(p.state, 'idle');
@@ -1427,7 +1438,7 @@ test('patrol: idle until the wake delay, then drives along +Z at patrolSpeed and
   step(e.lm, 0.3);
   assert.equal(p.state, 'patrolling');
   let top = 0;
-  for (let t = 0; t < 30; t += DT) {
+  for (let t = 0; t < 70; t += DT) {          // 890 m at 17 m/s
     const before = p.z;
     e.lm.update(DT, t);
     top = Math.max(top, p.speed);
@@ -1437,10 +1448,10 @@ test('patrol: idle until the wake delay, then drives along +Z at patrolSpeed and
   }
   assert.ok(Math.abs(top - 17) < 1e-6, `top speed ${top}`);
   assert.equal(p.state, 'idle');
-  assert.ok(Math.abs(p.z - 125) < 1, `stopped at ${p.z}`);
+  assert.ok(Math.abs(p.z - L3_PATROL_END) < 1, `stopped at ${p.z}`);
   assert.equal(p.speed, 0);
   step(e.lm, 3);
-  assert.ok(Math.abs(p.z - 125) < 1, 'stays put, does not patrol again');
+  assert.ok(Math.abs(p.z - L3_PATROL_END) < 1, 'stays put, does not patrol again');
   assert.equal(p.state, 'idle');
 });
 
@@ -1461,7 +1472,7 @@ test('reaction: from the first sighting it brakes to a stop, holds still flashin
   const e = make();
   e.lm.load(3);
   e.setLights(false);
-  e.taxi.position.set(0, 0, -50);            // parked ahead: the patrol runs into it
+  e.taxi.position.set(0, 0, L3_PURSUER_Z + 100);   // parked ahead: the patrol runs into it
   const p = e.lm.pursuit;
   let t = 0, maxDecel = 0;
   while (p.state === 'patrolling' || p.state === 'idle') {
@@ -1496,7 +1507,7 @@ test('reaction: no capture while it holds, even with the taxi inside capture ran
   const e = make();
   e.lm.load(3);
   e.setLights(true);
-  e.taxi.position.set(0, 0, L3_PURSUER_Z + 5);   // parked, lit, inside capture range
+  e.taxi.position.set(0, 0, L3_PURSUER_Z + 6);   // parked, lit, inside capture range (6.4) but not inside the minimum separation
   const p = e.lm.pursuit;
   step(e.lm, 1.0 + 1.4);                      // wake delay + just under reactionTime
   assert.equal(p.state, 'reacting');
@@ -1536,9 +1547,9 @@ test('patrol/reaction: reset, reload and level switches clear the state', () => 
   for (const midState of ['patrolling', 'reacting', 'ended']) {
     e.lm.load(3);
     e.setLights(false);
-    e.taxi.position.set(0, 0, midState === 'ended' ? 145 : -50);
+    e.taxi.position.set(0, 0, midState === 'ended' ? L3_PATROL_END + 20 : L3_PURSUER_Z + 100);
     const reached = () => (midState === 'ended' ? p.patrolEnded : p.state === midState);
-    for (let t = 0; t < 40 && !reached(); t += DT) e.lm.update(DT, t);
+    for (let t = 0; t < 90 && !reached(); t += DT) e.lm.update(DT, t);
     assert.ok(reached(), `reached ${midState}`);
     e.lm.reset();
     assert.equal(p.state, 'idle');
@@ -1554,7 +1565,7 @@ test('patrol/reaction: reset, reload and level switches clear the state', () => 
   // Switch to Level 2 mid-patrol: no patrol or reaction there
   e.lm.load(3);
   e.setLights(false);
-  e.taxi.position.set(0, 0, 145);
+  e.taxi.position.set(0, 0, L3_PATROL_END + 20);
   step(e.lm, 2);
   assert.equal(p.state, 'patrolling');
   e.lm.load(2);
@@ -1566,7 +1577,7 @@ test('patrol/reaction: reset, reload and level switches clear the state', () => 
   // and Level 3 patrols again afterwards
   e.lm.load(3);
   e.setLights(false);
-  e.taxi.position.set(0, 0, 145);
+  e.taxi.position.set(0, 0, L3_PATROL_END + 20);
   step(e.lm, 2);
   assert.equal(p.state, 'patrolling');
 });
@@ -1583,7 +1594,7 @@ test('patrol and reaction frames do not allocate (no GC over 200k frames)', asyn
   const p = e.lm.pursuit;
   const cycle = (n) => {
     for (let i = 0; i < n; i++) {
-      if (i % 2000 === 0) { p.reset(); e.setLights(false); e.taxi.position.set(0, 0, -60); }
+      if (i % 2000 === 0) { p.reset(); e.setLights(false); e.taxi.position.set(0, 0, L3_PURSUER_Z + 100); }
       p.update(DT);
     }
   };

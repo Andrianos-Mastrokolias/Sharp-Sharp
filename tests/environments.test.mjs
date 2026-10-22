@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import assert from 'node:assert/strict';
 import { LevelManager, LEVELS } from '../src/world/LevelManager.js';
+import { roadLength } from '../src/world/roads.js';
 import { ROAD_ALBEDO } from '../src/world/environments/township.js';
 import { createTownshipHouse } from '../src/world/environments/props.js';
 import { MAIN_POTHOLES, SPEED_BUMP } from '../src/world/environments/helpers.js';
@@ -150,12 +151,13 @@ function checkMotorway(step, lm, scene, collidables) {
   };
 
   // Only the two barriers are the environment's collidables; with the
-  // flyover rails (6), pillars (4) and the 7 traffic cars the level is 19.
-  // The ceiling was 15; raised to 20 on purpose for traffic (M2-07).
+  // flyover rails (6), pillars (4) and the 16 traffic cars (7 + 9, the
+  // original density on the longer road) the level is 28. The ceiling was
+  // 20 for the original 7 cars, 15 before traffic.
   assert.equal(env.collidables.length, 2, `step ${step}: motorway collidables`);
   assert.ok(env.collidables.every((m) => m.name === 'motorway-barrier'));
-  assert.equal(collidables.length, 2 + 6 + 4 + 7, `step ${step}: level 2 collidables`);
-  assert.ok(collidables.length <= 20, `step ${step}: level 2 collidable budget (${collidables.length})`);
+  assert.equal(collidables.length, 2 + 6 + 4 + 16, `step ${step}: level 2 collidables`);
+  assert.ok(collidables.length <= 28, `step ${step}: level 2 collidable budget (${collidables.length})`);
 
   // Barriers sit at |x| ~ 10.3 on both sides and clear every flyover collidable
   const barriers = named('motorway-barrier');
@@ -226,17 +228,22 @@ function checkCity(step, lm, collidables) {
     assert.equal(mesh.material.customProgramCacheKey(), 'person-walk-v1', 'people shader key');
     instances += mesh.count;
   }
-  assert.ok(instances >= 150 && instances <= 220, `step ${step}: ${instances} people`);
+  // 216 people per 400 m of road (150 or more), as the original street had
+  const cap = Math.round(216 * roadLength(LEVELS[1].road) / 400);
+  assert.ok(instances >= 150 * roadLength(LEVELS[1].road) / 400 && instances <= cap + 1, `step ${step}: ${instances} people (cap ${cap})`);
 
-  // Four side streets: a surface and a zebra each, nothing collidable
+  // Eleven side streets (the original four, then the pattern repeated
+  // every ten building slots below them): a surface and a zebra each,
+  // nothing collidable
   const zebras = [];
   env.group.traverse((o) => {
     if (o.isInstancedMesh && o.geometry.type === 'BoxGeometry' && o.geometry.parameters.height === 0.025 && o.geometry.parameters.width === 2.8) zebras.push(o);
   });
-  assert.equal(zebras.length, 4, `step ${step}: zebra crossings`);
-  assert.equal(env.collidables.length, 26, `step ${step}: level 1 collidables unchanged`);
-  // 26 buildings + 8 traffic cars (LevelManager registers the cars, not the environment)
-  assert.ok(collidables.length === 26 + 8, `step ${step}: shared collidable array (${collidables.length})`);
+  assert.equal(zebras.length, 11, `step ${step}: zebra crossings`);
+  // the original 26 buildings, then 2 per slot of the longer road (38 more)
+  assert.equal(env.collidables.length, 64, `step ${step}: level 1 collidables`);
+  // 64 buildings + 20 traffic cars (LevelManager registers the cars, not the environment)
+  assert.ok(collidables.length === 64 + 20, `step ${step}: shared collidable array (${collidables.length})`);
 
   return people.length;
 }
@@ -258,10 +265,11 @@ function checkTownship(step, lm, scene, collidables) {
     return found;
   };
 
-  // Budget: at most ~40 collidables, all childless single Meshes (checked
-  // for every level above); only these kinds are collidable
-  assert.ok(env.collidables.length <= 40, `step ${step}: township collidable budget (${env.collidables.length})`);
-  assert.ok(collidables.length <= 40, 'shared collidable array budget');
+  // Budget: about 10 collidables per 100 m of road (the original 400 m had
+  // 32), all childless single Meshes (checked for every level above); only
+  // these kinds are collidable
+  assert.ok(env.collidables.length <= 110, `step ${step}: township collidable budget (${env.collidables.length})`);
+  assert.ok(collidables.length <= 110, 'shared collidable array budget');
   const kinds = new Set(['township-houses', 'township-fence', 'township-wreck', 'township-bin']);
   assert.ok(env.collidables.every((m) => kinds.has(m.name)), 'unexpected collidable kind');
   for (const kind of kinds) {
@@ -287,10 +295,11 @@ function checkTownship(step, lm, scene, collidables) {
     const [, hi] = absXRange(new THREE.Box3().setFromObject(mesh));
     assert.ok(hi < 10.1, `${mesh.name} pokes into the fence (|x| ${hi})`);
   }
-  const [roofs] = named('township-roofs');
-  const roofPos = roofs.geometry.attributes.position;
-  for (let i = 0; i < roofPos.count; i++) {
-    assert.ok(Math.abs(roofPos.getX(i)) >= 10.9, 'roof overhang reaches the road');
+  for (const roofs of named('township-roofs')) {
+    const roofPos = roofs.geometry.attributes.position;
+    for (let i = 0; i < roofPos.count; i++) {
+      assert.ok(Math.abs(roofPos.getX(i)) >= 10.9, 'roof overhang reaches the road');
+    }
   }
 
   // No sidewalks and no shop-scale buildings (the city's 7 x 0.3 x 28 sidewalk)
@@ -300,10 +309,10 @@ function checkTownship(step, lm, scene, collidables) {
   });
 
   // Nothing lights the road: no lights, and the only emissive material is the
-  // (at most 6) faint candle windows
+  // faint candle windows (6 per 400 m of road)
   const candles = named('township-candles');
   assert.equal(candles.length, 1);
-  assert.ok(candles[0].isInstancedMesh && candles[0].count >= 1 && candles[0].count <= 6, 'candle count');
+  assert.ok(candles[0].isInstancedMesh && candles[0].count >= 6 && candles[0].count <= Math.round(6 * roadLength(LEVELS[3].road) / 400), 'candle count');
   assert.ok(candles[0].material.emissiveIntensity <= 0.6, 'candles must be faint');
   env.group.traverse((o) => {
     assert.ok(!o.isLight, 'township must not add lights');
@@ -432,7 +441,9 @@ function checkRoofsClosed() {
 }
 
 // Collidable house bodies are unchanged by the roof fix: their bounding
-// boxes are as recorded before it, so the route corridor and collisions are too
+// boxes are as recorded before it, so the route corridor and collisions are
+// too. These are the original road's (z -200..200): they come first, as the
+// longer road only adds chunks after them.
 const HOUSE_BODY_BOXES = [
   [-20.87, 0, -195.447, -11.692, 2.874, -101.464],
   [-21.67, 0, -98.731, -11.776, 2.93, -10.337],
@@ -454,18 +465,22 @@ function checkTownshipGlowAndRoofs(step, lm) {
 
   // House bodies: same boxes as before, and no upward (textured) faces
   const bodies = named('township-houses');
-  assert.equal(bodies.length, HOUSE_BODY_BOXES.length, 'house chunk count');
-  bodies.forEach((mesh, i) => {
+  assert.ok(bodies.length > HOUSE_BODY_BOXES.length, 'house chunk count');
+  bodies.slice(0, HOUSE_BODY_BOXES.length).forEach((mesh, i) => {
     const box = new THREE.Box3().setFromObject(mesh);
     const got = [box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z];
     got.forEach((v, k) => assert.ok(Math.abs(v - HOUSE_BODY_BOXES[i][k]) < 0.002, `step ${step}: house chunk ${i} box changed (${got})`));
     assert.equal(upwardTriangles(mesh.geometry), 0, `step ${step}: house body chunk ${i} has a textured top`);
   });
+  bodies.forEach((mesh, i) => assert.equal(upwardTriangles(mesh.geometry), 0, `step ${step}: house body chunk ${i} has a textured top`));
 
-  // The merged roofs are one closed mesh and non-collidable
-  const [roofs] = named('township-roofs');
-  assertWatertight(roofs.geometry, `step ${step}: merged roofs`);
-  assert.ok(!lm.collidables.includes(roofs), 'roofs must not be collidable');
+  // The merged roofs (one per 100 m chunk) are closed meshes and non-collidable
+  const allRoofs = named('township-roofs');
+  assert.ok(allRoofs.length >= 4, 'roof chunks');
+  allRoofs.forEach((roofs, i) => {
+    assertWatertight(roofs.geometry, `step ${step}: merged roofs ${i}`);
+    assert.ok(!lm.collidables.includes(roofs), 'roofs must not be collidable');
+  });
 
   // Road markings and patches: lit standard material, no brighter than ~1.2x the road
   const LIMIT = 1.2;
@@ -477,18 +492,22 @@ function checkTownshipGlowAndRoofs(step, lm) {
   // ROAD_ALBEDO is the texture mean x this tint; keep the two in step
   assert.ok(Math.abs(ROAD_ALBEDO[0] / 0.0551 - roadTint.r) < 0.005, 'ROAD_ALBEDO no longer matches the road tint');
 
-  const [patches] = named('township-patches');
+  // one set of patches per stretch of road (the original, then the one below and the one above)
+  const allPatches = named('township-patches');
   const [dashes] = named('township-dashes');
-  for (const mesh of [patches, dashes]) {
+  assert.equal(allPatches.length, 3, 'patches: the original stretch, one below it and one above');
+  for (const mesh of [...allPatches, dashes]) {
     assert.ok(mesh.material.isMeshStandardMaterial && !mesh.material.isMeshBasicMaterial, `${mesh.name}: must be a lit standard material`);
     assert.equal(mesh.material.emissive.getHex(), 0, `${mesh.name}: must not be emissive`);
   }
-  assert.ok(patches.isInstancedMesh && patches.instanceColor, 'patch instance colours');
   const tint = new THREE.Color();
-  for (let i = 0; i < patches.count; i++) {
-    patches.getColorAt(i, tint);
-    const eff = [tint.r * patches.material.color.r, tint.g * patches.material.color.g, tint.b * patches.material.color.b];
-    eff.forEach((v, ch) => assert.ok(v <= ROAD_ALBEDO[ch] * LIMIT + 1e-9, `step ${step}: patch ${i} channel ${ch} = ${v} > ${LIMIT}x road ${ROAD_ALBEDO[ch]}`));
+  for (const patches of allPatches) {
+    assert.ok(patches.isInstancedMesh && patches.instanceColor, 'patch instance colours');
+    for (let i = 0; i < patches.count; i++) {
+      patches.getColorAt(i, tint);
+      const eff = [tint.r * patches.material.color.r, tint.g * patches.material.color.g, tint.b * patches.material.color.b];
+      eff.forEach((v, ch) => assert.ok(v <= ROAD_ALBEDO[ch] * LIMIT + 1e-9, `step ${step}: patch ${i} channel ${ch} = ${v} > ${LIMIT}x road ${ROAD_ALBEDO[ch]}`));
+    }
   }
   const dash = dashes.material.color;
   [dash.r, dash.g, dash.b].forEach((v, ch) => assert.ok(v <= ROAD_ALBEDO[ch] * LIMIT + 1e-9, `step ${step}: dash channel ${ch} brighter than ${LIMIT}x road`));
@@ -578,7 +597,7 @@ for (const [step, level] of SEQUENCE.entries()) {
     assert.equal(mesh.children.length, 0, 'collidable must be childless');
     assert.ok(collidables.includes(mesh), 'environment collidable not registered');
   }
-  assert.ok(lm.environment.collidables.length <= 80, 'collidable budget');
+  assert.ok(lm.environment.collidables.length <= 110, 'collidable budget');
 
   // Bump and main potholes sit at the vehicle's physics positions in every level
   const discs = [];

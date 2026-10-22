@@ -4,6 +4,7 @@ import {
   createBox,
   createTexturedBox,
   MAIN_POTHOLES,
+  ROAD_TILE_LENGTH,
   createGeometryCache,
   createMergeBatch,
   disposeObjectTree
@@ -15,8 +16,16 @@ import {
 } from './props.js';
 
 import {
-  createLife
+  createLife,
+  LIFE_DENSITY
 } from './life.js';
+
+import {
+  DEFAULT_ROAD,
+  alignedFrom,
+  roadCentre,
+  roadLength
+} from '../roads.js';
 
 
 // ==================================================
@@ -31,14 +40,21 @@ import {
 //
 // Draw-call budget: every repeated, non-collidable part
 // (sidewalks, roofs, rooftop boxes, windows, shopfronts,
-// awnings, lane dashes) is merged per 30 m chunk (one
-// building slot) and side of the street, and each street
+// awnings, lane dashes) is merged per 120 m chunk (four
+// building slots) and side of the street, and each street
 // lamp station is its own instanced chunk, so frustum
 // culling still drops everything that is off screen. Merged
 // parts are drawn whole while any of their chunk is in view,
 // so the in-view triangle count stays within ~1% of the
 // unmerged street (measured: tests/tools/gl-measure.mjs).
-// The 26 collidable buildings stay single Meshes.
+// The collidable buildings stay single Meshes (the original 26,
+// then two per slot of a longer road).
+//
+// The chunks were 30 m (one slot) while the road was 400 m. On a
+// 960 m road the camera sees a longer street at once (a level's
+// view distance is its fog distance, see main.js), and 120 m
+// chunks keep the draw calls of that view near the old ones (the
+// in-view triangles barely change: the same windows are drawn).
 //
 // Street life (Stage 1): four side streets are cut into the
 // gaps between building slots (the sidewalk slabs stop at the
@@ -48,12 +64,41 @@ import {
 // on the carriageway and nothing of it is collidable.
 // ==================================================
 
-// Merge chunk length along the street (metres): one building
-// slot, so a building's windows are drawn with the building.
-const CHUNK_SIZE = 30;
+// Merge chunk length along the street (metres): four building
+// slots, so a building's windows are drawn with the buildings.
+const CHUNK_SIZE = 120;
 
 
-export function createCityStreet({ materials }) {
+// --------------------------------------------------
+// Road length. The original road is z -200..200, with building
+// slots every 30 m from z -180 (slot 0) to 180 (slot 12), four
+// side streets, lamps every 40 m from -160 and dashes every 12 m
+// from -190. A longer road keeps all of that exactly and carries
+// the same pattern on past it: slots continue at the same
+// spacing (a building's look follows its slot number, which runs
+// on below 0 and above 12), the side streets repeat every ten
+// slots, and every repeating thing keeps its phase.
+// --------------------------------------------------
+export function createCityStreet({
+  materials,
+  road: roadExtent = DEFAULT_ROAD
+}) {
+
+const ROAD_Z_MIN =
+  roadExtent.zMin;
+
+const ROAD_Z_MAX =
+  roadExtent.zMax;
+
+const ROAD_CENTRE =
+  roadCentre(
+    roadExtent
+  );
+
+const ROAD_LENGTH =
+  roadLength(
+    roadExtent
+  );
 
 const group =
   new THREE.Group();
@@ -81,15 +126,20 @@ const ground =
 
     0.2,
 
-    400,
+    ROAD_LENGTH,
 
     materials
-      .createGrassMaterial()
+      .createGrassMaterial(),
+
+    ROAD_TILE_LENGTH
   );
 
 
 ground.position.y =
   -0.2;
+
+ground.position.z =
+  ROAD_CENTRE;
 
 
 group.add(
@@ -108,15 +158,20 @@ const road =
 
     0.05,
 
-    400,
+    ROAD_LENGTH,
 
     materials
-      .createRoadMaterial()
+      .createRoadMaterial(),
+
+    ROAD_TILE_LENGTH
   );
 
 
 road.position.y =
   -0.05;
+
+road.position.z =
+  ROAD_CENTRE;
 
 
 group.add(
@@ -148,9 +203,11 @@ for (
 
       0.22,
 
-      400,
+      ROAD_LENGTH,
 
-      kerbMaterial
+      kerbMaterial,
+
+      ROAD_TILE_LENGTH
     );
 
 
@@ -161,7 +218,7 @@ for (
 
     0.04,
 
-    0
+    ROAD_CENTRE
   );
 
 
@@ -187,8 +244,13 @@ const lineMaterial =
 
 
 for (
-  let z = -190;
-  z < 200;
+  let z = alignedFrom(
+    -190,
+    12,
+    ROAD_Z_MIN +
+    2.5
+  );
+  z < ROAD_Z_MAX;
   z += 12
 ) {
 
@@ -451,26 +513,136 @@ const SLOT_Z0 =
 const SLOT_SPACING =
   30;
 
+// The original slots are 0..12 (z -180..180). A longer road adds
+// slots below 0 and above 12 while a slab (z +- 14) still reaches
+// no further than 10 m past the road's end.
+const CORE_SLOT_FIRST =
+  0;
+
+const CORE_SLOT_LAST =
+  12;
+
+const SLOT_FIRST =
+  Math.ceil(
+    (ROAD_Z_MIN + 4 - SLOT_Z0) /
+    SLOT_SPACING
+  );
+
+const SLOT_LAST =
+  Math.floor(
+    (ROAD_Z_MAX - 4 - SLOT_Z0) /
+    SLOT_SPACING
+  );
+
+// The original slots first (so their buildings, collidables and
+// people come out exactly as before), then the ones added beyond
+const slotList =
+  [];
+
+for (
+  let k = CORE_SLOT_FIRST;
+  k <= CORE_SLOT_LAST;
+  k++
+) {
+
+  slotList.push(
+    k
+  );
+}
+
+for (
+  let k = CORE_SLOT_FIRST - 1;
+  k >= SLOT_FIRST;
+  k--
+) {
+
+  slotList.push(
+    k
+  );
+}
+
+for (
+  let k = CORE_SLOT_LAST + 1;
+  k <= SLOT_LAST;
+  k++
+) {
+
+  slotList.push(
+    k
+  );
+}
+
+const isCoreSlot =
+  (k) =>
+    k >= CORE_SLOT_FIRST &&
+    k <= CORE_SLOT_LAST;
+
+// A slot's number says what its building looks like: the sizes,
+// materials and shopfronts all follow `buildingIndex` modulo 2,
+// 3, 4 and 5, so adding 60 (a multiple of each) keeps the look of
+// every original slot and lets the pattern run on below slot 0.
+const indexOf =
+  (k, side) =>
+    2 * k +
+    (side === 1 ? 1 : 0) +
+    60;
+
 // The building's depth (along z), as in the loop below
 const slotDepth =
   (k, side) =>
     18 +
     (
-      (2 * k + (side === 1 ? 1 : 0)) %
+      indexOf(k, side) %
       4
     ) *
     1.8;
 
-const sideStreets =
+// The original four side streets, then the same pattern every ten
+// slots beyond the original ones (which stay as they were)
+const SIDE_STREET_PATTERN =
+  { 1: 1, 3: -1, 6: 1, 9: -1 };
+
+const sideStreetSpecs =
   [
     { k: 1, side: 1 },
     { k: 3, side: -1 },
     { k: 6, side: 1 },
     { k: 9, side: -1 }
-  ].map(
+  ];
+
+for (
+  let k = SLOT_FIRST;
+  k < SLOT_LAST;
+  k++
+) {
+
+  const side =
+    SIDE_STREET_PATTERN[
+      ((k % 10) + 10) % 10
+    ];
+
+  // None next to an original slot: that would shorten the
+  // original sidewalk beside it
+  if (
+    side !== undefined &&
+    !isCoreSlot(k) &&
+    !isCoreSlot(k + 1)
+  ) {
+
+    sideStreetSpecs.push({
+      k,
+      side
+    });
+  }
+}
+
+const sideStreets =
+  sideStreetSpecs.map(
     ({ k, side }) => ({
       k,
       side,
+      core:
+        isCoreSlot(k),
       z0:
         SLOT_Z0 + k * SLOT_SPACING +
         slotDepth(k, side) / 2,
@@ -483,28 +655,42 @@ const sideStreets =
 const SIDEWALK_TOP =
   0.2;
 
-// Where people may be (see life.js)
+// Where people may be (see life.js). The original stretch and the
+// stretch added to it are laid out separately, so the original
+// people stay exactly where they were.
 const lifeLayout =
   {
     sidewalks: [],
     crossings: []
   };
 
-
-let buildingIndex =
-  0;
+const lifeLayoutAdded =
+  {
+    sidewalks: [],
+    crossings: []
+  };
 
 
 for (
-  let z = -180;
-  z <= 180;
-  z += 30
+  const slot
+  of slotList
 ) {
+
+  const z =
+    SLOT_Z0 +
+    slot *
+    SLOT_SPACING;
 
   for (
     const side
     of [-1, 1]
   ) {
+
+    const buildingIndex =
+      indexOf(
+        slot,
+        side
+      );
 
     // ----------------------------------------------
     // SIDEWALK
@@ -517,13 +703,6 @@ for (
 
     let walkTo =
       z + 14;
-
-    const slot =
-      Math.round(
-        (z - SLOT_Z0) /
-        SLOT_SPACING
-      );
-
 
     for (
       const street
@@ -556,6 +735,21 @@ for (
     }
 
 
+    // The last slabs stop at the end of the road (the original ones,
+    // z -194..194, never reached it)
+    walkFrom =
+      Math.max(
+        walkFrom,
+        ROAD_Z_MIN
+      );
+
+    walkTo =
+      Math.min(
+        walkTo,
+        ROAD_Z_MAX
+      );
+
+
     const sidewalk =
       createTexturedBox(
 
@@ -580,7 +774,11 @@ for (
     );
 
 
-    lifeLayout.sidewalks.push({
+    (
+      isCoreSlot(slot)
+        ? lifeLayout
+        : lifeLayoutAdded
+    ).sidewalks.push({
       side,
       z0: walkFrom + 0.8,
       z1: walkTo - 0.8,
@@ -1126,8 +1324,6 @@ for (
       );
     }
 
-
-    buildingIndex++;
   }
 }
 
@@ -1215,7 +1411,11 @@ for (
   );
 
 
-  lifeLayout.crossings.push({
+  (
+    street.core
+      ? lifeLayout
+      : lifeLayoutAdded
+  ).crossings.push({
     side:
       street.side,
 
@@ -1236,6 +1436,43 @@ createLife({
   layout: lifeLayout,
   group
 });
+
+
+// The stretch added beyond the original road gets the same
+// density: the instance cap grows with its length (216 per 400 m,
+// as the original), and its people use their own seed so the
+// original ones are not disturbed.
+const addedLength =
+  Math.max(
+    0,
+    -200 - ROAD_Z_MIN
+  ) +
+  Math.max(
+    0,
+    ROAD_Z_MAX - 200
+  );
+
+if (
+  addedLength > 0
+) {
+
+  createLife({
+    level: 1,
+    layout: lifeLayoutAdded,
+    group,
+    density: {
+      ...LIFE_DENSITY[1],
+      seed:
+        LIFE_DENSITY[1].seed + 1,
+      maxInstances:
+        Math.round(
+          LIFE_DENSITY[1].maxInstances *
+          addedLength /
+          400
+        )
+    }
+  });
+}
 
 
 // ==================================================
@@ -1275,8 +1512,13 @@ const lampStations =
 
 
 for (
-  let z = -160;
-  z <= 160;
+  let z = alignedFrom(
+    -160,
+    40,
+    ROAD_Z_MIN +
+    40
+  );
+  z <= ROAD_Z_MAX - 40;
   z += 40
 ) {
 

@@ -4,10 +4,19 @@ import {
   createBox,
   createTexturedBox,
   prepareAO,
+  scaleLengthUV,
   MAIN_POTHOLES,
+  ROAD_TILE_LENGTH,
   SPEED_BUMP,
   disposeObjectTree
 } from './helpers.js';
+
+import {
+  DEFAULT_ROAD,
+  alignedFrom,
+  roadCentre,
+  roadLength
+} from '../roads.js';
 
 import {
   createBarrierMesh,
@@ -23,7 +32,7 @@ import {
 // LEVEL 2: MOTORWAY
 // --------------------------------------------------
 // Same straight road along z at x = 0 as every level
-// (18 m wide, 400 m long), dressed as a motorway:
+// (18 m wide, 400 m long or longer, see roads.js), dressed as a motorway:
 //
 //   x  -9 ... -5.4   hard shoulder
 //      -5.4 .. -1.8  lane    | solid white edge line at +-5.4
@@ -39,7 +48,6 @@ import {
 // Collidables (2): one barrier Mesh per side.
 // ==================================================
 
-const ROAD_LENGTH = 400;
 const ROAD_HALF_WIDTH = 9;
 
 const LANE_WIDTH = 3.6;
@@ -49,6 +57,10 @@ const LANE_LINE_X = LANE_WIDTH / 2;       // 1.8
 export const BARRIER_X = 10.3;
 
 const LAMP_X = 11.4;
+
+// Half the length of the original road (lamps, dashes and ribs keep
+// the phase they had on it)
+const ROAD_HALF_LENGTH_ORIGINAL = 200;
 const LAMP_SPACING = 60;
 
 export const GANTRY = {
@@ -88,7 +100,9 @@ function setRepeat(
 // Verge-to-field earth bank, extruded along z. Profile is
 // (distance from the road centre, height); it is built for
 // the +x side and the mesh is turned round for -x.
-function createEmbankmentGeometry() {
+function createEmbankmentGeometry(
+  length
+) {
 
   const shape =
     new THREE.Shape();
@@ -108,7 +122,7 @@ function createEmbankmentGeometry() {
       shape,
       {
         depth:
-          ROAD_LENGTH,
+          length,
 
         bevelEnabled:
           false
@@ -119,7 +133,7 @@ function createEmbankmentGeometry() {
   geometry.translate(
     0,
     0,
-    -ROAD_LENGTH / 2
+    -length / 2
   );
 
 
@@ -129,7 +143,26 @@ function createEmbankmentGeometry() {
 }
 
 
-export function createMotorway({ materials }) {
+export function createMotorway({
+  materials,
+  road: roadExtent = DEFAULT_ROAD
+}) {
+
+  const ROAD_Z_MIN =
+    roadExtent.zMin;
+
+  const ROAD_Z_MAX =
+    roadExtent.zMax;
+
+  const ROAD_LENGTH =
+    roadLength(
+      roadExtent
+    );
+
+  const ROAD_CENTRE =
+    roadCentre(
+      roadExtent
+    );
 
   const group =
     new THREE.Group();
@@ -146,13 +179,17 @@ export function createMotorway({ materials }) {
     createTexturedBox(
       400,
       0.2,
-      400,
-      materials.createGrassMaterial()
+      ROAD_LENGTH,
+      materials.createGrassMaterial(),
+      ROAD_TILE_LENGTH
     );
 
 
   ground.position.y =
     -0.2;
+
+  ground.position.z =
+    ROAD_CENTRE;
 
 
   group.add(
@@ -179,12 +216,16 @@ export function createMotorway({ materials }) {
       ROAD_HALF_WIDTH * 2,
       0.05,
       ROAD_LENGTH,
-      roadMaterial
+      roadMaterial,
+      ROAD_TILE_LENGTH
     );
 
 
   road.position.y =
     -0.05;
+
+  road.position.z =
+    ROAD_CENTRE;
 
 
   group.add(
@@ -228,7 +269,7 @@ export function createMotorway({ materials }) {
       side *
       (EDGE_LINE_X + ROAD_HALF_WIDTH) / 2,
       -0.01,
-      0
+      ROAD_CENTRE
     );
 
 
@@ -281,7 +322,7 @@ export function createMotorway({ materials }) {
       side *
       EDGE_LINE_X,
       0.015,
-      0
+      ROAD_CENTRE
     );
 
 
@@ -300,11 +341,16 @@ export function createMotorway({ materials }) {
       xs:
         [-LANE_LINE_X, LANE_LINE_X],
 
+      // dashes keep the original phase (z -200 + 12 k)
       zFrom:
-        -ROAD_LENGTH / 2,
+        alignedFrom(
+          -200,
+          12,
+          ROAD_Z_MIN
+        ),
 
       zTo:
-        ROAD_LENGTH / 2,
+        ROAD_Z_MAX,
 
       period:
         12,
@@ -341,12 +387,16 @@ export function createMotorway({ materials }) {
 
 
   const vergeGeometry =
-    prepareAO(
-      new THREE.BoxGeometry(
-        vergeWidth,
-        0.06,
-        ROAD_LENGTH
-      )
+    scaleLengthUV(
+      prepareAO(
+        new THREE.BoxGeometry(
+          vergeWidth,
+          0.06,
+          ROAD_LENGTH
+        )
+      ),
+      ROAD_LENGTH,
+      ROAD_TILE_LENGTH
     );
 
 
@@ -366,7 +416,7 @@ export function createMotorway({ materials }) {
       side *
       (ROAD_HALF_WIDTH + vergeWidth / 2),
       0,
-      0
+      ROAD_CENTRE
     );
 
 
@@ -415,7 +465,7 @@ export function createMotorway({ materials }) {
       side *
       BARRIER_X,
       0,
-      0
+      ROAD_CENTRE
     );
 
 
@@ -443,21 +493,60 @@ export function createMotorway({ materials }) {
   );
 
 
-  group.add(
-    createBarrierRibs({
-      length:
-        ROAD_LENGTH,
+  // One InstancedMesh per 120 m window (a 4 m multiple, so the
+  // ribs keep their original phase): a whole-road mesh would be
+  // drawn in full while any part of it is in view
+  for (
+    let start = -200 +
+      120 * Math.floor(
+        (ROAD_Z_MIN + 200) / 120
+      );
+    start < ROAD_Z_MAX;
+    start += 120
+  ) {
 
-      spacing:
+    const from =
+      alignedFrom(
+        -200,
         4,
+        Math.max(
+          start,
+          ROAD_Z_MIN
+        )
+      );
 
-      xs:
-        [-BARRIER_X, BARRIER_X],
+    const to =
+      Math.min(
+        start + 120,
+        ROAD_Z_MAX
+      );
 
-      material:
-        ribMaterial
-    })
-  );
+    if (
+      to - from < 4
+    ) {
+
+      continue;
+    }
+
+    group.add(
+      createBarrierRibs({
+        length:
+          to - from,
+
+        zFrom:
+          from,
+
+        spacing:
+          4,
+
+        xs:
+          [-BARRIER_X, BARRIER_X],
+
+        material:
+          ribMaterial
+      })
+    );
+  }
 
 
   // ----------------------------------------------
@@ -473,7 +562,9 @@ export function createMotorway({ materials }) {
 
 
   const embankmentGeometry =
-    createEmbankmentGeometry();
+    createEmbankmentGeometry(
+      ROAD_LENGTH
+    );
 
 
   for (
@@ -497,6 +588,9 @@ export function createMotorway({ materials }) {
         ? Math.PI
         : 0;
 
+    bank.position.z =
+      ROAD_CENTRE;
+
 
     bank.receiveShadow =
       true;
@@ -516,9 +610,14 @@ export function createMotorway({ materials }) {
     [];
 
 
+  // z -150 + 60 k, as the original six pairs
   for (
-    let z = -ROAD_LENGTH / 2 + LAMP_SPACING / 2 + 20;
-    z < ROAD_LENGTH / 2;
+    let z = alignedFrom(
+      -ROAD_HALF_LENGTH_ORIGINAL + LAMP_SPACING / 2 + 20,
+      LAMP_SPACING,
+      ROAD_Z_MIN + 50
+    );
+    z < ROAD_Z_MAX;
     z += LAMP_SPACING
   ) {
 

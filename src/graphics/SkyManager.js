@@ -631,15 +631,75 @@ export class SkyManager {
 
 
   // ==================================================
+  // VIEW DISTANCE
+  // ==================================================
+
+  // The dome and the stars must lie inside the camera's far plane,
+  // or they are clipped. The camera's far plane is a level's fog
+  // distance plus a margin (a long road would otherwise draw all
+  // of its far end), which can be well under the dome's 450 m, so
+  // the dome (and the star sphere, whose points are enlarged to
+  // look as they did) is scaled to fit. The sky shader works from
+  // the view direction only, so the dome's size does not show.
+  setViewDistance(far) {
+
+    const scale =
+      Math.min(
+        1,
+        (far - 30) /
+        450
+      );
+
+
+    this.sky.scale.setScalar(
+      scale
+    );
+
+
+    this.stars.scale.setScalar(
+      scale
+    );
+
+
+    this.stars.material.size =
+      0.55 *
+      scale;
+  }
+
+
+  // ==================================================
   // UPDATE
   // ==================================================
 
   update(
-    elapsedTime
+    elapsedTime,
+    anchor = null
   ) {
 
-    // Keep the sky centred around the world origin.
-    // Since the level is currently small this is enough.
+    // Keep the dome and the stars centred on the taxi (x and z
+    // only). The levels are long, so a dome fixed at the origin
+    // would be left behind (and the taxi would drive out of it);
+    // moved with the taxi it is always 450 m away in every direction.
+    // Without an anchor it stays where it was.
+
+    if (
+      anchor
+    ) {
+
+      this.sky.position.set(
+        anchor.x,
+        0,
+        anchor.z
+      );
+
+
+      this.stars.position.set(
+        anchor.x,
+        0,
+        anchor.z
+      );
+    }
+
 
     if (
       this.stars.visible
