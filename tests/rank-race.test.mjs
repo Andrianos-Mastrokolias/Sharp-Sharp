@@ -48,8 +48,8 @@ function step(lm, seconds) {
   for (let t = 0; t < seconds; t += DT) lm.update(DT, t);
 }
 
-// Beaten needs the taxi to have been behind a rival and then well ahead of it
-// (the rule may change, this is true under both): start behind everyone, then jump ahead
+// Move behind all rivals, then ahead of them.
+// All eight rivals should be beaten exactly once.
 function beatAll(e) {
   e.taxi.position.set(0, 0, 195);
   step(e.lm, 0.2);
@@ -423,11 +423,11 @@ test('head start: a rival beaten after z -140 (not yet released) still counts, a
   e.taxi.position.set(0, 0, -200);
   const rivals = e.lm.rivals.rivals;
   rivals.forEach((r) => { r.z = -600; r.x = 0; });
-  rivals[0].z = -190;
-  rivals[0].seenBehind = true;
-  rivals[1].z = -190;
-  rivals[1].x = 5;
-  rivals[1].seenBehind = true;
+ 
+rivals[0].z = -190;
+rivals[1].z = -190;
+rivals[1].x = 5;
+
   e.lm.rivals.launched = true;
   step(e.lm, DT);
   e.lm.rivals.launched = false;
@@ -508,6 +508,95 @@ test('events: onScore carries { delta, reason, points } and the same objects are
   assert.notEqual(e.events[0], e.events[1]);
 });
 
+test('points: rivals beside or behind the player are beatable after launch', () => {
+  const e = make();
+  e.lm.load(1);
+
+  const rear = e.lm.rivals.rivals.filter(
+    (r) => r.initialZ > L1.spawn.z
+  );
+
+  const alongside = e.lm.rivals.rivals.filter(
+    (r) => r.initialZ === L1.spawn.z
+  );
+
+  assert.ok(
+    rear.length > 0 && alongside.length > 0,
+    'grid must include rear and beside rows'
+  );
+
+  // No scoring during the countdown.
+  step(e.lm, 0.1);
+
+  assert.equal(
+    e.lm.getState().score.beaten,
+    0,
+    'do not score during countdown'
+  );
+
+  // Start the race.
+  e.lm.skipCountdown();
+  step(e.lm, DT);
+
+  // Rivals behind the player should count as beaten.
+  assert.ok(
+    rear.every((r) => r.beaten),
+    'rear row can count without ever leading'
+  );
+
+  // Rivals alongside should not count yet.
+  assert.ok(
+    alongside.every((r) => !r.beaten),
+    'side row has not been passed yet'
+  );
+
+  assert.equal(
+    e.lm.getState().score.beaten,
+    rear.length
+  );
+
+  // Move less than 3 metres ahead.
+  e.taxi.position.z = L1.spawn.z - 2.5;
+  step(e.lm, DT);
+
+  assert.ok(
+    alongside.every((r) => !r.beaten),
+    'less than 3 m ahead is not enough'
+  );
+
+  // Move more than 3 metres ahead.
+  e.taxi.position.z = L1.spawn.z - 3.5;
+  step(e.lm, DT);
+
+  assert.ok(
+    alongside.every((r) => r.beaten),
+    'beside row becomes beatable at 3 m ahead'
+  );
+
+  const expected = rear.length + alongside.length;
+
+  assert.equal(
+    e.lm.getState().score.beaten,
+    expected
+  );
+
+  assert.equal(
+    e.events.filter((ev) => ev.reason === 'beaten').length,
+    expected
+  );
+
+  // Make sure rivals cannot award points twice.
+  step(e.lm, 0.3);
+
+  assert.equal(
+    e.events.filter((ev) => ev.reason === 'beaten').length,
+    expected,
+    'each rival awards points only once'
+  );
+});
+
+
+
 let failed = 0;
 for (const [name, fn] of tests) {
   try { await fn(); console.log('PASS', name); }
@@ -515,3 +604,5 @@ for (const [name, fn] of tests) {
 }
 console.log(failed ? `${failed} FAILED` : 'ALL PASSED');
 process.exit(failed ? 1 : 0);
+
+
