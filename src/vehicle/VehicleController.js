@@ -73,9 +73,9 @@ export class VehicleController {
     );
 
     this.settings = {
-      maxForwardSpeed: 28,
+      maxForwardSpeed: 31,
       maxReverseSpeed: 10,
-      acceleration: 13,
+      acceleration: 15,
       reverseAcceleration: 8,
       brakingForce: 24,
       rollingResistance: 4.5,
@@ -92,6 +92,8 @@ export class VehicleController {
       normalSlipBuild: 0.35,
       handbrakeSlipBuild: 1.35,
       maxLateralSpeed: 4.5,
+      speedBumpSpeedLoss: 0.10,
+      potholeSpeedLoss: 0.16,
 
       wheelRadius: 0.45,
       gravity: -22,
@@ -100,9 +102,9 @@ export class VehicleController {
       maxSuspensionMovement: 0.38,
 
       // Level 2 sustained-speed pressure.
-      level2SpeedThreshold: 20,
+      level2SpeedThreshold: 22,
       level2GraceTime: 3,
-      level2StressRate: 1.8,
+      level2StressRate: 1.2,
 
       // Visual polish.
       cornerRollAmount: 0.09,
@@ -114,8 +116,8 @@ export class VehicleController {
       level3HazardCooldown: 0.6,
 
       // Level 1 kerb response (called by the world when needed).
-      kerbSpeedLoss: 0.08,
-      kerbStress: 3,
+      kerbSpeedLoss: 0.12,
+      kerbStress: 4,
       kerbCooldown: 0.25
     };
 
@@ -140,6 +142,40 @@ export class VehicleController {
   getSpeed() {
     return this.speed;
   }
+
+  
+  // Generic external hit response.
+  // Used by pedestrians, scripted hazards, etc.
+  //
+  // speedLoss: fraction of current speed (0..1)
+  // stress: non-negative cargo stress
+  // kick: suspension impulse (0..1)
+  applyHit({
+    speedLoss = 0,
+    stress = 0,
+    kick = 0
+  } = {}) {
+    const loss = Number.isFinite(speedLoss)
+      ? THREE.MathUtils.clamp(speedLoss, 0, 1)
+      : 0;
+
+    const cargoStress = Number.isFinite(stress)
+      ? Math.max(0, stress)
+      : 0;
+
+    const suspensionKick = Number.isFinite(kick)
+      ? THREE.MathUtils.clamp(kick, 0, 1)
+      : 0;
+
+    this.speed *= 1 - loss;
+
+    if (cargoStress > 0) {
+      this.cargoSystem.applyStress(cargoStress);
+    }
+
+    this.suspensionVelocity -= suspensionKick;
+  }
+
 
   isGrounded() {
     return this.grounded;
@@ -267,42 +303,51 @@ export class VehicleController {
   }
 
   // Optional Level 1 API for world/kerb collision zones.
-  triggerKerbImpact(severity = 1, side = 1) {
-    if (
-      this.currentLevel !== 1 ||
-      this.kerbImpactCooldown > 0 ||
-      Math.abs(this.speed) < 1
-    ) {
-      return;
-    }
 
-    severity = THREE.MathUtils.clamp(severity, 0.2, 2);
-    side = side >= 0 ? 1 : -1;
-
-    const speedFactor = THREE.MathUtils.clamp(
-      Math.abs(this.speed) / 18,
-      0.25,
-      1.5
-    );
-
-    this.speed *= Math.max(
-      1.1,
-      1 - this.settings.kerbSpeedLoss * severity * speedFactor
-    );
-
-    this.suspensionVelocity -= 0.7 * severity * speedFactor;
-    this.bodyRoll += side * 0.07 * severity * speedFactor;
-    this.lateralVelocity += side * 0.35 * severity * speedFactor;
-
-    this.cargoSystem.velocityX +=
-      side * 0.22 * severity * speedFactor;
-
-    this.cargoSystem.applyStress(
-      this.settings.kerbStress * severity * speedFactor
-    );
-
-    this.kerbImpactCooldown = this.settings.kerbCooldown;
+triggerKerbImpact(severity = 1, side = 1) {
+  if (
+    this.currentLevel !== 1 ||
+    this.kerbImpactCooldown > 0 ||
+    Math.abs(this.speed) < 1
+  ) {
+    return;
   }
+
+  severity = THREE.MathUtils.clamp(severity, 0.2, 2);
+  side = side >= 0 ? 1 : -1;
+
+  const speedFactor = THREE.MathUtils.clamp(
+    Math.abs(this.speed) / 18,
+    0.25,
+    1.5
+  );
+
+  // Kerb impact must reduce speed, never increase it.
+  const speedMultiplier = THREE.MathUtils.clamp(
+    1 - this.settings.kerbSpeedLoss * severity * speedFactor,
+    0.7,
+    1
+  );
+
+  this.speed *= speedMultiplier;
+
+  // Suspension and body reaction.
+  this.suspensionVelocity -= 0.7 * severity * speedFactor;
+  this.bodyRoll += side * 0.07 * severity * speedFactor;
+  this.lateralVelocity += side * 0.35 * severity * speedFactor;
+
+  // Cargo reaction.
+  this.cargoSystem.velocityX +=
+    side * 0.22 * severity * speedFactor;
+
+  this.cargoSystem.applyStress(
+    this.settings.kerbStress * severity * speedFactor
+  );
+
+  // Prevent repeated impacts during cooldown.
+  this.kerbImpactCooldown = this.settings.kerbCooldown;
+}
+
 
   // ------------------------------------------------------------------
   // Reset
@@ -548,6 +593,30 @@ isOnLevelSpeedBump(x, z) {
 
   return false;
 }
+ 
+
+applyRoadHazardSlowdown(baseLoss) {
+  const speed = Math.abs(this.speed);
+
+  // Don't punish the player at crawling speeds.
+  if (speed < 4) return;
+
+  const speedFactor = THREE.MathUtils.clamp(
+    speed / 20,
+    0.5,
+    1.4
+  );
+
+  const loss = THREE.MathUtils.clamp(
+    baseLoss * speedFactor,
+    0,
+    0.35
+  );
+
+  // Works for forward and reverse without changing direction.
+  this.speed *= 1 - loss;
+}
+
 
   getPotholeHit(x, z) {
     for (const pothole of this.potholes) {
@@ -585,7 +654,38 @@ isOnLevelSpeedBump(x, z) {
       if (this.taxiBox.intersectsBox(this.obstacleBox)) {
         this.taxi.position.copy(previousPosition);
 
-        const impactSpeed = Math.abs(this.speed);
+        
+        // Preserve the original impact calculation for static objects.
+        let impactSpeed = Math.abs(this.speed);
+
+        // Moving obstacles optionally provide world-space velocity.
+        const velocity = object.userData?.velocity;
+
+        if (
+          velocity &&
+          Number.isFinite(velocity.x) &&
+          Number.isFinite(velocity.z)
+        ) {
+          const heading = this.taxi.rotation.y;
+          const sin = Math.sin(heading);
+          const cos = Math.cos(heading);
+
+          // Taxi local forward is -Z.
+          // Include lateral drift when calculating world velocity.
+          const taxiVX =
+            -sin * this.speed +
+            cos * this.lateralVelocity;
+
+          const taxiVZ =
+            -cos * this.speed -
+            sin * this.lateralVelocity;
+
+          impactSpeed = Math.hypot(
+            taxiVX - velocity.x,
+            taxiVZ - velocity.z
+          );
+        }
+
 
         this.speed *= -0.2;
         this.lateralVelocity *= -0.25;
@@ -611,518 +711,612 @@ isOnLevelSpeedBump(x, z) {
   // Level 2 mechanic
   // ------------------------------------------------------------------
 
-  updateLevel2Mechanic(dt) {
-    if (this.currentLevel !== 2) {
-      this.highSpeedTime = 0;
-      return;
-    }
-
-    const speed = Math.abs(this.speed);
-    const aboveThreshold =
-      speed > this.settings.level2SpeedThreshold;
-
-    if (aboveThreshold) {
-      this.highSpeedTime += dt;
-    } else {
-      this.highSpeedTime = Math.max(
-        0,
-        this.highSpeedTime - dt * 1.5
-      );
-    }
-
-    if (
-      this.highSpeedTime >
-      this.settings.level2GraceTime
-    ) {
-      const excessSpeed =
-        speed - this.settings.level2SpeedThreshold;
-
-      const speedPressure = THREE.MathUtils.clamp(
-        excessSpeed / 8,
-        0.25,
-        1.5
-      );
-
-      this.cargoSystem.applyStress(
-        this.settings.level2StressRate *
-        speedPressure *
-        dt
-      );
-    }
+  
+updateLevel2Mechanic(dt) {
+  // Sustained-speed pressure applies only on Level 2.
+  if (this.currentLevel !== 2) {
+    this.highSpeedTime = 0;
+    return;
   }
+
+  if (dt <= 0) {
+    return;
+  }
+
+  const speed = Math.abs(this.speed);
+  const threshold = this.settings.level2SpeedThreshold;
+  const graceTime = this.settings.level2GraceTime;
+  const aboveThreshold = speed > threshold;
+
+  // Build up high-speed pressure gradually.
+  if (aboveThreshold) {
+    this.highSpeedTime += dt;
+  } else {
+    // Recover when the player slows down.
+    this.highSpeedTime = Math.max(
+      0,
+      this.highSpeedTime - dt * 1.5
+    );
+
+    // IMPORTANT: No additional sustained-speed stress
+    // when driving below the threshold.
+    return;
+  }
+
+  // Allow a short grace period before cargo takes damage.
+  if (this.highSpeedTime <= graceTime) {
+    return;
+  }
+
+  const excessSpeed = speed - threshold;
+
+  // Faster driving creates more strap pressure.
+  const speedPressure = THREE.MathUtils.clamp(
+    excessSpeed / 8,
+    0.25,
+    1.5
+  );
+
+  // Gradually weaken cargo rather than causing sudden loss.
+  const stress =
+    this.settings.level2StressRate *
+    speedPressure *
+    dt;
+
+  this.cargoSystem.applyStress(stress);
+}
+
 
   // ------------------------------------------------------------------
   // Update
   // ------------------------------------------------------------------
 
-  update(dt, keys) {
-    if (!this.enabled) {
-      return;
+ 
+update(dt, keys) {
+  if (!this.enabled) {
+    return;
+  }
+
+  if (this.level3HazardCooldown > 0) {
+    this.level3HazardCooldown = Math.max(
+      0,
+      this.level3HazardCooldown - dt
+    );
+  }
+
+  if (this.kerbImpactCooldown > 0) {
+    this.kerbImpactCooldown = Math.max(
+      0,
+      this.kerbImpactCooldown - dt
+    );
+  }
+
+  const accelerating = keys.KeyW || keys.ArrowUp;
+  const braking = keys.KeyS || keys.ArrowDown;
+  const left = keys.KeyA || keys.ArrowLeft;
+  const right = keys.KeyD || keys.ArrowRight;
+  const handbrake = keys.Space;
+
+  // --------------------------------------------------
+  // ACCELERATION
+  // --------------------------------------------------
+  if (accelerating) {
+    if (this.speed < -0.5) {
+      this.speed += this.settings.brakingForce * dt;
+    } else {
+      this.speed += this.settings.acceleration * dt;
     }
+  }
 
-    if (this.level3HazardCooldown > 0) {
-      this.level3HazardCooldown = Math.max(
-        0,
-        this.level3HazardCooldown - dt
-      );
+  // Brake / reverse.
+  if (braking) {
+    if (this.speed > 0.5) {
+      this.speed -= this.settings.brakingForce * dt;
+    } else {
+      this.speed -= this.settings.reverseAcceleration * dt;
     }
+  }
 
-    if (this.kerbImpactCooldown > 0) {
-      this.kerbImpactCooldown = Math.max(
-        0,
-        this.kerbImpactCooldown - dt
-      );
+  // Rolling resistance.
+  if (!accelerating && !braking) {
+    if (this.speed > 0) {
+      this.speed -= this.settings.rollingResistance * dt;
+      if (this.speed < 0) this.speed = 0;
+    } else if (this.speed < 0) {
+      this.speed += this.settings.rollingResistance * dt;
+      if (this.speed > 0) this.speed = 0;
     }
+  }
 
-    const accelerating = keys.KeyW || keys.ArrowUp;
-    const braking = keys.KeyS || keys.ArrowDown;
-    const left = keys.KeyA || keys.ArrowLeft;
-    const right = keys.KeyD || keys.ArrowRight;
-    const handbrake = keys.Space;
+  // Air resistance.
+  this.speed -=
+    this.speed *
+    Math.abs(this.speed) *
+    this.settings.airResistance *
+    dt;
 
-    // Acceleration.
-    if (accelerating) {
-      if (this.speed < -0.5) {
-        this.speed += this.settings.brakingForce * dt;
-      } else {
-        this.speed += this.settings.acceleration * dt;
-      }
-    }
+  // Handbrake scrubs forward speed but keeps lateral momentum.
+  if (handbrake) {
+    this.speed *= Math.pow(0.90, dt * 60);
+  }
 
-    // Brake / reverse.
-    if (braking) {
-      if (this.speed > 0.5) {
-        this.speed -= this.settings.brakingForce * dt;
-      } else {
-        this.speed -= this.settings.reverseAcceleration * dt;
-      }
-    }
+  this.speed = THREE.MathUtils.clamp(
+    this.speed,
+    -this.settings.maxReverseSpeed,
+    this.settings.maxForwardSpeed
+  );
 
-    // Rolling resistance.
-    if (!accelerating && !braking) {
-      if (this.speed > 0) {
-        this.speed -= this.settings.rollingResistance * dt;
-        if (this.speed < 0) this.speed = 0;
-      } else if (this.speed < 0) {
-        this.speed += this.settings.rollingResistance * dt;
-        if (this.speed > 0) this.speed = 0;
-      }
-    }
+  this.updateLevel2Mechanic(dt);
 
-    // Air resistance.
-    this.speed -=
+  // --------------------------------------------------
+  // STEERING
+  // --------------------------------------------------
+  let steeringInput = 0;
+
+  if (left) steeringInput += 1;
+  if (right) steeringInput -= 1;
+
+  const targetSteering =
+    steeringInput * this.settings.maxSteeringAngle;
+
+  if (steeringInput !== 0) {
+    this.steeringAngle = THREE.MathUtils.lerp(
+      this.steeringAngle,
+      targetSteering,
+      1 - Math.exp(-this.settings.steeringSpeed * dt)
+    );
+  } else {
+    this.steeringAngle = THREE.MathUtils.lerp(
+      this.steeringAngle,
+      0,
+      1 - Math.exp(-this.settings.steeringReturnSpeed * dt)
+    );
+  }
+
+  const speedRatio = THREE.MathUtils.clamp(
+    Math.abs(this.speed) / this.settings.maxForwardSpeed,
+    0,
+    1
+  );
+
+  const steeringSensitivity = THREE.MathUtils.lerp(
+    1,
+    0.35,
+    speedRatio
+  );
+
+  const effectiveSteering =
+    this.steeringAngle * steeringSensitivity;
+
+  if (Math.abs(this.speed) > 0.2) {
+    const handbrakeTurnBoost = handbrake ? 1.15 : 1;
+
+    this.taxi.rotation.y +=
+      effectiveSteering *
       this.speed *
-      Math.abs(this.speed) *
-      this.settings.airResistance *
+      0.065 *
+      handbrakeTurnBoost *
+      dt;
+  }
+
+  // --------------------------------------------------
+  // LATERAL GRIP / SLIP
+  // --------------------------------------------------
+  if (this.grounded) {
+    const slipBuild = handbrake
+      ? this.settings.handbrakeSlipBuild
+      : this.settings.normalSlipBuild;
+
+    this.lateralVelocity +=
+      effectiveSteering *
+      this.speed *
+      slipBuild *
       dt;
 
-    // Handbrake scrubs forward speed but keeps lateral momentum.
-    if (handbrake) {
-      this.speed *= Math.pow(0.90, dt * 60);
-    }
+    const grip = handbrake
+      ? this.settings.handbrakeGrip
+      : THREE.MathUtils.lerp(
+          this.settings.normalGripLowSpeed,
+          this.settings.normalGripHighSpeed,
+          speedRatio
+        );
 
-    this.speed = THREE.MathUtils.clamp(
-      this.speed,
-      -this.settings.maxReverseSpeed,
-      this.settings.maxForwardSpeed
-    );
+    this.lateralVelocity *= Math.exp(-grip * dt);
+  } else {
+    // Preserve sideways momentum while airborne.
+    this.lateralVelocity *= Math.exp(-0.15 * dt);
+  }
 
-    this.updateLevel2Mechanic(dt);
+  this.lateralVelocity = THREE.MathUtils.clamp(
+    this.lateralVelocity,
+    -this.settings.maxLateralSpeed,
+    this.settings.maxLateralSpeed
+  );
 
-    // Steering.
-    let steeringInput = 0;
-    if (left) steeringInput += 1;
-    if (right) steeringInput -= 1;
+  // --------------------------------------------------
+  // VEHICLE MOVEMENT
+  // --------------------------------------------------
+  this.previousPosition.copy(this.taxi.position);
 
-    const targetSteering =
-      steeringInput * this.settings.maxSteeringAngle;
+  this.taxi.translateZ(-this.speed * dt);
+  this.taxi.translateX(this.lateralVelocity * dt);
 
-    if (steeringInput !== 0) {
-      this.steeringAngle = THREE.MathUtils.lerp(
-        this.steeringAngle,
-        targetSteering,
-        1 - Math.exp(-this.settings.steeringSpeed * dt)
-      );
-    } else {
-      this.steeringAngle = THREE.MathUtils.lerp(
-        this.steeringAngle,
-        0,
-        1 - Math.exp(-this.settings.steeringReturnSpeed * dt)
-      );
-    }
+  this.checkCollisions(this.previousPosition);
 
-    const speedRatio = THREE.MathUtils.clamp(
-      Math.abs(this.speed) /
-      this.settings.maxForwardSpeed,
-      0,
-      1
-    );
-
-    const steeringSensitivity = THREE.MathUtils.lerp(
-      1,
-      0.35,
-      speedRatio
-    );
-
-    const effectiveSteering =
-      this.steeringAngle * steeringSensitivity;
-
-    if (Math.abs(this.speed) > 0.2) {
-      const handbrakeTurnBoost = handbrake ? 1.15 : 1;
-
-      this.taxi.rotation.y +=
-        effectiveSteering *
-        this.speed *
-        0.065 *
-        handbrakeTurnBoost *
-        dt;
-    }
-
-    // Arcade lateral grip / slip.
-    if (this.grounded) {
-      const slipBuild = handbrake
-        ? this.settings.handbrakeSlipBuild
-        : this.settings.normalSlipBuild;
-
-      // The slip is opposite the centre of the turn, so the taxi's
-      // rear visibly steps out rather than moving like a train on rails.
-      this.lateralVelocity +=
-        effectiveSteering *
-        this.speed *
-        slipBuild *
-        dt;
-
-      const grip = handbrake
-        ? this.settings.handbrakeGrip
-        : THREE.MathUtils.lerp(
-            this.settings.normalGripLowSpeed,
-            this.settings.normalGripHighSpeed,
-            speedRatio
-          );
-
-      this.lateralVelocity *= Math.exp(-grip * dt);
-    } else {
-      // Preserve most sideways momentum while airborne.
-      this.lateralVelocity *= Math.exp(-0.15 * dt);
-    }
-
-    this.lateralVelocity = THREE.MathUtils.clamp(
-      this.lateralVelocity,
-      -this.settings.maxLateralSpeed,
-      this.settings.maxLateralSpeed
-    );
-
-    // Move taxi.
-    this.previousPosition.copy(this.taxi.position);
-
-    this.taxi.translateZ(-this.speed * dt);
-    this.taxi.translateX(this.lateralVelocity * dt);
-
-    this.checkCollisions(this.previousPosition);
-    // --------------------------------------------------
-// Level 1 kerb impact
-// --------------------------------------------------
-
-const onKerb =
-  this.isTouchingKerb(
+  // --------------------------------------------------
+  // LEVEL 1 KERB IMPACT
+  // --------------------------------------------------
+  const onKerb = this.isTouchingKerb(
     this.taxi.position.x
   );
 
-if (
-  onKerb &&
-  !this.wasOnKerb &&
-  this.grounded
-) {
-  const side =
-    this.taxi.position.x >= 0
-      ? 1
-      : -1;
+  if (
+    onKerb &&
+    !this.wasOnKerb &&
+    this.grounded
+  ) {
+    const side = this.taxi.position.x >= 0 ? 1 : -1;
 
-  this.triggerKerbImpact(
-    1,
-    side
-  );
-}
+    this.triggerKerbImpact(1, side);
+  }
 
-this.wasOnKerb = onKerb;
+  this.wasOnKerb = onKerb;
 
-    // Ground.
-    const groundHeight = this.getGroundHeight(
-      this.taxi.position.x,
-      this.taxi.position.z
-    );
-
-    const groundDifference =
-      groundHeight - this.previousGroundHeight;
-
-    // Potholes (used by Level 1 and Level 3 registered hazards).
-    const potholeHit = this.getPotholeHit(
-      this.taxi.position.x,
-      this.taxi.position.z
-    );
-
-    const insidePothole = potholeHit !== null;
-
-    if (
-      insidePothole &&
-      !this.wasInPothole &&
-      this.grounded
-    ) {
-      const impact = THREE.MathUtils.clamp(
-        Math.abs(this.speed) / 20,
-        0.2,
-        1.5
-      );
-
-      this.suspensionVelocity -= 1.5 * impact;
-      this.bodyRoll = THREE.MathUtils.clamp(
-        potholeHit.dx * 0.08,
-        -0.15,
-        0.15
-      );
-
-      this.cargoSystem.velocityZ += impact * 0.4;
-      this.cargoSystem.velocityX += potholeHit.dx * 0.15;
-      this.cargoSystem.applyStress(impact * 9);
-    }
-
-    if (
-      !insidePothole &&
-      this.wasInPothole &&
-      this.grounded &&
-      Math.abs(this.speed) > 8
-    ) {
-      this.grounded = false;
-
-      this.verticalVelocity = THREE.MathUtils.clamp(
-        Math.abs(this.speed) * 0.09,
-        0.7,
-        2.5
-      );
-
-      this.suspensionVelocity += 0.6;
-      this.cargoSystem.velocityZ -=
-        Math.abs(this.speed) * 0.02;
-    }
-
-    this.wasInPothole = insidePothole;
-
-    const onSpeedBump = this.isOnSpeedBump(
-      this.taxi.position.x,
-      this.taxi.position.z
-    ) ||
-  this.isOnLevelSpeedBump(
+  // --------------------------------------------------
+  // GROUND HEIGHT
+  // --------------------------------------------------
+  const groundHeight = this.getGroundHeight(
     this.taxi.position.x,
     this.taxi.position.z
   );
 
-    const leavingSpeedBump =
-      this.wasOnSpeedBump && !onSpeedBump;
+  const groundDifference =
+    groundHeight - this.previousGroundHeight;
 
-    // Road suspension.
-    if (
-      this.grounded &&
-      Math.abs(groundDifference) > 0.01
-    ) {
-      this.suspensionVelocity += groundDifference * 15;
-    }
+  // --------------------------------------------------
+  // POTHOLES
+  // --------------------------------------------------
+  const potholeHit = this.getPotholeHit(
+    this.taxi.position.x,
+    this.taxi.position.z
+  );
 
-    // Grounded physics.
-    if (this.grounded) {
-      if (groundHeight > this.taxi.position.y) {
-        this.taxi.position.y = groundHeight;
-      }
+  const insidePothole = potholeHit !== null;
 
-      if (
-        leavingSpeedBump &&
-        Math.abs(this.speed) > 12
-      ) {
-        this.grounded = false;
-
-        this.verticalVelocity = Math.min(
-          Math.abs(this.speed) * 0.18,
-          6
-        );
-
-        this.cargoSystem.velocityZ -=
-          Math.abs(this.speed) * 0.025;
-
-        this.cargoSystem.applyStress(
-          THREE.MathUtils.clamp(
-            Math.abs(this.speed) * 0.55,
-            4,
-            17
-          )
-        );
-      } else {
-        this.taxi.position.y = groundHeight;
-      }
-    }
-
-    // Airborne physics.
-    if (!this.grounded) {
-      this.verticalVelocity += this.settings.gravity * dt;
-      this.taxi.position.y += this.verticalVelocity * dt;
-
-      if (this.taxi.position.y <= groundHeight) {
-        const impactSpeed = Math.abs(this.verticalVelocity);
-        this.taxi.position.y = groundHeight;
-
-        if (impactSpeed > 1) {
-          this.suspensionVelocity -= Math.min(
-            impactSpeed * 0.12,
-            1.2
-          );
-
-          this.cargoSystem.velocityZ += Math.min(
-            impactSpeed * 0.08,
-            0.8
-          );
-
-          this.cargoSystem.applyStress(
-            impactSpeed * 2.0
-          );
-        }
-
-        this.verticalVelocity = 0;
-        this.grounded = true;
-      }
-    }
-
-    this.wasOnSpeedBump = onSpeedBump;
-    this.previousGroundHeight = groundHeight;
-
-    // Suspension spring.
-    const suspensionForce =
-      -this.suspensionOffset *
-      this.settings.suspensionStrength;
-
-    const dampingForce =
-      -this.suspensionVelocity *
-      this.settings.suspensionDamping;
-
-    this.suspensionVelocity +=
-      (suspensionForce + dampingForce) * dt;
-
-    this.suspensionOffset +=
-      this.suspensionVelocity * dt;
-
-    this.suspensionOffset = THREE.MathUtils.clamp(
-      this.suspensionOffset,
-      -this.settings.maxSuspensionMovement,
-      this.settings.maxSuspensionMovement
+  if (
+    insidePothole &&
+    !this.wasInPothole &&
+    this.grounded
+  ) {
+    const impact = THREE.MathUtils.clamp(
+      Math.abs(this.speed) / 20,
+      0.2,
+      1.5
     );
 
-    this.chassis.position.y = this.suspensionOffset;
+    // Suspension impact.
+    this.suspensionVelocity -= 1.5 * impact;
 
-    // Body pitch.
-    const accelerationChange =
-      (this.speed - this.previousSpeed) /
-      Math.max(dt, 0.001);
-
-    const targetPitch = THREE.MathUtils.clamp(
-      accelerationChange * 0.003,
-      -0.08,
-      0.08
+    this.bodyRoll = THREE.MathUtils.clamp(
+      potholeHit.dx * 0.08,
+      -0.15,
+      0.15
     );
 
-    this.chassis.rotation.x = THREE.MathUtils.lerp(
-      this.chassis.rotation.x,
-      targetPitch,
-      1 - Math.exp(-5 * dt)
-    );
+    // Cargo impact.
+    this.cargoSystem.velocityZ += impact * 0.4;
+    this.cargoSystem.velocityX += potholeHit.dx * 0.15;
 
-    // Cornering body roll.
-    const cornerSpeedRatio = THREE.MathUtils.clamp(
-      Math.abs(this.speed) /
-      this.settings.maxForwardSpeed,
-      0,
-      1
-    );
+    this.cargoSystem.applyStress(impact * 9);
 
-    const targetCornerRoll =
-      -steeringInput *
-      cornerSpeedRatio *
-      this.settings.cornerRollAmount;
+    // NEW: Potholes slow the taxi down.
+    // Once per entry, with more slowdown at higher speeds.
+    const hazardSpeed = Math.abs(this.speed);
 
-    this.cornerRoll = THREE.MathUtils.lerp(
-      this.cornerRoll,
-      targetCornerRoll,
-      1 - Math.exp(-5 * dt)
-    );
-
-    const totalRoll = this.bodyRoll + this.cornerRoll;
-
-    this.chassis.rotation.z = THREE.MathUtils.lerp(
-      this.chassis.rotation.z,
-      totalRoll,
-      1 - Math.exp(-8 * dt)
-    );
-
-    this.bodyRoll = THREE.MathUtils.lerp(
-      this.bodyRoll,
-      0,
-      1 - Math.exp(-4 * dt)
-    );
-
-    // Cargo.
-    this.cargoSystem.updateAttached(dt, {
-      speed: this.speed,
-      previousSpeed: this.previousSpeed,
-      steeringInput,
-      suspensionVelocity: this.suspensionVelocity,
-      lateralVelocity: this.lateralVelocity,
-      handbrake,
-      level: this.currentLevel
-    });
-
-    this.cargoSystem.updateDetached(dt);
-
-    this.previousSpeed = this.speed;
-
-    // Boundaries.
-    const oldX = this.taxi.position.x;
-    const oldZ = this.taxi.position.z;
-
-    this.taxi.position.x = THREE.MathUtils.clamp(
-      this.taxi.position.x,
-      this.bounds.minX,
-      this.bounds.maxX
-    );
-
-    this.taxi.position.z = THREE.MathUtils.clamp(
-      this.taxi.position.z,
-      this.bounds.minZ,
-      this.bounds.maxZ
-    );
-
-    if (
-      this.taxi.position.x !== oldX ||
-      this.taxi.position.z !== oldZ
-    ) {
-      this.lateralVelocity *= 0.25;
-    }
-
-    // Wheel steering. The array contains both the invisible fallback
-    // pivots and, once the GLB loads, visual wheel steering pivots.
-    for (const pivot of this.frontWheelPivots) {
-      pivot.rotation.y = THREE.MathUtils.lerp(
-        pivot.rotation.y,
-        this.steeringAngle,
-        1 - Math.exp(
-          -this.settings.wheelSteeringSmoothness * dt
-        )
+    if (hazardSpeed >= 4) {
+      const speedFactor = THREE.MathUtils.clamp(
+        hazardSpeed / 20,
+        0.5,
+        1.4
       );
-    }
 
-    // Wheel spin. GLB wheels use local Z as their axle; fallback
-    // procedural wheels use local X. Taxi.js marks the GLB pivots.
-    const wheelRotation =
-      this.speed * dt / this.settings.wheelRadius;
+      const speedLoss = THREE.MathUtils.clamp(
+        0.16 * speedFactor,
+        0,
+        0.35
+      );
 
-    for (const wheel of this.wheels) {
-      const axis = wheel.userData.spinAxis || 'x';
-      wheel.rotation[axis] -= wheelRotation;
+      this.speed *= 1 - speedLoss;
     }
   }
+
+  // Leaving a pothole can briefly launch the taxi.
+  if (
+    !insidePothole &&
+    this.wasInPothole &&
+    this.grounded &&
+    Math.abs(this.speed) > 8
+  ) {
+    this.grounded = false;
+
+    this.verticalVelocity = THREE.MathUtils.clamp(
+      Math.abs(this.speed) * 0.09,
+      0.7,
+      2.5
+    );
+
+    this.suspensionVelocity += 0.6;
+
+    this.cargoSystem.velocityZ -=
+      Math.abs(this.speed) * 0.02;
+  }
+
+  this.wasInPothole = insidePothole;
+
+  // --------------------------------------------------
+  // SPEED BUMPS
+  // --------------------------------------------------
+  const onSpeedBump =
+    this.isOnSpeedBump(
+      this.taxi.position.x,
+      this.taxi.position.z
+    ) ||
+    this.isOnLevelSpeedBump(
+      this.taxi.position.x,
+      this.taxi.position.z
+    );
+
+  // NEW: Apply slowdown once when entering a speed bump.
+  if (
+    onSpeedBump &&
+    !this.wasOnSpeedBump &&
+    this.grounded
+  ) {
+    const hazardSpeed = Math.abs(this.speed);
+
+    if (hazardSpeed >= 4) {
+      const speedFactor = THREE.MathUtils.clamp(
+        hazardSpeed / 20,
+        0.5,
+        1.4
+      );
+
+      const speedLoss = THREE.MathUtils.clamp(
+        0.10 * speedFactor,
+        0,
+        0.35
+      );
+
+      this.speed *= 1 - speedLoss;
+    }
+  }
+
+  const leavingSpeedBump =
+    this.wasOnSpeedBump && !onSpeedBump;
+
+  // --------------------------------------------------
+  // ROAD SUSPENSION
+  // --------------------------------------------------
+  if (
+    this.grounded &&
+    Math.abs(groundDifference) > 0.01
+  ) {
+    this.suspensionVelocity += groundDifference * 15;
+  }
+
+  // --------------------------------------------------
+  // GROUNDED PHYSICS
+  // --------------------------------------------------
+  if (this.grounded) {
+    if (groundHeight > this.taxi.position.y) {
+      this.taxi.position.y = groundHeight;
+    }
+
+    if (
+      leavingSpeedBump &&
+      Math.abs(this.speed) > 12
+    ) {
+      this.grounded = false;
+
+      this.verticalVelocity = Math.min(
+        Math.abs(this.speed) * 0.18,
+        6
+      );
+
+      this.cargoSystem.velocityZ -=
+        Math.abs(this.speed) * 0.025;
+
+      this.cargoSystem.applyStress(
+        THREE.MathUtils.clamp(
+          Math.abs(this.speed) * 0.55,
+          4,
+          17
+        )
+      );
+    } else {
+      this.taxi.position.y = groundHeight;
+    }
+  }
+
+  // --------------------------------------------------
+  // AIRBORNE PHYSICS
+  // --------------------------------------------------
+  if (!this.grounded) {
+    this.verticalVelocity += this.settings.gravity * dt;
+
+    this.taxi.position.y += this.verticalVelocity * dt;
+
+    if (this.taxi.position.y <= groundHeight) {
+      const impactSpeed = Math.abs(this.verticalVelocity);
+
+      this.taxi.position.y = groundHeight;
+
+      if (impactSpeed > 1) {
+        this.suspensionVelocity -= Math.min(
+          impactSpeed * 0.12,
+          1.2
+        );
+
+        this.cargoSystem.velocityZ += Math.min(
+          impactSpeed * 0.08,
+          0.8
+        );
+
+        this.cargoSystem.applyStress(
+          impactSpeed * 2.0
+        );
+      }
+
+      this.verticalVelocity = 0;
+      this.grounded = true;
+    }
+  }
+
+  this.wasOnSpeedBump = onSpeedBump;
+  this.previousGroundHeight = groundHeight;
+
+  // --------------------------------------------------
+  // SUSPENSION SPRING
+  // --------------------------------------------------
+  const suspensionForce =
+    -this.suspensionOffset *
+    this.settings.suspensionStrength;
+
+  const dampingForce =
+    -this.suspensionVelocity *
+    this.settings.suspensionDamping;
+
+  this.suspensionVelocity +=
+    (suspensionForce + dampingForce) * dt;
+
+  this.suspensionOffset +=
+    this.suspensionVelocity * dt;
+
+  this.suspensionOffset = THREE.MathUtils.clamp(
+    this.suspensionOffset,
+    -this.settings.maxSuspensionMovement,
+    this.settings.maxSuspensionMovement
+  );
+
+  this.chassis.position.y = this.suspensionOffset;
+
+  // --------------------------------------------------
+  // BODY PITCH
+  // --------------------------------------------------
+  const accelerationChange =
+    (this.speed - this.previousSpeed) /
+    Math.max(dt, 0.001);
+
+  const targetPitch = THREE.MathUtils.clamp(
+    accelerationChange * 0.003,
+    -0.08,
+    0.08
+  );
+
+  this.chassis.rotation.x = THREE.MathUtils.lerp(
+    this.chassis.rotation.x,
+    targetPitch,
+    1 - Math.exp(-5 * dt)
+  );
+
+  // --------------------------------------------------
+  // BODY ROLL
+  // --------------------------------------------------
+  const cornerSpeedRatio = THREE.MathUtils.clamp(
+    Math.abs(this.speed) / this.settings.maxForwardSpeed,
+    0,
+    1
+  );
+
+  const targetCornerRoll =
+    -steeringInput *
+    cornerSpeedRatio *
+    this.settings.cornerRollAmount;
+
+  this.cornerRoll = THREE.MathUtils.lerp(
+    this.cornerRoll,
+    targetCornerRoll,
+    1 - Math.exp(-5 * dt)
+  );
+
+  const totalRoll = this.bodyRoll + this.cornerRoll;
+
+  this.chassis.rotation.z = THREE.MathUtils.lerp(
+    this.chassis.rotation.z,
+    totalRoll,
+    1 - Math.exp(-8 * dt)
+  );
+
+  this.bodyRoll = THREE.MathUtils.lerp(
+    this.bodyRoll,
+    0,
+    1 - Math.exp(-4 * dt)
+  );
+
+  // --------------------------------------------------
+  // CARGO PHYSICS
+  // --------------------------------------------------
+  this.cargoSystem.updateAttached(dt, {
+    speed: this.speed,
+    previousSpeed: this.previousSpeed,
+    steeringInput,
+    suspensionVelocity: this.suspensionVelocity,
+    lateralVelocity: this.lateralVelocity,
+    handbrake,
+    level: this.currentLevel
+  });
+
+  this.cargoSystem.updateDetached(dt);
+
+  this.previousSpeed = this.speed;
+
+  // --------------------------------------------------
+  // WORLD BOUNDARIES
+  // --------------------------------------------------
+  const oldX = this.taxi.position.x;
+  const oldZ = this.taxi.position.z;
+
+  this.taxi.position.x = THREE.MathUtils.clamp(
+    this.taxi.position.x,
+    this.bounds.minX,
+    this.bounds.maxX
+  );
+
+  this.taxi.position.z = THREE.MathUtils.clamp(
+    this.taxi.position.z,
+    this.bounds.minZ,
+    this.bounds.maxZ
+  );
+
+  if (
+    this.taxi.position.x !== oldX ||
+    this.taxi.position.z !== oldZ
+  ) {
+    this.lateralVelocity *= 0.25;
+  }
+
+  // --------------------------------------------------
+  // FRONT WHEEL STEERING
+  // --------------------------------------------------
+  for (const pivot of this.frontWheelPivots) {
+    pivot.rotation.y = THREE.MathUtils.lerp(
+      pivot.rotation.y,
+      this.steeringAngle,
+      1 - Math.exp(
+        -this.settings.wheelSteeringSmoothness * dt
+      )
+    );
+  }
+
+  // --------------------------------------------------
+  // WHEEL ROTATION
+  // --------------------------------------------------
+  const wheelRotation =
+    this.speed * dt / this.settings.wheelRadius;
+
+  for (const wheel of this.wheels) {
+    const axis = wheel.userData.spinAxis || 'x';
+    wheel.rotation[axis] -= wheelRotation;
+  }
+}
 }
