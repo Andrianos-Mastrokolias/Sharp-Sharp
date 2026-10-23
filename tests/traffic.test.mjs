@@ -126,7 +126,7 @@ test('createTrafficCar: 4 variants, <400 tris, ground origin, faces -Z, emissive
     const mats = [].concat(material);
     assert.ok(mats.length >= 2);
     const emissive = mats.filter((m) => m.emissive && m.emissive.getHex() !== 0);
-    assert.equal(emissive.length, 1, `${variant}: one emissive (tail light) material`);
+    assert.equal(emissive.length, 2, `${variant}: two emissive materials (headlights and taillights)`);
     mats.forEach((m) => materials.add(m));
 
     // Tail light triangles are at the back (+z), none at the front
@@ -140,7 +140,7 @@ test('createTrafficCar: 4 variants, <400 tris, ground origin, faces -Z, emissive
 
   // The tail material is shared by all four variants, never duplicated per colour
   const tails = [...materials].filter((m) => m.emissive.getHex() !== 0);
-  assert.equal(tails.length, 1, 'one shared tail material');
+  assert.equal(tails.length, 2, 'two shared tail material');
   // one material per colour
   const colours = [...materials].filter((m) => m.emissive.getHex() === 0).map((m) => m.color.getHex());
   assert.equal(new Set(colours).size, colours.length, 'one material per colour');
