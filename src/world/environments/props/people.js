@@ -390,6 +390,136 @@ function scaleSwingPivots(
 
 
 // ==================================================
+// THE WALK ON THE CPU
+// --------------------------------------------------
+// The shader below places every person from aStart, aDir, aMotion
+// and uTime alone, so the CPU does not know where anyone is. This is
+// the same path as plain numbers, for the hit test (life.js). KEEP IT
+// IN STEP WITH THE SHADER: tests/pedestrians.test.mjs runs the shader's
+// own GLSL (translated line by line) beside this and compares them.
+//
+//   out.s     distance along the path from the start (0..length)
+//   out.sign  +1 walking or standing at the far end, -1 on the way
+//             back or standing at the start after a return
+// ==================================================
+export function personPath(
+  out,
+  speed,
+  length,
+  offset,
+  t
+) {
+
+  out.s =
+    0;
+
+  out.sign =
+    1;
+
+
+  if (
+    speed <= 0.001
+  ) {
+
+    return out;
+  }
+
+
+  const walk =
+    length /
+    Math.max(speed, 0.001);
+
+  const cycle =
+    2 *
+    (walk + PERSON_PAUSE);
+
+  // GLSL mod(): x - y * floor(x / y), never negative
+  let pT =
+    (t + offset) %
+    cycle;
+
+  if (
+    pT < 0
+  ) {
+
+    pT +=
+      cycle;
+  }
+
+
+  if (
+    pT < walk
+  ) {
+
+    out.s =
+      speed * pT;
+  }
+
+  else if (
+    pT < walk + PERSON_PAUSE
+  ) {
+
+    out.s =
+      length;
+  }
+
+  else if (
+    pT < 2 * walk + PERSON_PAUSE
+  ) {
+
+    out.s =
+      length -
+      speed * (pT - walk - PERSON_PAUSE);
+
+    out.sign =
+      -1;
+  }
+
+  else {
+
+    out.sign =
+      -1;
+  }
+
+
+  return out;
+}
+
+
+// World x, z of a person at time t (out.x, out.z, out.sign)
+export function personPosition(
+  out,
+  startX,
+  startZ,
+  dirX,
+  dirZ,
+  speed,
+  length,
+  offset,
+  t
+) {
+
+  personPath(
+    out,
+    speed,
+    length,
+    offset,
+    t
+  );
+
+  out.x =
+    startX +
+    dirX * out.s;
+
+  out.z =
+    startZ +
+    dirZ * out.s;
+
+  return out;
+}
+
+
+// ==================================================
 // MATERIAL (the walk, in the vertex shader)
 // ==================================================
 

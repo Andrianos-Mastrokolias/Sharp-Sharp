@@ -855,7 +855,9 @@ const levelManager = new LevelManager({
       'Haibo! The pursuer caught you.',
       'haibo!'
     );
-  }
+  },
+
+  onPedestrianHit: () => audio.cue('pedestrianHit')
 });
 
 // ============================================================

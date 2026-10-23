@@ -116,7 +116,7 @@ export function countEnvironment(env, camera, focus = null) {
   );
 
   env.group.traverse((o) => {
-    if (!o.geometry) return;
+    if (!o.geometry || !o.visible) return;               // the renderer skips what is hidden (the dust puffs while idle)
     objects++;
 
     if (o.frustumCulled && !frustum.intersectsObject(o)) return;

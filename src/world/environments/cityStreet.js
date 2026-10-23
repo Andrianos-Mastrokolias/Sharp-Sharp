@@ -17,6 +17,7 @@ import {
 
 import {
   createLife,
+  createPedestrianField,
   LIFE_DENSITY
 } from './life.js';
 
@@ -1448,10 +1449,21 @@ for (
 }
 
 
+// Everyone the street's life puts on the sidewalks, known to the hit test
+// (LevelManager hands it the taxi each frame); the dust puffs of a hit
+// are drawn from it
+const pedestrians =
+  createPedestrianField();
+
+group.add(
+  pedestrians.object
+);
+
 createLife({
   level: 1,
   layout: lifeLayout,
-  group
+  group,
+  field: pedestrians
 });
 
 
@@ -1477,6 +1489,7 @@ if (
     level: 1,
     layout: lifeLayoutAdded,
     group,
+    field: pedestrians,
     density: {
       ...LIFE_DENSITY[1],
       seed:
@@ -1596,7 +1609,12 @@ return {
 
   collidables,
 
+  // The people, for pedestrian hits (see life.js)
+  pedestrians,
+
   dispose() {
+
+    pedestrians.dispose();
 
     disposeObjectTree(
       group,

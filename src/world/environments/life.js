@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import {
   createRandom,
   createPerson,
+  personPosition,
   PERSON_VARIANT_COUNT
 } from './props.js';
 
@@ -59,6 +60,817 @@ const CLOTHING = [
 
 
 // Per-level density. A level without an entry gets no people.
+// ==================================================
+// THE CLOCK
+// --------------------------------------------------
+// The walk is a function of uTime, and uTime is this, written by each
+// chunk mesh's onBeforeRender. The hit test reads the same clock, so
+// the CPU and the GPU agree on where everyone is (to a frame).
+// ==================================================
+export const pedestrianClock =
+  () =>
+    performance.now() *
+    0.001;
+
+
+// ==================================================
+// PEDESTRIAN HITS
+// --------------------------------------------------
+// The people are animated entirely in a vertex shader, so a hit
+// needs the CPU copy of the path (personPosition in props/people.js).
+// A PedestrianField knows every person of the level (read straight
+// from the instance attributes, so it can never disagree with what is
+// drawn) and, each frame, tests the few near the taxi:
+//
+//   const field = createPedestrianField();
+//   group.add(field.object);                  // the dust puffs
+//   createLife({ ..., field });               // adds the chunk meshes
+//   field.onHit = (x, z, id) => { ... };
+//   field.update(dt, taxi, speed);            // every frame
+//   field.reset();                            // everyone back, puffs gone
+//
+// A hit person is knocked aside: scale 0 (it vanishes from the shader)
+// and a puff of dust. Rules: the taxi must be doing HIT_MIN_SPEED or
+// more; a person is hit once until reset(); after a hit nobody can be
+// hit for HIT_COOLDOWN seconds (a contact during it is not consumed).
+//
+// For people added later (the Level 3 / Level 1 runners):
+//   addMesh(mesh)          -> { first, count }  ids of an InstancedMesh with
+//                             aStart / aDir / aMotion, built any time
+//   setOffset(id, offset)  change a person's time offset (aMotion.z)
+//   restart(id, now)       start its path from the beginning at now
+//   setActive(id, on)      hide and ignore a person, or bring it back
+//   positionOf(id, out, now)
+// ==================================================
+
+export const PERSON_RADIUS = 0.35;     // m, shoulder to shoulder about 0.5 m
+export const HIT_MIN_SPEED = 1;        // m/s
+export const HIT_COOLDOWN = 0.5;       // s
+const HIT_MAX_TAXI_Y = 1.5;            // a taxi up on a flyover hits nobody
+const BUCKET = 10;                     // m of z per search bucket
+const QUERY_HALF = 3.5;                // taxi box half diagonal 2.67 + radius, rounded up
+
+
+// Puffs of dust where a person was hit: one Points object, one
+// preallocated pool, nothing created while playing
+function createDustPuffs() {
+
+  const PUFFS = 8;
+  const PER_PUFF = 12;
+  const COUNT = PUFFS * PER_PUFF;
+
+  const positions =
+    new Float32Array(
+      COUNT * 3
+    );
+
+  const velocities =
+    new Float32Array(
+      COUNT * 3
+    );
+
+  const life =
+    new Float32Array(
+      COUNT
+    );
+
+  for (
+    let i = 0;
+    i < COUNT;
+    i++
+  ) {
+
+    positions[i * 3 + 1] =
+      -999;
+  }
+
+  const geometry =
+    new THREE.BufferGeometry();
+
+  geometry.setAttribute(
+    'position',
+    new THREE.BufferAttribute(
+      positions,
+      3
+    )
+  );
+
+  const material =
+    new THREE.PointsMaterial({
+      color: 0xb89d7c,
+      size: 0.7,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      sizeAttenuation: true
+    });
+
+  const points =
+    new THREE.Points(
+      geometry,
+      material
+    );
+
+  points.name =
+    'pedestrian-dust';
+
+  points.frustumCulled =
+    false;
+
+  // drawn only while a puff is alive
+  points.visible =
+    false;
+
+  let next =
+    0;
+
+  let alive =
+    0;
+
+  const hide =
+    () => {
+
+      for (
+        let i = 0;
+        i < COUNT;
+        i++
+      ) {
+
+        life[i] =
+          0;
+
+        positions[i * 3 + 1] =
+          -999;
+      }
+
+      alive =
+        0;
+
+      points.visible =
+        false;
+
+      geometry.attributes.position.needsUpdate =
+        true;
+    };
+
+  return {
+
+    points,
+
+    get alive() {
+      return alive;
+    },
+
+    spawn(x, y, z) {
+
+      const base =
+        next * PER_PUFF;
+
+      next =
+        (next + 1) % PUFFS;
+
+      for (
+        let j = 0;
+        j < PER_PUFF;
+        j++
+      ) {
+
+        const i =
+          base + j;
+
+        const angle =
+          Math.random() *
+          Math.PI *
+          2;
+
+        const speed =
+          0.8 +
+          Math.random() * 1.6;
+
+        positions[i * 3] =
+          x;
+
+        positions[i * 3 + 1] =
+          y;
+
+        positions[i * 3 + 2] =
+          z;
+
+        velocities[i * 3] =
+          Math.cos(angle) * speed;
+
+        velocities[i * 3 + 1] =
+          0.6 +
+          Math.random() * 1.2;
+
+        velocities[i * 3 + 2] =
+          Math.sin(angle) * speed;
+
+        life[i] =
+          0.5 +
+          Math.random() * 0.5;
+      }
+
+      points.visible =
+        true;
+
+      geometry.attributes.position.needsUpdate =
+        true;
+    },
+
+    update(dt) {
+
+      if (
+        !points.visible
+      ) {
+
+        return;
+      }
+
+      alive =
+        0;
+
+      const drag =
+        Math.pow(
+          0.2,
+          dt
+        );
+
+      for (
+        let i = 0;
+        i < COUNT;
+        i++
+      ) {
+
+        if (
+          life[i] <= 0
+        ) {
+
+          continue;
+        }
+
+        life[i] -=
+          dt;
+
+        if (
+          life[i] <= 0
+        ) {
+
+          positions[i * 3 + 1] =
+            -999;
+
+          continue;
+        }
+
+        alive++;
+
+        positions[i * 3] +=
+          velocities[i * 3] * dt;
+
+        positions[i * 3 + 1] +=
+          velocities[i * 3 + 1] * dt;
+
+        positions[i * 3 + 2] +=
+          velocities[i * 3 + 2] * dt;
+
+        velocities[i * 3] *=
+          drag;
+
+        velocities[i * 3 + 1] *=
+          drag;
+
+        velocities[i * 3 + 2] *=
+          drag;
+      }
+
+      if (
+        alive === 0
+      ) {
+
+        points.visible =
+          false;
+      }
+
+      geometry.attributes.position.needsUpdate =
+        true;
+    },
+
+    clear: hide
+  };
+}
+
+
+export function createPedestrianField({
+  clock = pedestrianClock
+} = {}) {
+
+  // Per person (id = position in these lists)
+  const meshes =
+    [];
+
+  const slots =
+    [];
+
+  const baseScale =
+    [];
+
+  const hit =
+    [];
+
+  const active =
+    [];
+
+  const meshList =
+    [];
+
+  // z bucket (BUCKET m) -> ids whose whole path crosses it
+  const buckets =
+    new Map();
+
+  const scratch =
+    {
+      x: 0,
+      z: 0,
+      sign: 1
+    };
+
+  const puffs =
+    createDustPuffs();
+
+  let sinceHit =
+    Infinity;
+
+  let hitCount =
+    0;
+
+
+  const read =
+    (id) => meshes[id].geometry.attributes;
+
+
+  const field = {
+
+    // () => seconds: the clock the shader's uTime comes from
+    clock,
+
+    // (x, z, id) => void, called once per hit, after the person is gone
+    onHit: null,
+
+    // The taxi's collision box, half sizes (m); LevelManager sets them
+    // from vehicle.localTaxiCollisionBox
+    halfX: 1.35,
+    halfZ: 2.3,
+
+    radius: PERSON_RADIUS,
+
+    // The dust puffs: add this to the environment's group
+    object: puffs.points,
+
+    get count() {
+      return meshes.length;
+    },
+
+    get hits() {
+      return hitCount;
+    },
+
+    get puffsAlive() {
+      return puffs.alive;
+    },
+
+    isHit: (id) => hit[id] === true,
+
+    // The person's walking speed (0: standing), from the instance data
+    speedOf: (id) => read(id).aMotion.array[slots[id] * 4],
+
+
+    // Adds every instance of an InstancedMesh that has the aStart / aDir /
+    // aMotion attributes. Safe at any time. -> { first, count }
+    addMesh(mesh) {
+
+      const { aStart, aDir, aMotion } =
+        mesh.geometry.attributes;
+
+      const first =
+        meshes.length;
+
+      meshList.push(
+        mesh
+      );
+
+      for (
+        let i = 0;
+        i < mesh.count;
+        i++
+      ) {
+
+        const id =
+          meshes.length;
+
+        meshes.push(
+          mesh
+        );
+
+        slots.push(
+          i
+        );
+
+        baseScale.push(
+          aMotion.array[i * 4 + 3]
+        );
+
+        hit.push(
+          false
+        );
+
+        active.push(
+          true
+        );
+
+        // every bucket the path crosses (a taxi within reach of the person
+        // searches the buckets around its own z, which include one of these)
+        const z0 =
+          aStart.array[i * 3 + 2];
+
+        const z1 =
+          z0 +
+          aDir.array[i * 2 + 1] *
+          (aMotion.array[i * 4] > 0.001
+            ? aMotion.array[i * 4 + 1]
+            : 0);
+
+        const from =
+          Math.floor(
+            Math.min(z0, z1) /
+            BUCKET
+          );
+
+        const to =
+          Math.floor(
+            Math.max(z0, z1) /
+            BUCKET
+          );
+
+        for (
+          let b = from;
+          b <= to;
+          b++
+        ) {
+
+          if (
+            !buckets.has(
+              b
+            )
+          ) {
+
+            buckets.set(
+              b,
+              []
+            );
+          }
+
+          buckets.get(
+            b
+          ).push(
+            id
+          );
+        }
+      }
+
+      return {
+        first,
+        count: mesh.count
+      };
+    },
+
+
+    positionOf(
+      id,
+      out,
+      now = clock()
+    ) {
+
+      const { aStart, aDir, aMotion } =
+        read(id);
+
+      const i =
+        slots[id];
+
+      return personPosition(
+        out,
+        aStart.array[i * 3],
+        aStart.array[i * 3 + 2],
+        aDir.array[i * 2],
+        aDir.array[i * 2 + 1],
+        aMotion.array[i * 4],
+        aMotion.array[i * 4 + 1],
+        aMotion.array[i * 4 + 2],
+        now
+      );
+    },
+
+
+    // Changes a person's time offset (aMotion.z): where it is in its cycle
+    setOffset(id, offset) {
+
+      const { aMotion } =
+        read(id);
+
+      aMotion.array[slots[id] * 4 + 2] =
+        offset;
+
+      aMotion.needsUpdate =
+        true;
+    },
+
+
+    // Starts a person's path from its start at time now (the offset
+    // that makes its cycle begin then)
+    restart(
+      id,
+      now = clock()
+    ) {
+
+      const { aMotion } =
+        read(id);
+
+      const i =
+        slots[id];
+
+      const speed =
+        aMotion.array[i * 4];
+
+      const cycle =
+        2 *
+        (aMotion.array[i * 4 + 1] /
+          Math.max(speed, 0.001) +
+          3);
+
+      field.setOffset(
+        id,
+        (((-now) % cycle) + cycle) % cycle
+      );
+    },
+
+
+    // Hides and ignores a person (a runner waiting for its trigger), or
+    // brings it back. A person that has been hit stays gone until reset().
+    setActive(id, on) {
+
+      active[id] =
+        on;
+
+      const { aMotion } =
+        read(id);
+
+      aMotion.array[slots[id] * 4 + 3] =
+        on && !hit[id]
+          ? baseScale[id]
+          : 0;
+
+      aMotion.needsUpdate =
+        true;
+    },
+
+
+    // Per frame, no allocation. Returns true on the frame a person is hit.
+    update(
+      dt,
+      taxi,
+      speed,
+      now = clock()
+    ) {
+
+      puffs.update(
+        dt
+      );
+
+      sinceHit +=
+        dt;
+
+      // after a hit nobody can be hit for a while: a contact now is not
+      // consumed, the person is still there when it ends
+      if (
+        sinceHit < HIT_COOLDOWN - 1e-9 ||
+        Math.abs(speed) < HIT_MIN_SPEED ||
+        taxi.position.y > HIT_MAX_TAXI_Y
+      ) {
+
+        return false;
+      }
+
+      const tx =
+        taxi.position.x;
+
+      const tz =
+        taxi.position.z;
+
+      const yaw =
+        taxi.rotation.y;
+
+      const cos =
+        Math.cos(yaw);
+
+      const sin =
+        Math.sin(yaw);
+
+      const reachX =
+        field.halfX +
+        field.radius;
+
+      const reachZ =
+        field.halfZ +
+        field.radius;
+
+      const last =
+        Math.floor(
+          (tz + QUERY_HALF) /
+          BUCKET
+        );
+
+      for (
+        let b = Math.floor((tz - QUERY_HALF) / BUCKET);
+        b <= last;
+        b++
+      ) {
+
+        const ids =
+          buckets.get(
+            b
+          );
+
+        if (
+          ids === undefined
+        ) {
+
+          continue;
+        }
+
+        for (
+          let k = 0;
+          k < ids.length;
+          k++
+        ) {
+
+          const id =
+            ids[k];
+
+          if (
+            hit[id] ||
+            !active[id]
+          ) {
+
+            continue;
+          }
+
+          field.positionOf(
+            id,
+            scratch,
+            now
+          );
+
+          const dx =
+            scratch.x - tx;
+
+          const dz =
+            scratch.z - tz;
+
+          // into the taxi's own frame (its forward is -z at yaw 0)
+          const lx =
+            dx * cos -
+            dz * sin;
+
+          const lz =
+            dx * sin +
+            dz * cos;
+
+          if (
+            Math.abs(lx) < reachX &&
+            Math.abs(lz) < reachZ
+          ) {
+
+            field.knockDown(
+              id
+            );
+
+            return true;
+          }
+        }
+      }
+
+      return false;
+    },
+
+
+    // The person at scratch (just positioned) is gone: scale 0, a puff,
+    // the cooldown, onHit
+    knockDown(id) {
+
+      const { aStart, aMotion } =
+        read(id);
+
+      const i =
+        slots[id];
+
+      hit[id] =
+        true;
+
+      aMotion.array[i * 4 + 3] =
+        0;
+
+      aMotion.needsUpdate =
+        true;
+
+      puffs.spawn(
+        scratch.x,
+        aStart.array[i * 3 + 1] + 0.5,
+        scratch.z
+      );
+
+      sinceHit =
+        0;
+
+      hitCount++;
+
+      field.onHit?.(
+        scratch.x,
+        scratch.z,
+        id
+      );
+    },
+
+
+    // Everyone back (their scale), no puffs, no cooldown, no hit counted
+    reset() {
+
+      for (
+        let id = 0;
+        id < meshes.length;
+        id++
+      ) {
+
+        hit[id] =
+          false;
+
+        active[id] =
+          true;
+
+        read(id).aMotion.array[slots[id] * 4 + 3] =
+          baseScale[id];
+      }
+
+      for (
+        const mesh
+        of meshList
+      ) {
+
+        mesh.geometry.attributes.aMotion.needsUpdate =
+          true;
+      }
+
+      sinceHit =
+        Infinity;
+
+      hitCount =
+        0;
+
+      puffs.clear();
+    },
+
+
+    dispose() {
+
+      meshes.length =
+        0;
+
+      slots.length =
+        0;
+
+      baseScale.length =
+        0;
+
+      hit.length =
+        0;
+
+      active.length =
+        0;
+
+      meshList.length =
+        0;
+
+      buckets.clear();
+
+      field.onHit =
+        null;
+
+      puffs.clear();
+    }
+  };
+
+  return field;
+}
+
+
 export const LIFE_DENSITY = {
 
   1: {
@@ -117,7 +929,10 @@ export function createLife({
   level,
   layout,
   group,
-  density = LIFE_DENSITY[level]
+  density = LIFE_DENSITY[level],
+
+  // a PedestrianField to register the people with, for the hit test
+  field = null
 }) {
 
   const stats = {
@@ -712,13 +1527,16 @@ export function createLife({
         () => {
 
           uTime.value =
-            performance.now() *
-            0.001;
+            pedestrianClock();
         };
     }
 
 
     group.add(
+      mesh
+    );
+
+    field?.addMesh(
       mesh
     );
 
