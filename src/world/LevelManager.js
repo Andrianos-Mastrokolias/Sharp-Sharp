@@ -30,6 +30,16 @@ const L1_ROAD = ROADS[1];
 const L2_ROAD = ROADS[2];
 const L3_ROAD = ROADS[3];
 
+// What running over a pedestrian does to the taxi (vehicle.applyHit): it
+// loses 30% of its speed, the cargo takes a little stress and the suspension a
+// kick. Nothing happens to the police. On Level 1 it also costs 50 points
+// (registerPedestrianHit, L1_RACE.points.pedestrian).
+const PEDESTRIAN_HIT = {
+  speedLoss: 0.3,
+  stress: 2,
+  kick: 0.3
+};
+
 // A raised section only lifts the taxi if it is already near the
 // deck surface (or at the ramp toe), so driving on the ground
 // underneath does not snap it up onto the deck. The pursuer
@@ -576,7 +586,8 @@ export class LevelManager {
     getHeadlightsEnabled = null,
     onDelivered = null,
     onCaptured = null,
-    onScore = null
+    onScore = null,
+    onPedestrianHit = null
   }) {
 
     // The array main.js hands to VehicleController for its ground
@@ -608,6 +619,10 @@ export class LevelManager {
     // ({ delta, reason: 'beaten' | 'firstOut' | 'pedestrian', points })
     // for the HUD's pop-ups
     this.onScore = onScore;
+
+    // ({ x, z }) when the taxi has knocked a pedestrian down: the place for
+    // the sound cue (the score pop-up comes through onScore)
+    this.onPedestrianHit = onPedestrianHit;
 
     this.levelId = null;
     this.config = null;
@@ -835,7 +850,23 @@ if (
 
     this.resetRace();
 
+    // everyone knocked down is back on their feet
+    this.environment?.pedestrians?.reset();
+
     this.setZoneDelivered(false);
+  }
+
+
+  // The taxi has knocked a pedestrian down (the environment's pedestrian
+  // field calls this once per hit): the speed loss, the points (Level 1)
+  // and the callback. Not the police's business.
+  pedestrianHit(x, z) {
+
+    this.vehicle.applyHit?.(PEDESTRIAN_HIT);
+
+    this.registerPedestrianHit();
+
+    this.onPedestrianHit?.({ x, z });
   }
 
 
@@ -1062,6 +1093,13 @@ if (
     this.traffic.update(dt);
 
     this.updateRace(dt);
+
+    // Levels without pedestrians (2 and 3 so far) have no field
+    this.environment?.pedestrians?.update(
+      dt,
+      this.taxi,
+      this.vehicle.getSpeed()
+    );
 
     if (this.isInDeliveryZone()) {
       this.deliver();
@@ -1537,6 +1575,21 @@ if (
 
     for (const mesh of this.environment.collidables) {
       this.registerCollidable(mesh);
+    }
+
+    // The pedestrian hit test, if the level has people on foot
+    const pedestrians = this.environment.pedestrians;
+
+    if (pedestrians) {
+
+      const box = this.vehicle.localTaxiCollisionBox;
+
+      if (box) {
+        pedestrians.halfX = (box.max.x - box.min.x) / 2;
+        pedestrians.halfZ = (box.max.z - box.min.z) / 2;
+      }
+
+      pedestrians.onHit = (x, z) => this.pedestrianHit(x, z);
     }
   }
 

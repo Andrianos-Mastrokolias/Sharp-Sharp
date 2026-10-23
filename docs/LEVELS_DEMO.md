@@ -42,6 +42,13 @@ slower.
    continuous contact (fails the level).
 8. Reach the zone. Traffic inside 18 m of the destination goes ghost so it can
    never block the delivery.
+9. **Pedestrians can be hit.** Drive onto a sidewalk or a side street and run
+   into someone at 1 m/s or more: they are knocked aside in a puff of dust, the
+   taxi loses 30% of its speed (`vehicle.applyHit`), the cargo takes a little
+   stress, and the race score loses 50 points. The police do not care. Each
+   person can be hit once per load, there is a 0.5 s cooldown between hits, and
+   a retry puts everyone back. The people are animated in a shader, so
+   `life.js` keeps a CPU copy of their paths for the hit test.
 
 **Say:** the world is data (a level config), traffic, rivals and pursuit are
 separate systems that read it, and all are deterministic so they can be tested.
@@ -93,11 +100,12 @@ game: stealth instead of a straight chase.
 - `src/world/LevelManager.js`: `LEVELS` configs (spawn, route, destination, hazards, pursuit, traffic, elevated sections); level load/reset.
 - `src/world/roads.js`: per-level road length and bounds shared by the world, traffic and vehicle limits.
 - `src/world/environments/cityStreet.js`, `motorway.js`, `township.js`: scenery for Levels 1, 2 and 3.
+- `src/world/environments/life.js` and `props/people.js`: the pedestrians (shader walk, `personPosition` CPU copy, `createPedestrianField` hit test and dust).
 - `src/world/TrafficSystem.js`: seeded lanes, lane hold, wrap hold, zone ghosting, no per-frame allocation.
 - `src/world/RivalTaxis.js`: the rival taxis (Level 1 rank race); `LevelManager` owns the countdown, points, releasing and the police head start.
 - `src/world/PursuitSystem.js`: chase, patrol/reaction, flyover keep-out, capture and catch lunge.
 - `src/main.js`: `onCaptured` hooks capture to the fail screen; the vehicle is given no keys while `levelManager.inputLocked` (the countdown).
-- `tests/traffic.test.mjs`, `tests/pursuit.test.mjs`, `tests/rank-race.test.mjs`, `tests/environments.test.mjs`, `tests/budget.mjs`: what each guarantees.
+- `tests/traffic.test.mjs`, `tests/pursuit.test.mjs`, `tests/rank-race.test.mjs`, `tests/pedestrians.test.mjs`, `tests/environments.test.mjs`, `tests/budget.mjs`: what each guarantees.
 
 ## Performance (from `tests/budget.mjs`)
 
