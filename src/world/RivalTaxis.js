@@ -123,7 +123,6 @@ export class RivalTaxiSystem {
         targetX: initialX,
         laneDirection: i % 2 ? 1 : -1,
         nextLaneChange: 1.2 + (i % 4) * 0.3,
-        seenBehind: false,
         beaten: false,
         released: false
       };
@@ -210,132 +209,130 @@ export class RivalTaxiSystem {
     return false;
   }
 
-  update(dt, player = null) {
-    if (!this.launched || !this.road || !(dt > 0)) return;
+ 
+update(dt, player = null) {
+  if (!this.launched || !this.road || !(dt > 0)) return;
 
-    // Cap large frame jumps to prevent tunnelling.
-    dt = Math.min(dt, 1 / 30);
-    this.time += dt;
+  // Cap large frame jumps to prevent tunnelling.
+  dt = Math.min(dt, 1 / 30);
+  this.time += dt;
 
-    for (let i = 0; i < this.rivals.length; i++) {
-      const car = this.rivals[i];
-      if (car.released) continue;
+  for (let i = 0; i < this.rivals.length; i++) {
+    const car = this.rivals[i];
+    if (car.released) continue;
 
-      const oldX = car.x;
-      const oldZ = car.z;
+    const oldX = car.x;
+    const oldZ = car.z;
 
-      let desiredSpeed = car.topSpeed;
-      let targetX = car.initialX;
+    let desiredSpeed = car.topSpeed;
+    let targetX = car.initialX;
 
-      switch (car.personality) {
-        case 'weaver':
-          if (this.time >= car.nextLaneChange) {
-            car.laneDirection *= -1;
-            car.nextLaneChange =
-              this.time + 1.2 + (i % 4) * 0.25;
-          }
-
-          targetX =
-            car.initialX + car.laneDirection * 2.7;
-          break;
-
-        case 'brake-checker':
-          if (this.someoneBehind(car, player)) {
-            desiredSpeed = Math.min(7, car.topSpeed);
-          }
-          break;
-
-        case 'cutter':
-          if (
-            player &&
-            Math.abs(player.z - car.z) < 11 &&
-            Math.abs(player.x - car.x) < 5
-          ) {
-            const side = car.x < player.x ? -1 : 1;
-            targetX = player.x + side * 2.8;
-          }
-          break;
-
-        case 'racer':
-        default:
-          break;
-      }
-
-      const edge = this.road.halfWidth - car.width / 2;
-      targetX = clamp(targetX, -edge, edge);
-
-      const rate =
-        desiredSpeed < car.speed ? BRAKING : ACCELERATION;
-
-      car.speed += clamp(
-        desiredSpeed - car.speed,
-        -rate * dt,
-        rate * dt
-      );
-
-      const stepX = clamp(
-        targetX - car.x,
-        -LANE_CHANGE_SPEED * dt,
-        LANE_CHANGE_SPEED * dt
-      );
-
-      let nextX = clamp(car.x + stepX, -edge, edge);
-      let nextZ = clamp(
-        car.z + this.direction * car.speed * dt,
-        this.road.zMin + car.length / 2,
-        this.road.zMax - car.length / 2
-      );
-
-      // Try the intended movement, then forward-only or
-      // sideways-only movement before stopping altogether.
-      if (this.blocked(car, nextX, nextZ, player)) {
-        if (!this.blocked(car, car.x, nextZ, player)) {
-          nextX = car.x;
-        } else if (!this.blocked(car, nextX, car.z, player)) {
-          nextZ = car.z;
-        } else {
-          nextX = car.x;
-          nextZ = car.z;
-        }
-      }
-
-      car.x = nextX;
-      car.z = nextZ;
-
-      car.mesh.position.set(car.x, 0, car.z);
-
-      car.mesh.userData.velocity.set(
-        (car.x - oldX) / dt,
-        0,
-        (car.z - oldZ) / dt
-      );
-
-      // Keep physical speed consistent if traffic blocks us.
-      car.speed = Math.max(
-        0,
-        this.direction * (car.z - oldZ) / dt
-      );
-
-      // Count overtaking only after the player has actually
-      // been behind this rival and then moved fully ahead.
-      if (player && !car.beaten) {
-        const relative =
-          this.direction * (player.z - car.z);
-
-        if (relative < -3) {
-          car.seenBehind = true;
+    switch (car.personality) {
+      case 'weaver':
+        if (this.time >= car.nextLaneChange) {
+          car.laneDirection *= -1;
+          car.nextLaneChange =
+            this.time + 1.2 + (i % 4) * 0.25;
         }
 
+        targetX =
+          car.initialX + car.laneDirection * 2.7;
+        break;
+
+      case 'brake-checker':
+        if (this.someoneBehind(car, player)) {
+          desiredSpeed = Math.min(7, car.topSpeed);
+        }
+        break;
+
+      case 'cutter':
         if (
-          car.seenBehind &&
-          relative > (car.length + 4.6) / 2
+          player &&
+          Math.abs(player.z - car.z) < 11 &&
+          Math.abs(player.x - car.x) < 5
         ) {
-          car.beaten = true;
-          this.onBeaten?.(car.index);
+          const side = car.x < player.x ? -1 : 1;
+          targetX = player.x + side * 2.8;
         }
+        break;
+
+      case 'racer':
+      default:
+        break;
+    }
+
+    const edge = this.road.halfWidth - car.width / 2;
+    targetX = clamp(targetX, -edge, edge);
+
+    const rate =
+      desiredSpeed < car.speed ? BRAKING : ACCELERATION;
+
+    car.speed += clamp(
+      desiredSpeed - car.speed,
+      -rate * dt,
+      rate * dt
+    );
+
+    const stepX = clamp(
+      targetX - car.x,
+      -LANE_CHANGE_SPEED * dt,
+      LANE_CHANGE_SPEED * dt
+    );
+
+    let nextX = clamp(car.x + stepX, -edge, edge);
+    let nextZ = clamp(
+      car.z + this.direction * car.speed * dt,
+      this.road.zMin + car.length / 2,
+      this.road.zMax - car.length / 2
+    );
+
+    // Try intended movement, then forward-only or
+    // sideways-only movement before stopping altogether.
+    if (this.blocked(car, nextX, nextZ, player)) {
+      if (!this.blocked(car, car.x, nextZ, player)) {
+        nextX = car.x;
+      } else if (!this.blocked(car, nextX, car.z, player)) {
+        nextZ = car.z;
+      } else {
+        nextX = car.x;
+        nextZ = car.z;
+      }
+    }
+
+    car.x = nextX;
+    car.z = nextZ;
+
+    car.mesh.position.set(car.x, 0, car.z);
+
+    car.mesh.userData.velocity.set(
+      (car.x - oldX) / dt,
+      0,
+      (car.z - oldZ) / dt
+    );
+
+    // Keep physical speed consistent if traffic blocks us.
+    car.speed = Math.max(
+      0,
+      this.direction * (car.z - oldZ) / dt
+    );
+
+    // Every rival is eligible to be beaten after launch,
+    // regardless of its original starting position.
+    if (player && !car.beaten) {
+      const relative =
+        this.direction * (player.z - car.z);
+
+      // The player must be at least 3 metres ahead.
+      if (relative >= 3) {
+        car.beaten = true;
+
+        // Award points only once for this rival.
+        this.onBeaten?.(car.index);
       }
     }
   }
+}
+
 
   release(index) {
     const car = this.rivals[index];
@@ -375,7 +372,6 @@ export class RivalTaxiSystem {
       car.targetX = car.initialX;
       car.nextLaneChange = 1.2 + (car.index % 4) * 0.3;
       car.laneDirection = car.index % 2 ? 1 : -1;
-      car.seenBehind = false;
       car.beaten = false;
       car.released = false;
 
