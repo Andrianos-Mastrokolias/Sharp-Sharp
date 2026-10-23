@@ -241,9 +241,20 @@ function checkCity(step, lm, collidables) {
   });
   assert.equal(zebras.length, 11, `step ${step}: zebra crossings`);
   // the original 26 buildings, then 2 per slot of the longer road (38 more)
-  assert.equal(env.collidables.length, 64, `step ${step}: level 1 collidables`);
-  // 64 buildings + 20 traffic cars (LevelManager registers the cars, not the environment)
-  assert.ok(collidables.length === 64 + 20, `step ${step}: shared collidable array (${collidables.length})`);
+  // Updated Level 1: taxi rank replaces the original
+// buildings in the starting section.
+assert.equal(
+  env.collidables.length,
+  49,
+  `step ${step}: level 1 collidables`
+);
+
+// 49 scenery collidables + 20 traffic cars.
+assert.equal(
+  collidables.length,
+  49 + 20,
+  `step ${step}: shared collidable array`
+);
 
   return people.length;
 }

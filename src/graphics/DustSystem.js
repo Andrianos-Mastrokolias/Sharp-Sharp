@@ -31,6 +31,8 @@ export class DustSystem {
 
     this.currentLevel =
       1;
+      // Graphics quality can disable dust entirely.
+this.enabled = true;
 
 
     // ==================================================
@@ -224,14 +226,23 @@ export class DustSystem {
   // ==================================================
 
   setLevel(level) {
+  this.currentLevel = level;
 
-    this.currentLevel =
-      level;
+  // Dust is only shown in Level 1 and when enabled.
+  this.points.visible = this.enabled && level === 1;
+}
 
+// Enable or disable dust without destroying its resources.
+setEnabled(enabled) {
+  this.enabled = Boolean(enabled);
+  this.points.visible = this.enabled && this.currentLevel === 1;
 
-    this.points.visible =
-      level === 1;
+  // Clear old particles when disabling dust.
+  if (!this.enabled) {
+    this.reset();
+    this.spawnAccumulator = 0;
   }
+}
 
 
   // ==================================================
@@ -390,12 +401,10 @@ export class DustSystem {
     dt
   ) {
 
-    if (
-      this.currentLevel !== 1
-    ) {
-
-      return;
-    }
+    // Skip all particle calculations when dust is disabled.
+if (!this.enabled || this.currentLevel !== 1) {
+  return;
+}
 
 
     const speed =

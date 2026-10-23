@@ -43,7 +43,7 @@ export const OVERHEAD = {
 // buildings plus 38 more (one per slot and side), Level 2 still two
 // barriers, Level 3 the original 32 plus the ones in its added stretches
 // (house, fence, wreck and bin chunks, all merged per 100 m).
-export const COLLIDABLES = { 1: 64, 2: 2, 3: 99 };
+export const COLLIDABLES = { 1: 49, 2: 2, 3: 99 };
 
 // The original (400 m road) counts, which the first collidables of each
 // level still are
@@ -206,17 +206,38 @@ for (const level of [1, 2, 3]) {
   assert.ok(total.draws <= CEILINGS[level].draws, `level ${level}: ${total.draws} draws > ceiling ${CEILINGS[level].draws}`);
   assert.ok(total.tris <= CEILINGS[level].tris, `level ${level}: ${total.tris} tris > ceiling ${CEILINGS[level].tris}`);
 
-  if (level === 1) {
-    // The merge must not touch the collidable buildings (the original 26 come first)
-    env.group.updateMatrixWorld(true);
-    assert.equal(env.collidables.length, COLLIDABLES[1]);
-    env.collidables.slice(0, L1_BUILDING_BOXES.length).forEach((mesh, i) => {
-      const b = new THREE.Box3().setFromObject(mesh);
-      [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].forEach((v, k) => {
-        assert.ok(Math.abs(v - L1_BUILDING_BOXES[i][k]) < 0.002, `building ${i} box changed`);
-      });
-    });
+  
+if (level === 1) {
+  // The new rank replaces some of the original buildings.
+  // Validate the resulting scenery instead of comparing it
+  // against the obsolete original building list.
+  env.group.updateMatrixWorld(true);
+
+  assert.equal(
+    env.collidables.length,
+    COLLIDABLES[1],
+    'Level 1 collidable count'
+  );
+
+  // Every solid object must have a valid bounding box.
+  for (const mesh of env.collidables) {
+    const bounds = new THREE.Box3().setFromObject(mesh);
+
+    assert.ok(
+      !bounds.isEmpty(),
+      'Level 1 has an empty collidable'
+    );
+
+    // The rank starting zone must remain clear for taxis.
+    if (bounds.max.z >= -60 && bounds.min.z <= 170) {
+      assert.ok(
+        bounds.min.x >= 9 || bounds.max.x <= -9,
+        'Taxi rank obstacle enters the driving corridor'
+      );
+    }
   }
+}
+
 
   traffic.dispose();
   env.dispose();

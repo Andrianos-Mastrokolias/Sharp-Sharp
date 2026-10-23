@@ -166,13 +166,16 @@ export const CREDITS = [
   {
     heading: 'Models',
     entries: [
-      {
-        name: 'Sesfikile minibus taxi',
-        detail:
-          "Toyota HiAce 'Sesfikile' minibus model — downloaded from SketchUp 3D Warehouse, " +
-          'original author unknown; modified and exported in Blender.',
-        files: ['models/sesfikile.glb']
-      },
+      
+{
+  name: "Toyota Ses'fikile minibus taxi — googlenaut",
+  detail:
+    "Original 3D model uploaded by googlenaut to SketchUp 3D Warehouse. " +
+    "Source: https://embed-3dwarehouse-classic.sketchup.com/model/93cd92b6-5bd0-421e-9d41-9e4952468c14/Toyota-Sesfikile. " +
+    "Modified and exported in Blender for use in Sharp-Sharp.",
+  files: ['models/sesfikile.glb']
+},
+
       {
         name: 'Pursuer, traffic cars, pedestrians and street props',
         detail: 'Built in code by the team'

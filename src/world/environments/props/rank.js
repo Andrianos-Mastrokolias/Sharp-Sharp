@@ -329,8 +329,9 @@ export function createTaxiRank({
     }
   }
 
-  const shelterA = Math.min(zMax - 22, zMin + 95);
-  const shelterB = Math.min(zMax - 45, zMin + 150);
+  // Shelters immediately beside the starting rank.
+const shelterA = zMax - 30;
+const shelterB = zMax - 60;
 
   if (length > 90) {
     createShelter(-1, shelterA);
@@ -383,11 +384,11 @@ export function createTaxiRank({
   }
 
   if (length > 100) {
-    createStall(-1, zMin + 74, stallRed);
-    createStall(-1, zMin + 89, stallBlue);
-    createStall(1, zMin + 110, stallBlue);
-    createStall(1, zMin + 126, stallRed);
-  }
+  createStall(-1, zMax - 45, stallRed);
+  createStall(-1, zMax - 70, stallBlue);
+  createStall(1, zMax - 35, stallBlue);
+  createStall(1, zMax - 65, stallRed);
+}
 
   // ==========================================================
   // MARSHAL'S BOOTH
@@ -395,7 +396,7 @@ export function createTaxiRank({
 
   if (length > 75) {
     const boothX = -13.5;
-    const boothZ = zMin + 45;
+    const boothZ = zMax - 85;
 
     // Booth lower body.
     addBox(
@@ -430,7 +431,38 @@ export function createTaxiRank({
       0.6
     );
   }
+// ==========================================================
+// STARTING RANK SIGN
+// ==========================================================
 
+// High roadside identification sign, visible immediately
+// when the player spawns facing towards negative Z.
+addBox(
+  0.25, 5.2, 0.25,
+  steel,
+  -11.2, 2.6, zMax - 13,
+  { shadow: true }
+);
+
+addBox(
+  4.6, 1.35, 0.15,
+  asphaltDark,
+  -11.2, 4.8, zMax - 13,
+  { shadow: true }
+);
+
+addSign(
+  'TAXI RANK',
+  -11.2,
+  4.8,
+  zMax - 12.89,
+  4.4,
+  1.2,
+  {
+    background: '#173e56',
+    foreground: '#ffe08b'
+  }
+);
   // ==========================================================
   // EXIT GANTRY
   // ==========================================================

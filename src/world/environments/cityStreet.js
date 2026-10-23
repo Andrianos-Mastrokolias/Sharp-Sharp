@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-
+import { createTaxiRank } from './props/rank.js';
 import {
   createBox,
   createTexturedBox,
@@ -105,6 +105,17 @@ const group =
 
 const collidables =
   [];
+
+  // Add Johannesburg taxi rank scenery to Level 1
+const taxiRank = createTaxiRank({
+  materials,
+  zFrom: -60,
+  zTo: 170
+});
+
+group.add(taxiRank.group);
+collidables.push(...taxiRank.collidables);
+
 
 const geo =
   createGeometryCache();
@@ -684,7 +695,13 @@ for (
   for (
     const side
     of [-1, 1]
+    
   ) {
+    // Reserve the taxi-rank section for rank-specific scenery.
+// Keep the rest of the CBD buildings unchanged.
+if (z >= -60 && z <= 170) {
+  continue;
+}
 
     const buildingIndex =
       indexOf(
