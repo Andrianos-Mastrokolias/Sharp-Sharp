@@ -474,63 +474,42 @@ export class EffectsManager {
   // ENABLE / DISABLE
   // ==================================================
 
-  setHeatHazeEnabled(
-    enabled
-  ) {
+  
+  // ==================================================
+  // ENABLE / DISABLE
+  // ==================================================
 
-    this.hazeEnabled =
-      enabled;
+  setHeatHazeEnabled(enabled) {
 
+    // Store whether the heat haze is active.
+    this.hazeEnabled = enabled;
 
-    for (
-      const list
-      of [
-        this.lowerTiles,
-        this.upperTiles,
-        this.horizonTiles
-      ]
-    ) {
-
-      for (
-        const tile
-        of list
-      ) {
-
-        tile.visible =
-          enabled;
+    // Show or hide every haze tile.
+    for (const list of [
+      this.lowerTiles,
+      this.upperTiles,
+      this.horizonTiles
+    ]) {
+      for (const tile of list) {
+        tile.visible = enabled;
       }
     }
 
+    // Reduced intensity prevents neighbouring lower tiles
+    // from creating an excessively bright road surface.
+    this.heatHazeMaterial.uniforms.uIntensity.value =
+      enabled ? 0.70 : 0;
 
-    this.heatHazeMaterial
-      .uniforms
-      .uIntensity
-      .value =
+    // Keep the upper shimmer subtle so overlapping layers
+    // blend naturally with the road.
+    this.upperHeatHazeMaterial.uniforms.uIntensity.value =
+      enabled ? 0.45 : 0;
 
-        enabled
-          ? 1.15
-          : 0;
-
-
-    this.upperHeatHazeMaterial
-      .uniforms
-      .uIntensity
-      .value =
-
-        enabled
-          ? 0.75
-          : 0;
-
-
-    this.horizonHeatMaterial
-      .uniforms
-      .uIntensity
-      .value =
-
-        enabled
-          ? 0.65
-          : 0;
+    // The distant shimmer should remain faint.
+    this.horizonHeatMaterial.uniforms.uIntensity.value =
+      enabled ? 0.40 : 0;
   }
+
 
 
   // ==================================================

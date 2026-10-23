@@ -280,6 +280,20 @@ export class CameraSystem {
             false;
         }
       );
+      // Stop free-look if pointer capture is interrupted.
+this.renderer.domElement.addEventListener(
+  'pointercancel',
+  () => {
+    this.dragging = false;
+  }
+);
+
+this.renderer.domElement.addEventListener(
+  'lostpointercapture',
+  () => {
+    this.dragging = false;
+  }
+);
 
 
     // ------------------------------------------------
@@ -396,16 +410,19 @@ export class CameraSystem {
     // Smooth follow
     // ------------------------------------------------
 
-    this.camera.position.lerp(
+    // Smooth following during normal gameplay.
+// Instantly reposition after a teleport or level change.
+const distanceToTarget =
+  this.camera.position.distanceTo(this.desiredPosition);
 
-      this.desiredPosition,
-
-      1 -
-      Math.exp(
-        -7 *
-        dt
-      )
-    );
+if (distanceToTarget > 40 || dt <= 0) {
+  this.camera.position.copy(this.desiredPosition);
+} else {
+  this.camera.position.lerp(
+    this.desiredPosition,
+    1 - Math.exp(-7 * Math.max(0, dt))
+  );
+}
 
 
     // ------------------------------------------------

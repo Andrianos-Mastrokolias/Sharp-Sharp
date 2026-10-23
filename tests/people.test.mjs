@@ -267,9 +267,25 @@ for (const mesh of meshes) {
   assert.ok(uTime.value >= first, 'uTime never runs backwards');
 }
 
-// Nothing of the people is registered with the vehicle
-assert.equal(env.collidables.length, 64, 'level 1 collidables: the original 26 buildings and 38 more');
-assert.ok(env.collidables.every((m) => !m.isInstancedMesh && m.children.length === 0));
+// Nothing of the people is registered with the vehicle.
+// The new taxi-rank scenery replaces some of the original buildings.
+assert.equal(
+  env.collidables.length,
+  49,
+  'level 1 collidables: updated taxi-rank and city environment'
+);
+
+assert.ok(
+  env.collidables.every((m) =>
+    !m.isInstancedMesh && m.children.length === 0
+  ),
+  'all environment collidables must be individual meshes'
+);
+
+assert.ok(
+  env.collidables.every((m) => !meshes.includes(m)),
+  'pedestrians must never be registered as collidables'
+);
 
 // Deterministic: a second build is identical
 {

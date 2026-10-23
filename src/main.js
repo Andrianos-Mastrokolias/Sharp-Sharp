@@ -21,7 +21,7 @@ import { EffectsManager } from './graphics/EffectsManager.js';
 import { DustSystem } from './graphics/DustSystem.js';
 import { MaterialLibrary } from './graphics/MaterialLibrary.js';
 import { SkyManager } from './graphics/SkyManager.js';
-
+import { SkylineManager } from './graphics/SkylineManager.js';
 import { LevelManager, LEVELS } from './world/LevelManager.js';
 import {
   createBox,
@@ -129,7 +129,8 @@ const lighting = new LightingManager({
 const effects = new EffectsManager({ scene });
 const materials = new MaterialLibrary(renderer);
 const skyManager = new SkyManager({ scene, renderer });
-
+// Distant Johannesburg skyline for Levels 1 and 2.
+const skylineManager = new SkylineManager({ scene });
 // These arrays are shared with VehicleController.
 // LevelManager adds and removes environment objects.
 const collidableObjects = [];
@@ -233,15 +234,36 @@ const dustSystem = new DustSystem({
 // 1000 m would draw most of the level at once. The sky is scaled to fit.
 const VIEW_DISTANCE_MARGIN = 40;
 
+
+function applyGraphicsQuality() {
+  const lowQuality = preferences.quality === 'low';
+
+  // Disable shadow rendering on Low quality.
+  renderer.shadowMap.enabled = !lowQuality;
+  lighting.sun.castShadow = !lowQuality;
+
+  // Heat haze is only available in Level 2,
+  // and is disabled entirely on Low quality.
+  effects.setHeatHazeEnabled(
+    !lowQuality && currentLevel === 2
+  );
+
+  // Dust is only available outside Low quality.
+  // DustSystem handles which levels actually use it.
+  dustSystem.setEnabled(!lowQuality);
+}
+
+
 function applyLevelVisuals(level) {
   lighting.setLevel(level);
   effects.setLevel(level);
   dustSystem.setLevel(level);
   skyManager.setLevel(level);
-
+skylineManager.setLevel(level);
   camera.far = scene.fog.far + VIEW_DISTANCE_MARGIN;
   camera.updateProjectionMatrix();
   skyManager.setViewDistance(camera.far);
+  applyGraphicsQuality();
 }
 
 // ============================================================
@@ -365,6 +387,8 @@ panel.addEventListener('input', event => {
   applyQuality(renderer, preferences.quality, window.devicePixelRatio);
   const output = panel.querySelector('output');
   if (output) output.value = `${Math.round(preferences.volume * 100)}%`;
+  // Update shadows, heat haze and dust immediately.
+applyGraphicsQuality();
 });
 
 function showScreen(html, variant = 'scrim') {
@@ -1077,7 +1101,8 @@ function animate() {
   effects.update(elapsedTime);
 
   skyManager.update(elapsedTime, taxi.position);
-
+// Keep the distant skyline following the taxi.
+skylineManager.update(taxi.position);
   if (phase === GamePhase.PLAYING) {
     dustSystem.update(dt);
   }
