@@ -249,10 +249,11 @@ assert.equal(
   `step ${step}: level 1 collidables`
 );
 
-// 49 scenery collidables + 20 traffic cars.
+// 49 scenery collidables + 14 traffic cars (7 + 7, after the rank) + the
+// 8 rival taxis of the rank race
 assert.equal(
   collidables.length,
-  49 + 20,
+  49 + 14 + 8,
   `step ${step}: shared collidable array`
 );
 
@@ -540,12 +541,14 @@ function checkMarkers(step, level, lm) {
   assert.ok(lm.beamMaterial.opacity <= BASE.beam + 1e-9);
   assert.ok(lm.beamMaterial.opacity >= BASE.beam * Math.max(0.5, b) - 1e-9, `step ${step}: beam too dim`);
 
-  // The spawn bay really uses the material that is dimmed
+  // The spawn bay really uses the material that is dimmed. Level 1 has none:
+  // its spawn is in the rival grid, on the rank's own paint
   const bays = lm.group.children.filter((c) => c.geometry?.type === 'PlaneGeometry');
-  assert.equal(bays.length, 1);
-  assert.equal(bays[0].material, lm.rankMaterial);
+  assert.equal(bays.length, level === 1 ? 0 : 1, `step ${step}: level ${level} spawn bay`);
+  if (bays.length) assert.equal(bays[0].material, lm.rankMaterial);
 
-  // The per-frame pulse keeps the scaling
+  // The per-frame pulse keeps the scaling (Level 1's countdown holds it)
+  lm.skipCountdown();
   lm.update(0, 0.3);
   eq(lm.zoneMaterial.opacity, (0.35 + Math.sin(0.3 * 4) * 0.12) * b, 'pulsed ring opacity');
   lm.update(0, 1.9);

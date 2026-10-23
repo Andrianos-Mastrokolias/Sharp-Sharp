@@ -78,6 +78,13 @@ export const FOOTPRINT_MARGIN = 1;
 // are non-solid
 export const GHOST_ZONE_RADIUS = 18;
 
+// Wrap hold: a car of a same-direction lane (one that drives the way the
+// taxi does) does not wrap round to the entry end of its lane while the taxi
+// is within this (m, along z) of that entry point, so a car never appears
+// just ahead of (or beside) the taxi. It waits at the exit end, with the cars
+// behind it queued at the usual gap, and wraps once the taxi has moved off.
+export const WRAP_HOLD_RADIUS = 40;
+
 // A solid car this close (m, per side) to the taxi's box, now or at
 // its next position, is "in contact" and holds its lane
 export const CONTACT_MARGIN = 0.6;
@@ -267,7 +274,16 @@ export class TrafficSystem {
         centreHi,
         trackLength,
         sinceContact: HOLD_TIME + RESUME_TIME,
-        scale: 1
+        scale: 1,
+
+        // Wrap hold (see WRAP_HOLD_RADIUS): the lane's cars drive the
+        // way the taxi does (spawn -> destination), and enter at entryZ
+        sameDirection:
+          laneConfig.dir ===
+          Math.sign(level.destination.z - level.spawn.z),
+        entryZ: laneConfig.dir < 0 ? centreHi : centreLo,
+        wrapHeld: false,
+        order: []
       };
 
       this.lanes.push(lane);
@@ -303,6 +319,9 @@ export class TrafficSystem {
         });
       });
     });
+
+    // Each lane's car indices (re-sorted in place while its wrap is held)
+    this.cars.forEach((car, i) => this.lanes[car.laneIndex].order.push(i));
 
     this.reset();
   }
@@ -453,6 +472,7 @@ export class TrafficSystem {
     for (const lane of this.lanes) {
       lane.sinceContact = HOLD_TIME + RESUME_TIME;
       lane.scale = 1;
+      lane.wrapHeld = false;
     }
 
     for (const car of this.cars) {
@@ -566,15 +586,35 @@ export class TrafficSystem {
       lane.scale = t * t * (3 - 2 * t);
     }
 
+    // Wrap hold: a same-direction lane stops wrapping while the taxi is
+    // near the point its cars enter at
+    for (let l = 0; l < this.lanes.length; l++) {
+
+      const lane = this.lanes[l];
+
+      lane.wrapHeld = (
+        this.taxi !== null &&
+        lane.sameDirection &&
+        Math.abs(this.taxi.position.z - lane.entryZ) <= WRAP_HOLD_RADIUS
+      );
+
+      if (lane.wrapHeld) {
+        this.advanceHeld(lane, dt);
+      }
+    }
+
     for (let i = 0; i < this.cars.length; i++) {
 
       const car = this.cars[i];
       const lane = this.lanes[car.laneIndex];
 
-      car.u += lane.speed * lane.scale * dt;
+      if (!lane.wrapHeld) {
 
-      if (car.u >= lane.trackLength) {
-        car.u -= lane.trackLength;
+        car.u += lane.speed * lane.scale * dt;
+
+        if (car.u >= lane.trackLength) {
+          car.u -= lane.trackLength;
+        }
       }
 
       car.mesh.position.z =
@@ -583,6 +623,47 @@ export class TrafficSystem {
           : lane.centreLo + car.u;
 
       this.setSolid(car, !this.inGhostZone(car));
+    }
+  }
+
+
+  // A lane whose wrap is held: the cars still advance, but none passes the
+  // end of the loop. The leader waits there and the others queue behind it at
+  // the usual gap (insertion sort of the lane's indices, no allocation: this
+  // is the rare path, a few seconds when the taxi passes the entry point).
+  advanceHeld(lane, dt) {
+
+    const order = lane.order;
+    const cars = this.cars;
+    const step = lane.speed * lane.scale * dt;
+
+    for (let i = 1; i < order.length; i++) {
+
+      const index = order[i];
+      const u = cars[index].u;
+      let j = i - 1;
+
+      while (j >= 0 && cars[order[j]].u < u) {
+        order[j + 1] = order[j];
+        j--;
+      }
+
+      order[j + 1] = index;
+    }
+
+    let ceiling = lane.trackLength;
+
+    for (let k = 0; k < order.length; k++) {
+
+      const car = cars[order[k]];
+
+      // never backwards, never past the car ahead (or the end)
+      car.u = Math.max(car.u, Math.min(car.u + step, ceiling));
+
+      if (k + 1 < order.length) {
+        ceiling = car.u -
+          (car.length + cars[order[k + 1]].length) / 2 - MIN_CAR_GAP;
+      }
     }
   }
 
