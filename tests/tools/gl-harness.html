@@ -27,6 +27,7 @@ import { SkyManager } from '/src/graphics/SkyManager.js';
 import { MaterialLibrary } from '/src/graphics/MaterialLibrary.js';
 import { buildEnvironment } from '/src/world/environments/index.js';
 import { TrafficSystem } from '/src/world/TrafficSystem.js';
+import { RivalTaxiSystem } from '/src/world/RivalTaxis.js';
 import { LEVELS } from '/src/world/LevelManager.js';
 import { cameras, FOV, ASPECT, VIEW_DISTANCE, taxiFocus } from '/tests/tools/cameras.mjs';
 
@@ -46,12 +47,14 @@ const materials = new MaterialLibrary(renderer);
 
 let env = null;
 let traffic = null;
+let rivals = null;
 
 // trafficSeconds: how far the (deterministic) traffic has driven from its
 // initial layout, so a capture can show cars at different places.
 window.loadLevel = async (level, trafficSeconds = 0) => {
   if (env) { env.dispose(); env = null; }
   if (traffic) { traffic.dispose(); traffic = null; }
+  if (rivals) { rivals.dispose(); rivals = null; }
   lighting.setLevel(level);
   sky.setLevel(level);
   // as the game does (main.js): the far plane is the level's fog distance plus 40 m
@@ -63,6 +66,13 @@ window.loadLevel = async (level, trafficSeconds = 0) => {
   traffic = new TrafficSystem({ parent: scene });
   traffic.configure(LEVELS[level]);
   for (let t = 0; t < trafficSeconds; t += 1 / 30) traffic.update(1 / 30);
+
+  // Level 1's rank race: the 8 rival minibuses on their start grid
+  const { race, road } = LEVELS[level];
+  if (race) {
+    rivals = new RivalTaxiSystem({ parent: scene, registerCollidable() {} });
+    rivals.configure({ rivals: race.grid, road: { halfWidth: race.road.halfWidth, zMin: road.zMin, zMax: road.zMax }, direction: -1 });
+  }
   await sleep(4000);                       // textures + HDRI
   return { collidables: env.collidables.length, trafficCars: traffic.cars.length };
 };

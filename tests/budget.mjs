@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import assert from 'node:assert/strict';
 import { buildEnvironment } from '../src/world/environments/index.js';
 import { TrafficSystem } from '../src/world/TrafficSystem.js';
+import { RivalTaxiSystem } from '../src/world/RivalTaxis.js';
 import { LEVELS } from '../src/world/LevelManager.js';
 import { makeLibrary } from './tools/fake-library.mjs';
 import fs from 'node:fs';
@@ -52,7 +53,13 @@ export const ORIGINAL_COLLIDABLES = { 1: 26, 2: 2, 3: 32 };
 // Traffic cars LevelManager registers on top of that. They follow the
 // road's length at the original density: Level 1 runs 10 + 10 cars (the
 // original 4 + 4 on 370 m lanes), Level 2 7 + 9 (the original 3 + 4).
-export const TRAFFIC_COLLIDABLES = { 1: 20, 2: 16, 3: 0 };
+export const TRAFFIC_COLLIDABLES = { 1: 14, 2: 16, 3: 0 };
+
+// Level 1's lanes now start after the rank (680 m: 7 + 7 cars, the original
+// density), and the rank race adds 8 rival minibuses, which are counted as
+// all in view at once in every view (their worst case: they spread out
+// along the road as the race goes)
+export const RIVAL_COLLIDABLES = { 1: 8, 2: 0, 3: 0 };
 
 // Traffic is counted at its worst moment: every second of the first 4
 // minutes, which is several full loops of every lane (the lanes are 930 and
@@ -159,6 +166,23 @@ for (const level of [1, 2, 3]) {
   const views = {};
   const total = { draws: 0, tris: 0 };
 
+  // The rank race's rivals (Level 1): one cost for all of them, in view
+  const rivalCost = { draws: 0, tris: 0 };
+
+  if (LEVELS[level].race) {
+    const rivalGroup = new THREE.Group();
+    const rivals = new RivalTaxiSystem({ parent: rivalGroup, registerCollidable() {} });
+    const { race, road } = LEVELS[level];
+    rivals.configure({ rivals: race.grid, road: { halfWidth: race.road.halfWidth, zMin: road.zMin, zMax: road.zMax }, direction: -1 });
+    assert.equal(rivals.rivals.length, RIVAL_COLLIDABLES[level], `level ${level}: rival count`);
+    assert.ok(rivals.rivals.every((r) => r.mesh.castShadow === false), 'rivals cast shadows');
+    rivals.rivals.forEach((r) => { r.mesh.frustumCulled = false; });
+    const c = countEnvironment({ group: rivalGroup }, makeCamera(cameras(level)[0], VIEW_DISTANCE[level]));
+    rivalCost.draws = c.draws;
+    rivalCost.tris = c.tris;
+    rivals.dispose();
+  }
+
   const trafficGroup = new THREE.Group();
   const traffic = new TrafficSystem({ parent: trafficGroup });
   traffic.configure(LEVELS[level]);
@@ -193,11 +217,11 @@ for (const level of [1, 2, 3]) {
     }
 
     views[view.name] = { draws: base.draws, tris: base.tris, trafficDraws: worstTraffic.draws, trafficTris: worstTraffic.tris };
-    total.draws = Math.max(total.draws, base.draws + worstTraffic.draws + OVERHEAD[level].draws);
-    total.tris = Math.max(total.tris, base.tris + worstTraffic.tris + OVERHEAD[level].tris);
+    total.draws = Math.max(total.draws, base.draws + worstTraffic.draws + rivalCost.draws + OVERHEAD[level].draws);
+    total.tris = Math.max(total.tris, base.tris + worstTraffic.tris + rivalCost.tris + OVERHEAD[level].tris);
   }
 
-  report[level] = { objects: countEnvironment(env, makeCamera(cameras(level)[0], VIEW_DISTANCE[level])).objects, collidables: env.collidables.length, views, worstWithOverhead: total };
+  report[level] = { rivalCost, objects: countEnvironment(env, makeCamera(cameras(level)[0], VIEW_DISTANCE[level])).objects, collidables: env.collidables.length, views, worstWithOverhead: total };
 
   assert.equal(env.collidables.length, COLLIDABLES[level], `level ${level}: collidable count`);
   for (const mesh of env.collidables) {

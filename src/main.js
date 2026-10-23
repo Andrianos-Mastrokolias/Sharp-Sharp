@@ -64,9 +64,9 @@ const LAST_LEVEL = 3;
 const MINIMUM_CARGO = 2;
 
 const LEVEL_DESCRIPTIONS = {
-  1: 'Drive from the taxi rank to the CBD. Avoid traffic, protect your roof cargo and escape the pursuer.',
-  2: 'Take on the highway in the midday heat. Choose between the ground road and the flyover, avoid hazards and reach your delivery.',
-  3: 'Survive load shedding at night. Headlights help you see potholes but make you easier for the pursuer to detect.'
+  1: 'A whole household is strapped to your roof, and every driver at the rank wants the fare. Race out ahead of the other taxis, then run the CBD before the police pull over your overloaded taxi.',
+  2: 'The city streets are jammed, so you take the highway at midday. Choose the ground road or the flyover, and watch your straps: the faster you go, the looser they get.',
+  3: 'Load shedding: the power is out and the township is pitch black. Your headlights show the potholes but also give you away to the police, so choose when to switch them on.'
 };
 
 const GamePhase = Object.freeze({
@@ -928,6 +928,9 @@ function retryCurrentLevel() {
 
 const keys = {};
 
+// What the vehicle is given while the Level 1 countdown holds the taxi
+const NO_KEYS = Object.freeze({});
+
 function clearKeys() {
   for (const code in keys) {
     keys[code] = false;
@@ -1065,7 +1068,7 @@ function animate() {
 
   // Only update driving physics during gameplay.
   if (phase === GamePhase.PLAYING) {
-    vehicle.update(dt, keys);
+    vehicle.update(dt, levelManager.inputLocked ? NO_KEYS : keys);
 
     // Destination detection, traffic and pursuit.
     // This may change the game phase.

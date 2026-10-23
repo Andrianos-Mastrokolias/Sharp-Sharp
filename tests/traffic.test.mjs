@@ -5,7 +5,8 @@ import { PerformanceObserver } from 'node:perf_hooks';
 import { LevelManager, LEVELS } from '../src/world/LevelManager.js';
 import {
   TrafficSystem, MIN_CAR_GAP, TRAFFIC_VARIANTS, GHOST_ZONE_RADIUS,
-  CONTACT_MARGIN, HOLD_TIME, RESUME_TIME, MAX_TRAFFIC_CARS, MAX_TRAFFIC_CARS_CEILING
+  CONTACT_MARGIN, HOLD_TIME, RESUME_TIME, MAX_TRAFFIC_CARS, MAX_TRAFFIC_CARS_CEILING,
+  WRAP_HOLD_RADIUS
 } from '../src/world/TrafficSystem.js';
 import { createTrafficCar } from '../src/world/environments/props.js';
 
@@ -26,6 +27,12 @@ function make() {
     getSpeed: () => 0, getHighSpeedTime: () => 0, getLevel2Pressure: () => 0
   };
   const lm = new LevelManager({ scene, vehicle, taxi, collidables, potholes: [], getHeadlightsEnabled: () => true });
+
+  // Level 1 starts with the rank race's 3 s countdown, which holds the traffic
+  // too: these tests are about the traffic, so load() ends it at once
+  const load = lm.load.bind(lm);
+  lm.load = (level) => { const loaded = load(level); lm.skipCountdown(); return loaded; };
+
   return { scene, taxi, collidables, lm };
 }
 
@@ -147,21 +154,23 @@ test('createTrafficCar: 4 variants, <400 tris, ground origin, faces -Z, emissive
 });
 
 // The cars follow the road's length at the original density: the original lanes were
-// 370 m (L1: 4 + 4 cars, L2: 3 + 4); L1's are 930 m now (10 + 10, cap 20) and L2's
-// 1130 m (7 + 9, cap 16: a little under the original density)
-test('per-level config: L1 two lanes (10+10), L2 same-direction lanes (7+9), L3 none, per-level car caps, whole-road range', () => {
+// 370 m (L1: 4 + 4 cars, L2: 3 + 4); L1's are 680 m now, from the rank's exit line (7 + 7,
+// cap 16) and L2's 1130 m (7 + 9, cap 16: a little under the original density)
+test('per-level config: L1 two lanes (7+7), L2 same-direction lanes (7+9), L3 none, per-level car caps, lanes start after the rank', () => {
   const l1 = LEVELS[1].traffic.lanes;
   assert.deepEqual(l1.map(({ x, dir, speed, count }) => ({ x, dir, speed, count })), [
-    { x: -4.5, dir: -1, speed: 9, count: 10 },
-    { x: 4.5, dir: 1, speed: 12, count: 10 }
+    { x: -4.5, dir: -1, speed: 9, count: 7 },
+    { x: 4.5, dir: 1, speed: 12, count: 7 }
   ]);
-  assert.equal(LEVELS[1].traffic.maxCars, 20);
+  assert.equal(LEVELS[1].traffic.maxCars, 16);
+  // nothing in the rank (z 170 to -60): the lanes start 5 m past its exit line
+  assert.equal(LEVELS[1].traffic.zHi, LEVELS[1].race.exitZ - 5);
   assert.equal(LEVELS[2].traffic.maxCars, 16);
   for (const level of [1, 2]) {
     const { zLo, zHi } = LEVELS[level].traffic;
     const b = LEVELS[level].boundaries;
     assert.ok(zLo >= b.minZ && zHi <= b.maxZ, `level ${level}: lane range inside the vehicle bounds`);
-    assert.ok(zLo <= -180 && zHi >= 180, `level ${level}: lanes run across the whole road (${zLo}..${zHi})`);
+    assert.ok(zLo <= -180 && zHi >= (level === 1 ? -65 : 180), `level ${level}: lanes run across the whole road (${zLo}..${zHi})`);
   }
   const l2 = LEVELS[2].traffic.lanes;
   assert.deepEqual(l2.map(({ x, dir, speed, count }) => ({ x, dir, speed, count })), [
@@ -179,7 +188,7 @@ test('per-level config: L1 two lanes (10+10), L2 same-direction lanes (7+9), L3 
 });
 
 test('every car is a childless Mesh in the collidables, sharing geometry/material per variant', () => {
-  for (const [level, expected] of [[1, 20], [2, 16]]) {
+  for (const [level, expected] of [[1, 14], [2, 16]]) {
     const { lm, collidables, scene } = make();
     lm.load(level);
     assert.equal(lm.traffic.cars.length, expected);
@@ -408,7 +417,7 @@ test('1 -> 2 -> 3 -> 1 cycles leave no duplicates or leaks, even while cars are 
   };
   const seen = { 1: null, 2: null, 3: null };
   const disposedGeometries = [];
-  const expected = { 1: 20, 2: 16, 3: 0 };
+  const expected = { 1: 14, 2: 16, 3: 0 };
 
   for (let cycle = 0; cycle < 3; cycle++) {
     for (const level of [1, 2, 3, 1]) {
@@ -602,7 +611,7 @@ test('a taxi driving into an oncoming car (8, 15, 25 m/s): exactly one stress, t
     const lane = traffic.lanes[laneIndex];
     const car = traffic.cars.find((c) => c.laneIndex === laneIndex);
     isolate(lm, car);
-    car.u = -60 - lane.centreLo;                       // z = -60, away from both ends and the zone
+    car.u = -400 - lane.centreLo;                      // z = -400, away from both ends and the zone
     traffic.place(car);
     parkTaxi(taxi, lane.x, car.mesh.position.z + 45);  // 45 m up the road, facing the car (heading 0 is -z)
     const sim = makeVehicleSim({ taxi, collidables, lm });
@@ -949,6 +958,99 @@ test('pursuit is unaffected: not blocked by, and not registered with, traffic', 
   assert.notDeepEqual(snapshot(lm), before, 'LevelManager.update moves traffic while driving');
   assert.ok(lm.pursuit.mesh && !collidables.includes(lm.pursuit.mesh));
   assert.ok(lm.pursuit.active);
+});
+
+// ---- Wrap hold: a same-direction car does not wrap while the taxi is near the entry point
+
+test('wrap hold: lanes that drive the way the taxi does are marked; the oncoming lane is not', () => {
+  const { lm } = make();
+  lm.load(1);
+  assert.deepEqual(lm.traffic.lanes.map((l) => [l.dir, l.sameDirection]), [[-1, true], [1, false]]);
+  lm.load(2);
+  assert.ok(lm.traffic.lanes.every((l) => l.sameDirection));
+  assert.equal(WRAP_HOLD_RADIUS, 40);
+});
+
+test('wrap hold: a car at the exit end waits while the taxi is within 40 m of the entry point, then wraps', () => {
+  for (const [level, laneIndex] of [[1, 0], [2, 0], [2, 1]]) {
+    const { lm, taxi } = make();
+    lm.load(level);
+    const traffic = lm.traffic;
+    const lane = traffic.lanes[laneIndex];
+    const car = traffic.cars.find((c) => c.laneIndex === laneIndex);
+    isolate(lm, car);
+    car.mesh.position.x = lane.x;                      // isolate() moved the others, not this one
+
+    const wrapsAfter = (taxiZ) => {
+      car.u = lane.trackLength - 0.05;
+      parkTaxi(taxi, 40, taxiZ);
+      traffic.update(DT);
+      return car.u < 1;
+    };
+
+    // 39 m from the entry point on either side: held at the end of the loop
+    for (const dz of [-39, 0, 39]) {
+      assert.equal(wrapsAfter(lane.entryZ + dz), false, `level ${level} lane ${laneIndex}: wrapped with the taxi ${dz} m from the entry`);
+      assert.ok(car.u >= lane.trackLength - 0.06 && car.u <= lane.trackLength + 1e-9, 'waits at the exit end');
+    }
+
+    // 41 m away: it wraps
+    assert.equal(wrapsAfter(lane.entryZ - 41), true, `level ${level} lane ${laneIndex}: still held 41 m away`);
+    // and a held car wraps on the first frame after the taxi moves off
+    car.u = lane.trackLength - 0.05;
+    parkTaxi(taxi, 40, lane.entryZ);
+    traffic.update(DT);
+    parkTaxi(taxi, 40, lane.entryZ - 200);
+    traffic.update(DT);
+    assert.ok(car.u < 1, 'wraps once the taxi has gone');
+  }
+});
+
+test('wrap hold: the cars queue behind the waiting one at the usual gap, and none passes the end', () => {
+  const { lm, taxi } = make();
+  lm.load(2);
+  const traffic = lm.traffic;
+  const lane = traffic.lanes[1];                       // the faster lane: 9 cars
+  const cars = traffic.cars.filter((c) => c.laneIndex === 1);
+  parkTaxi(taxi, 40, lane.entryZ);                     // the taxi sits at the entry point
+
+  let minGap = Infinity;
+  for (let t = 0; t < 60; t += DT) {
+    traffic.update(DT);
+    const sorted = [...cars].sort((a, b) => b.u - a.u);
+    for (let i = 0; i < sorted.length; i++) {
+      assert.ok(sorted[i].u <= lane.trackLength + 1e-9, 'a car passed the end of the loop');
+      if (i + 1 < sorted.length) {
+        const gap = sorted[i].u - sorted[i + 1].u - (sorted[i].length + sorted[i + 1].length) / 2;
+        minGap = Math.min(minGap, gap);
+      }
+    }
+  }
+
+  assert.ok(minGap >= MIN_CAR_GAP - 1e-6, `queued cars ${minGap.toFixed(2)} m apart`);
+  const sorted = [...cars].sort((a, b) => b.u - a.u);
+  assert.ok(Math.abs(sorted[0].u - lane.trackLength) < 1e-6, 'the leader waits at the end');
+
+  // the taxi leaves: everyone moves on and wraps, spacing kept
+  parkTaxi(taxi, 40, lane.entryZ - 300);
+  let wrapped = 0;
+  for (let t = 0; t < 30; t += DT) {
+    const before = cars.map((c) => c.u);
+    traffic.update(DT);
+    cars.forEach((c, i) => { if (c.u < before[i] - 1) wrapped++; });
+  }
+  assert.ok(wrapped >= 1, 'cars wrap again once the taxi has gone');
+});
+
+test('wrap hold: nothing changes with the taxi far from the entry (no hold, same motion as before)', () => {
+  const { lm, taxi } = make();
+  lm.load(2);
+  const traffic = lm.traffic;
+  parkTaxi(taxi, 40, 0);
+  const lane = traffic.lanes[0];
+  for (let t = 0; t < 20; t += DT) traffic.update(DT);
+  assert.equal(lane.wrapHeld, false);
+  assert.ok(traffic.cars.every((c) => c.u >= 0 && c.u < traffic.lanes[c.laneIndex].trackLength));
 });
 
 let failed = 0;
