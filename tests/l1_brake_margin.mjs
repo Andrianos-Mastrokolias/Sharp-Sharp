@@ -36,7 +36,10 @@ function trial(brakeAt, crawl = false) {   // brakeAt: metres before the zone ed
     onDelivered: () => { out.delivered = t; }, onCaptured: () => { out.captured = t; }
   });
   lm.load(1);
-  taxi.position.set(0, 0, -80);
+  lm.skipCountdown();                         // the rank race's 3 s countdown holds everything
+  // just past the pursuit trigger (0.55 of the run, z -325); the rivals are
+  // released and the pursuer's head start is the base 25 m (nobody beaten)
+  taxi.position.set(0, 0, LEVELS[1].spawn.z + 0.56 * (dest.z - LEVELS[1].spawn.z));
   lm.update(DT, 0); lm.update(DT, 0);        // trigger the pursuer
   const startZ = edgeZ + brakeAt;
   taxi.position.set(0, 0, startZ + 60);      // cruise 60 m before the brake point

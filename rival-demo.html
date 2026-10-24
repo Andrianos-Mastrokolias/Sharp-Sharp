@@ -1,0 +1,457 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sharp-Sharp | Rival Taxi Test Track</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #111827;
+      font-family: Arial, sans-serif;
+      color: white;
+    }
+
+    #hud {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.78);
+      padding: 16px 20px;
+      border-radius: 12px;
+      line-height: 1.8;
+      min-width: 220px;
+    }
+
+    #status {
+      position: fixed;
+      top: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 30px;
+      font-weight: bold;
+      text-shadow: 0 3px 8px black;
+      z-index: 10;
+      text-align: center;
+    }
+
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.72);
+      padding: 12px 16px;
+      border-radius: 10px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud"></div>
+  <div id="status">Press ENTER to start</div>
+
+  <div id="controls">
+    <b>Test controls</b><br>
+    Enter — Start 3-2-1 countdown<br>
+    W / ↑ — Accelerate<br>
+    S / ↓ — Brake<br>
+    A / D — Move between lanes<br>
+    R — Reset the race
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { RivalTaxiSystem } from './src/world/RivalTaxis.js';
+    import { createTrafficCar } from './src/world/environments/props.js';
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87bad8);
+    scene.fog = new THREE.Fog(0x87bad8, 150, 450);
+
+    const camera = new THREE.PerspectiveCamera(
+      58,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true
+    });
+
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, 2)
+    );
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.HemisphereLight(
+      0xffffff, 0x7c8872, 2
+    ));
+
+    const sunlight = new THREE.DirectionalLight(
+      0xffffff, 2.2
+    );
+    sunlight.position.set(-30, 70, 20);
+    scene.add(sunlight);
+
+    // --------------------------------------------
+    // Test road
+    // --------------------------------------------
+
+    const ROAD_MIN = -730;
+    const ROAD_MAX = 170;
+    const ROAD_CENTRE = (ROAD_MIN + ROAD_MAX) / 2;
+
+    const grass = new THREE.Mesh(
+      new THREE.PlaneGeometry(250, 1050),
+      new THREE.MeshStandardMaterial({
+        color: 0x477d48
+      })
+    );
+    grass.rotation.x = -Math.PI / 2;
+    grass.position.set(0, -0.06, ROAD_CENTRE);
+    scene.add(grass);
+
+    const road = new THREE.Mesh(
+      new THREE.BoxGeometry(18, 0.08, 920),
+      new THREE.MeshStandardMaterial({
+        color: 0x353940,
+        roughness: 1
+      })
+    );
+    road.position.set(0, -0.045, ROAD_CENTRE);
+    scene.add(road);
+
+    const stripeGeometry = new THREE.BoxGeometry(
+      0.12, 0.012, 5
+    );
+    const stripeMaterial = new THREE.MeshBasicMaterial({
+      color: 0xf2eee0
+    });
+
+    for (const laneX of [-4, 0, 4]) {
+      for (let z = ROAD_MIN + 8; z < ROAD_MAX; z += 14) {
+        const stripe = new THREE.Mesh(
+          stripeGeometry,
+          stripeMaterial
+        );
+        stripe.position.set(laneX, 0.008, z);
+        scene.add(stripe);
+      }
+    }
+
+    // --------------------------------------------
+    // Player taxi
+    // --------------------------------------------
+
+    const playerModel = createTrafficCar('minibus');
+    const playerMesh = new THREE.Mesh(
+      playerModel.geometry,
+      playerModel.material
+    );
+    scene.add(playerMesh);
+
+    const player = {
+      x: 0,
+      z: 170,
+      heading: 0,
+      speed: 0
+    };
+
+    playerMesh.position.set(player.x, 0, player.z);
+
+    // --------------------------------------------
+    // Eight rival taxis
+    // --------------------------------------------
+
+    const colours = [
+      0xff7043, 0x4db6ac, 0xffd54f, 0xba68c8,
+      0x64b5f6, 0xa5d66d, 0xf48fb1, 0xb0bec5
+    ];
+
+    const personalities = [
+      'racer',
+      'weaver',
+      'brake-checker',
+      'cutter',
+      'racer',
+      'weaver',
+      'brake-checker',
+      'cutter'
+    ];
+
+    const speeds = [24, 20, 18, 22, 23, 19, 17, 21];
+    const lanes = [-6, -2, 2, 6];
+
+    const rivalConfigs = [];
+
+    for (let i = 0; i < 8; i++) {
+      rivalConfigs.push({
+        x: lanes[i % 4],
+        z: i < 4 ? 154 : 142,
+        heading: 0,
+        personality: personalities[i],
+        topSpeed: speeds[i],
+        colour: colours[i]
+      });
+    }
+
+    const collidables = new Set();
+
+    let points = 0;
+    let beaten = 0;
+
+    const rivalSystem = new RivalTaxiSystem({
+      parent: scene,
+
+      registerCollidable(mesh) {
+        collidables.add(mesh);
+      },
+
+      setCollidableActive(mesh, active) {
+        if (active) collidables.add(mesh);
+        else collidables.delete(mesh);
+      },
+
+      unregisterCollidable(mesh) {
+        collidables.delete(mesh);
+      },
+
+      onBeaten(index) {
+        points += 100;
+        beaten++;
+        console.log(
+          `Beaten rival ${index + 1}. Points: ${points}`
+        );
+      }
+    });
+
+    rivalSystem.configure({
+      rivals: rivalConfigs,
+      road: {
+        halfWidth: 9,
+        zMin: ROAD_MIN,
+        zMax: ROAD_MAX
+      },
+      direction: -1
+    });
+
+    // --------------------------------------------
+    // Race state
+    // --------------------------------------------
+
+    const keys = new Set();
+    const clock = new THREE.Clock();
+
+    let countdown = -1;
+    let racing = false;
+    let lastHudUpdate = 0;
+
+    const hud = document.getElementById('hud');
+    const status = document.getElementById('status');
+
+    window.addEventListener('keydown', event => {
+      const key = event.key.toLowerCase();
+
+      if ([
+        'arrowup', 'arrowdown', 'arrowleft',
+        'arrowright', ' '
+      ].includes(key)) {
+        event.preventDefault();
+      }
+
+      keys.add(key);
+
+      if (key === 'enter' && !racing && countdown < 0) {
+        countdown = 3;
+      }
+
+      if (key === 'r') {
+        resetRace();
+      }
+    });
+
+    window.addEventListener('keyup', event => {
+      keys.delete(event.key.toLowerCase());
+    });
+
+    function resetRace() {
+      player.x = 0;
+      player.z = 170;
+      player.speed = 0;
+
+      playerMesh.position.set(player.x, 0, player.z);
+
+      points = 0;
+      beaten = 0;
+      countdown = -1;
+      racing = false;
+
+      rivalSystem.reset();
+      status.textContent = 'Press ENTER to start';
+    }
+
+    // Prevent the demo player from moving through
+    // one of the registered rival meshes.
+    function playerBlocked(nextX, nextZ) {
+      for (const mesh of collidables) {
+        if (
+          Math.abs(nextX - mesh.position.x) < 2.7 &&
+          Math.abs(nextZ - mesh.position.z) < 5.2
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function updatePlayer(dt) {
+      if (!racing) return;
+
+      const accelerating =
+        keys.has('w') || keys.has('arrowup');
+
+      const braking =
+        keys.has('s') || keys.has('arrowdown');
+
+      if (accelerating) {
+        player.speed = Math.min(
+          28,
+          player.speed + 13 * dt
+        );
+      } else if (braking) {
+        player.speed = Math.max(
+          0,
+          player.speed - 24 * dt
+        );
+      } else {
+        player.speed = Math.max(
+          0,
+          player.speed - 3.5 * dt
+        );
+      }
+
+      let nextX = player.x;
+      let nextZ = Math.max(
+        ROAD_MIN + 3,
+        player.z - player.speed * dt
+      );
+
+      if (keys.has('a') || keys.has('arrowleft')) {
+        nextX -= 6 * dt;
+      }
+
+      if (keys.has('d') || keys.has('arrowright')) {
+        nextX += 6 * dt;
+      }
+
+      nextX = THREE.MathUtils.clamp(nextX, -7.5, 7.5);
+
+      if (!playerBlocked(nextX, nextZ)) {
+        player.x = nextX;
+        player.z = nextZ;
+      } else {
+        player.speed *= 0.65;
+
+        // Still allow a safe sideways movement.
+        if (!playerBlocked(nextX, player.z)) {
+          player.x = nextX;
+        }
+      }
+
+      playerMesh.position.set(player.x, 0, player.z);
+    }
+
+    const targetCameraPosition = new THREE.Vector3();
+    const cameraLook = new THREE.Vector3();
+
+    function updateCamera() {
+      targetCameraPosition.set(
+        player.x,
+        37,
+        player.z + 37
+      );
+
+      camera.position.lerp(targetCameraPosition, 0.08);
+
+      cameraLook.set(
+        player.x,
+        0,
+        player.z - 25
+      );
+
+      camera.lookAt(cameraLook);
+    }
+
+    function updateHud() {
+      hud.innerHTML = `
+        <strong>SHARP-SHARP · RIVAL TEST</strong><br>
+        Speed: ${(player.speed * 3.6).toFixed(0)} km/h<br>
+        Rivals beaten: ${beaten}/8<br>
+        Points: ${points}<br>
+        Position Z: ${player.z.toFixed(1)}<br>
+        Rival obstacles: ${collidables.size}
+      `;
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(clock.getDelta(), 1 / 30);
+
+      if (countdown >= 0) {
+        countdown -= dt;
+
+        if (countdown <= 0) {
+          countdown = -1;
+          racing = true;
+          rivalSystem.launch();
+          status.textContent = 'GO!';
+        } else {
+          status.textContent = String(Math.ceil(countdown));
+        }
+      }
+
+      updatePlayer(dt);
+
+      rivalSystem.update(dt, player);
+
+      if (racing && player.z < -60) {
+        status.textContent = 'RANK EXIT REACHED';
+      } else if (racing && player.z >= -60) {
+        status.textContent = beaten === 8
+          ? 'ALL RIVALS BEATEN!'
+          : 'OVERTAKE THE RIVALS';
+      }
+
+      updateCamera();
+
+      lastHudUpdate += dt;
+      if (lastHudUpdate >= 0.15) {
+        lastHudUpdate = 0;
+        updateHud();
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect =
+        window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(
+        window.innerWidth,
+        window.innerHeight
+      );
+    });
+
+    updateHud();
+    animate();
+  </script>
+</body>
+</html>

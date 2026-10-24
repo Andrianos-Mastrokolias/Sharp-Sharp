@@ -27,8 +27,9 @@ import { SkyManager } from '/src/graphics/SkyManager.js';
 import { MaterialLibrary } from '/src/graphics/MaterialLibrary.js';
 import { buildEnvironment } from '/src/world/environments/index.js';
 import { TrafficSystem } from '/src/world/TrafficSystem.js';
+import { RivalTaxiSystem } from '/src/world/RivalTaxis.js';
 import { LEVELS } from '/src/world/LevelManager.js';
-import { cameras, FOV, ASPECT } from '/tests/tools/cameras.mjs';
+import { cameras, FOV, ASPECT, VIEW_DISTANCE, taxiFocus } from '/tests/tools/cameras.mjs';
 
 const W = 1280, H = 720;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -39,26 +40,39 @@ renderer.setPixelRatio(1);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(FOV, ASPECT, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(FOV, ASPECT, 0.1, VIEW_DISTANCE[1]);
 const lighting = new LightingManager({ scene, renderer });
 const sky = new SkyManager({ scene, renderer });
 const materials = new MaterialLibrary(renderer);
 
 let env = null;
 let traffic = null;
+let rivals = null;
 
 // trafficSeconds: how far the (deterministic) traffic has driven from its
 // initial layout, so a capture can show cars at different places.
 window.loadLevel = async (level, trafficSeconds = 0) => {
   if (env) { env.dispose(); env = null; }
   if (traffic) { traffic.dispose(); traffic = null; }
+  if (rivals) { rivals.dispose(); rivals = null; }
   lighting.setLevel(level);
   sky.setLevel(level);
+  // as the game does (main.js): the far plane is the level's fog distance plus 40 m
+  camera.far = VIEW_DISTANCE[level];
+  camera.updateProjectionMatrix();
+  sky.setViewDistance(camera.far);
   env = buildEnvironment(level, { materials });
   scene.add(env.group);
   traffic = new TrafficSystem({ parent: scene });
   traffic.configure(LEVELS[level]);
   for (let t = 0; t < trafficSeconds; t += 1 / 30) traffic.update(1 / 30);
+
+  // Level 1's rank race: the 8 rival minibuses on their start grid
+  const { race, road } = LEVELS[level];
+  if (race) {
+    rivals = new RivalTaxiSystem({ parent: scene, registerCollidable() {} });
+    rivals.configure({ rivals: race.grid, road: { halfWidth: race.road.halfWidth, zMin: road.zMin, zMax: road.zMax }, direction: -1 });
+  }
   await sleep(4000);                       // textures + HDRI
   return { collidables: env.collidables.length, trafficCars: traffic.cars.length };
 };
@@ -72,6 +86,11 @@ window.shot = async (level, index) => {
   camera.position.set(...c.at);
   camera.lookAt(...c.to);
   camera.updateMatrixWorld(true);
+  // the sun's shadow camera and the sky dome follow the taxi, which stands 8 m in front of the camera
+  const [fx, fz] = taxiFocus(c);
+  const focus = new THREE.Vector3(fx, 0, fz);
+  lighting.updateShadowTracking({ position: focus });
+  sky.update(0, focus);
   let last = null;
   for (let i = 0; i < 40; i++) {
     renderer.render(scene, camera);

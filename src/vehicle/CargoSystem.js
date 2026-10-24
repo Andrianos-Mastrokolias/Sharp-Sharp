@@ -10,228 +10,144 @@ export class CargoSystem {
     onCargoLost = null
   }) {
     this.scene = scene;
-
     this.chassis = chassis;
-
     this.taxi = taxi;
-
     this.gravity = gravity;
-
-    this.onCargoLost =
-      onCargoLost;
+    this.onCargoLost = onCargoLost;
 
     this.strapCondition = 100;
-
     this.shiftX = 0;
     this.shiftZ = 0;
-
     this.velocityX = 0;
     this.velocityZ = 0;
+    this.groundHeightProvider = null;
 
-    this.items =
-      cargoItems.map(
-        (cargo) => ({
-          name:
-            cargo.name,
-
-          mesh:
-            cargo.mesh,
-
-          vulnerability:
-            cargo.vulnerability,
-
-          startPosition:
-            cargo.mesh.position.clone(),
-
-          stability: 100,
-
-          attached: true,
-
-          velocity:
-            new THREE.Vector3(),
-
-          spin:
-            new THREE.Vector3()
-        })
-      );
+    this.items = cargoItems.map((cargo) => ({
+      name: cargo.name,
+      mesh: cargo.mesh,
+      vulnerability: cargo.vulnerability,
+      startPosition: cargo.mesh.position.clone(),
+      stability: 100,
+      attached: true,
+      velocity: new THREE.Vector3(),
+      spin: new THREE.Vector3()
+    }));
   }
 
-  // --------------------------------------------------
-  // Cargo state API
-  // --------------------------------------------------
+  // ------------------------------------------------------------------
+  // Public state / integration API
+  // ------------------------------------------------------------------
 
-  getRemaining() {
-    return this.items.filter(
-      (item) =>
-        item.attached
-    ).length;
+  setGroundHeightProvider(provider) {
+    if (provider !== null && typeof provider !== 'function') {
+      throw new TypeError(
+        'Cargo ground height provider must be a function or null.'
+      );
+    }
+
+    this.groundHeightProvider = provider;
   }
 
-
-  getAverageStability() {
-    const attached =
-      this.items.filter(
-        (item) =>
-          item.attached
-      );
-
-
-    if (
-      attached.length === 0
-    ) {
+  getGroundHeight(x, z) {
+    if (!this.groundHeightProvider) {
       return 0;
     }
 
-
-    let total = 0;
-
-
-    for (
-      const item
-      of attached
-    ) {
-      total +=
-        item.stability;
-    }
-
-
-    return (
-      total /
-      attached.length
-    );
+    const height = this.groundHeightProvider(x, z);
+    return Number.isFinite(height) ? height : 0;
   }
 
+  getRemaining() {
+    return this.items.filter((item) => item.attached).length;
+  }
+
+  getLostItems() {
+    return this.items
+      .filter((item) => !item.attached)
+      .map((item) => item.name);
+  }
+
+  getAverageStability() {
+    const attached = this.items.filter((item) => item.attached);
+
+    if (attached.length === 0) {
+      return 0;
+    }
+
+    let total = 0;
+    for (const item of attached) {
+      total += item.stability;
+    }
+
+    return total / attached.length;
+  }
 
   getStatus() {
-    const remaining =
-      this.getRemaining();
+    const remaining = this.getRemaining();
+    const stability = this.getAverageStability();
 
-
-    const stability =
-      this.getAverageStability();
-
-
-    if (
-      remaining <= 1
-    ) {
-      return 'CRITICAL LOAD';
-    }
-
-
-    if (
-      remaining === 2
-    ) {
-      return 'CARGO WARNING';
-    }
-
-
-    if (
-      stability >= 70
-    ) {
-      return 'SECURE';
-    }
-
-
-    if (
-      stability >= 40
-    ) {
-      return 'SHIFTING';
-    }
-
-
-    if (
-      stability >= 15
-    ) {
-      return 'DANGER';
-    }
-
-
+    if (remaining <= 1) return 'CRITICAL LOAD';
+    if (remaining === 2) return 'CARGO WARNING';
+    if (stability >= 70) return 'SECURE';
+    if (stability >= 40) return 'SHIFTING';
+    if (stability >= 15) return 'DANGER';
     return 'CRITICAL';
   }
 
-
   getState() {
+    const lostItems = this.getLostItems();
+
     return {
-      remaining:
-        this.getRemaining(),
-
-      total:
-        this.items.length,
-
-      stability:
-        this.getAverageStability(),
-
-      straps:
-        this.strapCondition,
-
-      status:
-        this.getStatus()
+      remaining: this.getRemaining(),
+      total: this.items.length,
+      lost: lostItems.length,
+      lostItems,
+      stability: this.getAverageStability(),
+      straps: this.strapCondition,
+      status: this.getStatus()
     };
   }
 
-  // --------------------------------------------------
-  // Cargo stress
-  // --------------------------------------------------
+  // ------------------------------------------------------------------
+  // Stress / condition
+  // ------------------------------------------------------------------
 
   applyStress(amount) {
-    if (
-      amount <= 0
-    ) {
+    if (amount <= 0) {
       return;
     }
 
+    this.strapCondition -= amount * 0.35;
+    this.strapCondition = THREE.MathUtils.clamp(
+      this.strapCondition,
+      0,
+      100
+    );
 
-    this.strapCondition -=
-      amount *
-      0.35;
-
-
-    this.strapCondition =
-      THREE.MathUtils.clamp(
-        this.strapCondition,
-        0,
-        100
-      );
-
-
-    for (
-      const item
-      of this.items
-    ) {
-      if (
-        !item.attached
-      ) {
+    for (const item of this.items) {
+      if (!item.attached) {
         continue;
       }
 
-
       const strapWeakness =
-        1 +
-        (
-          100 -
-          this.strapCondition
-        ) /
-        100;
-
+        1 + (100 - this.strapCondition) / 100;
 
       item.stability -=
         amount *
         strapWeakness *
         item.vulnerability;
 
-
-      item.stability =
-        THREE.MathUtils.clamp(
-          item.stability,
-          0,
-          100
-        );
+      item.stability = THREE.MathUtils.clamp(
+        item.stability,
+        0,
+        100
+      );
     }
   }
 
-  // --------------------------------------------------
+  // ------------------------------------------------------------------
   // Attached cargo physics
-  // --------------------------------------------------
+  // ------------------------------------------------------------------
 
   updateAttached(
     dt,
@@ -239,176 +155,138 @@ export class CargoSystem {
       speed,
       previousSpeed,
       steeringInput,
-      suspensionVelocity
+      suspensionVelocity,
+      lateralVelocity = 0,
+      handbrake = false,
+      level = 1
     }
   ) {
     const acceleration =
-      (
-        speed -
-        previousSpeed
-      ) /
-      Math.max(
-        dt,
-        0.001
-      );
+      (speed - previousSpeed) /
+      Math.max(dt, 0.001);
 
+    // Forward/back movement from acceleration and braking.
+    const targetShiftZ = THREE.MathUtils.clamp(
+      acceleration * 0.012,
+      -0.35,
+      0.35
+    );
 
-    // Forward / back shift
-    const targetShiftZ =
-      THREE.MathUtils.clamp(
-        acceleration *
-        0.012,
-
-        -0.35,
-        0.35
-      );
-
-
-    // Sideways shift
+    // Sideways load shift now also reacts to actual taxi slip.
     const turningForce =
-      steeringInput *
-      Math.abs(speed) *
-      0.018;
+      steeringInput * Math.abs(speed) * 0.018 +
+      lateralVelocity * 0.055;
 
+    const targetShiftX = THREE.MathUtils.clamp(
+      turningForce * 1.15,
+      -0.39,
+      0.39
+    );
 
-    const targetShiftX =
-      THREE.MathUtils.clamp(
-        turningForce * 1.15,
-
-        -0.39,
-        0.39
-      );
-
-
-    // X spring
+    // X spring.
     this.velocityX +=
-      (
-        targetShiftX -
-        this.shiftX
-      ) *
+      (targetShiftX - this.shiftX) *
       14 *
       dt;
 
+    this.velocityX *= Math.pow(0.84, dt * 60);
+    this.shiftX += this.velocityX * dt;
 
-    this.velocityX *=
-      Math.pow(
-        0.84,
-        dt * 60
-      );
-
-
-    this.shiftX +=
-      this.velocityX *
-      dt;
-
-
-    // Z spring
+    // Z spring.
     this.velocityZ +=
-      (
-        targetShiftZ -
-        this.shiftZ
-      ) *
+      (targetShiftZ - this.shiftZ) *
       14 *
       dt;
 
+    this.velocityZ *= Math.pow(0.84, dt * 60);
+    this.shiftZ += this.velocityZ * dt;
 
-    this.velocityZ *=
-      Math.pow(
-        0.84,
-        dt * 60
-      );
-
-
-    this.shiftZ +=
-      this.velocityZ *
-      dt;
-
-
-    // --------------------------------------------------
-    // Continuous driving stress
-    // --------------------------------------------------
-
-    // Sharp driving only becomes dangerous above normal city speed.
-    // At ~20 m/s (~72 km/h), holding full steering for a few seconds
-    // should be able to throw cargo off the roof.
+    // Continuous driving stress.
     const absSpeed = Math.abs(speed);
     const steeringAmount = Math.abs(steeringInput);
 
     const corneringSpeed = THREE.MathUtils.clamp(
-      (absSpeed - 9) / 15, 0, 1.5
+      (absSpeed - 9) / 15,
+      0,
+      1.5
     );
 
-    // Quadratic response keeps gentle steering manageable, while
-    // a sudden/full-lock manoeuvre generates substantial stress.
-    const turningStress =
-      Math.pow(steeringAmount, 1.5) *
-      Math.pow(corneringSpeed, 1.5) *
-      19;
+    // --------------------------------------------------
+// Balanced driving stress
+// --------------------------------------------------
 
-    // Hard braking/accelerating stresses straps too.
-    const accelerationStress =
-      Math.max(0, Math.abs(acceleration) - 8) * 0.55;
+let turningStressRate = 5.5;
 
-    // applyStress() already scales individual item loss by cargo
-    // vulnerability and how worn the straps are.
-    this.applyStress(
-      (turningStress + accelerationStress) * dt
+if (level === 2) {
+  turningStressRate = 6;
+}
+
+if (level === 3) {
+  turningStressRate = 7;
+}
+
+
+// Turning stress
+const turningStress =
+  Math.pow(
+    steeringAmount,
+    1.7
+  ) *
+  Math.pow(
+    corneringSpeed,
+    1.7
+  ) *
+  turningStressRate;
+
+
+// Acceleration / braking stress
+const accelerationStress =
+  Math.max(
+    0,
+    Math.abs(acceleration) - 11
+  ) *
+  0.3;
+
+
+// Sliding / handbrake stress
+const slipStress =
+  Math.max(
+    0,
+    Math.abs(lateralVelocity) - 3.2
+  ) *
+  (
+    handbrake
+      ? 0.25
+      : 0.12
+  );
+
+
+this.applyStress(
+  (
+    turningStress +
+    accelerationStress +
+    slipStress
+  ) *
+  dt
+);
+    // Cargo visual wobble.
+    const bumpWobble = THREE.MathUtils.clamp(
+      suspensionVelocity * 0.035,
+      -0.14,
+      0.14
     );
 
+    for (let i = 0; i < this.items.length; i++) {
+      const item = this.items[i];
 
-    // --------------------------------------------------
-    // Cargo visual wobble
-    // --------------------------------------------------
-
-    const bumpWobble =
-      THREE.MathUtils.clamp(
-        suspensionVelocity *
-        0.035,
-
-        -0.14,
-        0.14
-      );
-
-
-    for (
-      let i = 0;
-      i < this.items.length;
-      i++
-    ) {
-      const item =
-        this.items[i];
-
-
-      if (
-        !item.attached
-      ) {
+      if (!item.attached) {
         continue;
       }
 
-
-      const instability =
-        1 -
-        item.stability /
-        100;
-
-
-      const wobbleMultiplier =
-        1 +
-        instability *
-        2.5;
-
-
-      const sideMultiplier =
-        0.7 +
-        i *
-        0.08;
-
-
-      const forwardMultiplier =
-        0.75 +
-        i *
-        0.07;
-
+      const instability = 1 - item.stability / 100;
+      const wobbleMultiplier = 1 + instability * 2.5;
+      const sideMultiplier = 0.7 + i * 0.08;
+      const forwardMultiplier = 0.75 + i * 0.07;
 
       item.mesh.position.x =
         item.startPosition.x +
@@ -416,22 +294,17 @@ export class CargoSystem {
         sideMultiplier *
         wobbleMultiplier;
 
-
       item.mesh.position.z =
         item.startPosition.z +
         this.shiftZ *
         forwardMultiplier *
         wobbleMultiplier;
 
-
       item.mesh.position.y =
         item.startPosition.y +
-        Math.abs(
-          bumpWobble
-        ) *
+        Math.abs(bumpWobble) *
         0.25 *
         item.vulnerability;
-
 
       item.mesh.rotation.z =
         this.shiftX *
@@ -439,277 +312,130 @@ export class CargoSystem {
         wobbleMultiplier *
         item.vulnerability;
 
-
       item.mesh.rotation.x =
         (
-          this.shiftZ *
-          0.5 +
+          this.shiftZ * 0.5 +
           bumpWobble
         ) *
         wobbleMultiplier *
         item.vulnerability;
 
-
-      if (
-        item.stability <= 5
-      ) {
-        this.detach(
-          item,
-          speed
-        );
+      if (item.stability <= 5) {
+        this.detach(item, speed);
       }
     }
   }
 
-  // --------------------------------------------------
-  // Detach cargo
-  // --------------------------------------------------
+  // ------------------------------------------------------------------
+  // Detach / loose cargo physics
+  // ------------------------------------------------------------------
 
-  detach(
-    item,
-    speed
-  ) {
-    if (
-      !item.attached
-    ) {
+  detach(item, speed) {
+    if (!item.attached) {
       return;
     }
 
-
-    this.scene.attach(
-      item.mesh
-    );
-
-
+    this.scene.attach(item.mesh);
     item.attached = false;
 
+    const forward = new THREE.Vector3(0, 0, -1);
+    forward.applyQuaternion(this.taxi.quaternion);
 
-    const forward =
-      new THREE.Vector3(
-        0,
-        0,
-        -1
-      );
+    const sideways = new THREE.Vector3(1, 0, 0);
+    sideways.applyQuaternion(this.taxi.quaternion);
 
+    item.velocity.copy(forward);
+    item.velocity.multiplyScalar(speed * 0.75);
 
-    forward.applyQuaternion(
-      this.taxi.quaternion
-    );
-
-
-    const sideways =
-      new THREE.Vector3(
-        1,
-        0,
-        0
-      );
-
-
-    sideways.applyQuaternion(
-      this.taxi.quaternion
-    );
-
-
-    item.velocity.copy(
-      forward
-    );
-
-
-    item.velocity.multiplyScalar(
-      speed *
-      0.75
-    );
-
-
-    const index =
-      this.items.indexOf(
-        item
-      );
-
-
-    const sideDirection =
-      index % 2 === 0
-        ? -1
-        : 1;
-
+    const index = this.items.indexOf(item);
+    const sideDirection = index % 2 === 0 ? -1 : 1;
 
     item.velocity.addScaledVector(
       sideways,
-
-      sideDirection *
-      1.8
+      sideDirection * 1.8
     );
-
 
     item.velocity.y =
-      2.5 +
-      Math.abs(speed) *
-      0.04;
-
+      2.5 + Math.abs(speed) * 0.04;
 
     item.spin.set(
-      2 +
-      index *
-      0.25,
-
+      2 + index * 0.25,
       1.5,
-
-      2.5 +
-      index *
-      0.2
+      2.5 + index * 0.2
     );
 
-
-    if (
-      this.onCargoLost
-    ) {
+    if (this.onCargoLost) {
       this.onCargoLost({
-        name:
-          item.name,
-
-        remaining:
-          this.getRemaining()
+        name: item.name,
+        remaining: this.getRemaining(),
+        lostItems: this.getLostItems()
       });
     }
   }
 
-  // --------------------------------------------------
-  // Detached cargo physics
-  // --------------------------------------------------
-
   updateDetached(dt) {
-    for (
-      const item
-      of this.items
-    ) {
-      if (
-        item.attached
-      ) {
+    const groundDamping = Math.pow(0.92, dt * 60);
+    const spinDamping = Math.pow(0.94, dt * 60);
+
+    for (const item of this.items) {
+      if (item.attached) {
         continue;
       }
 
+      item.velocity.y += this.gravity * 0.65 * dt;
+      item.mesh.position.addScaledVector(item.velocity, dt);
 
-      item.velocity.y +=
-        this.gravity *
-        0.65 *
-        dt;
+      item.mesh.rotation.x += item.spin.x * dt;
+      item.mesh.rotation.y += item.spin.y * dt;
+      item.mesh.rotation.z += item.spin.z * dt;
 
+      const groundHeight = this.getGroundHeight(
+        item.mesh.position.x,
+        item.mesh.position.z
+      );
 
-      item.mesh.position
-        .addScaledVector(
-          item.velocity,
-          dt
-        );
+      // Approximate half-height clearance. The previous version used
+      // a fixed world y=0.4, which made cargo fall through flyovers.
+      const floorY = groundHeight + 0.4;
 
+      if (item.mesh.position.y < floorY) {
+        item.mesh.position.y = floorY;
 
-      item.mesh.rotation.x +=
-        item.spin.x *
-        dt;
-
-
-      item.mesh.rotation.y +=
-        item.spin.y *
-        dt;
-
-
-      item.mesh.rotation.z +=
-        item.spin.z *
-        dt;
-
-
-      if (
-        item.mesh.position.y <
-        0.4
-      ) {
-        item.mesh.position.y =
-          0.4;
-
-
-        if (
-          Math.abs(
-            item.velocity.y
-          ) > 0.8
-        ) {
-          item.velocity.y *=
-            -0.25;
-
+        if (Math.abs(item.velocity.y) > 0.8) {
+          item.velocity.y *= -0.25;
         } else {
           item.velocity.y = 0;
         }
 
-
-        item.velocity.x *=
-          0.92;
-
-
-        item.velocity.z *=
-          0.92;
-
-
-        item.spin.multiplyScalar(
-          0.94
-        );
+        item.velocity.x *= groundDamping;
+        item.velocity.z *= groundDamping;
+        item.spin.multiplyScalar(spinDamping);
       }
     }
   }
 
-  // --------------------------------------------------
+  // ------------------------------------------------------------------
   // Reset
-  // --------------------------------------------------
+  // ------------------------------------------------------------------
 
   reset() {
     this.strapCondition = 100;
-
     this.shiftX = 0;
     this.shiftZ = 0;
-
     this.velocityX = 0;
     this.velocityZ = 0;
 
-
-    for (
-      const item
-      of this.items
-    ) {
-      if (
-        item.mesh.parent !==
-        this.chassis
-      ) {
-        this.chassis.attach(
-          item.mesh
-        );
+    for (const item of this.items) {
+      if (item.mesh.parent !== this.chassis) {
+        this.chassis.attach(item.mesh);
       }
 
-
       item.attached = true;
-
       item.stability = 100;
-
-
-      item.velocity.set(
-        0,
-        0,
-        0
-      );
-
-
-      item.spin.set(
-        0,
-        0,
-        0
-      );
-
-
-      item.mesh.position.copy(
-        item.startPosition
-      );
-
-
-      item.mesh.rotation.set(
-        0,
-        0,
-        0
-      );
+      item.velocity.set(0, 0, 0);
+      item.spin.set(0, 0, 0);
+      item.mesh.position.copy(item.startPosition);
+      item.mesh.rotation.set(0, 0, 0);
     }
   }
 }

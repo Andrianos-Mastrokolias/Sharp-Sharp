@@ -22,9 +22,12 @@ import { EffectsManager } from './graphics/EffectsManager.js';
 import { DustSystem } from './graphics/DustSystem.js';
 import { MaterialLibrary } from './graphics/MaterialLibrary.js';
 import { SkyManager } from './graphics/SkyManager.js';
-
+import { SkylineManager } from './graphics/SkylineManager.js';
 import { LevelManager, LEVELS } from './world/LevelManager.js';
-import { createBox, MAIN_POTHOLES } from './world/environments/helpers.js';
+import {
+  createBox,
+  MAIN_POTHOLES
+} from './world/environments/helpers.js';
 
 import { LoadingScreen } from './ui/LoadingScreen.js';
 import {
@@ -40,8 +43,18 @@ import {
   levelSelectHTML,
   creditsHTML
 } from './ui/screens.js';
+
 import { Hud } from './ui/Hud.js';
 import { CREDITS } from './ui/credits.js';
+import { GameAudio } from './audio/GameAudio.js';
+import { readPreferences, savePreferences, applyQuality } from './game/preferences.js';
+import { settingsHTML } from './ui/settings.js';
+
+let preferenceStorage;
+try { preferenceStorage = window.localStorage; } catch { /* Storage is optional. */ }
+let preferences = readPreferences(preferenceStorage);
+const audio = new GameAudio();
+audio.setVolume(preferences.muted ? 0 : preferences.volume);
 
 // ============================================================
 // GAME CONFIGURATION
@@ -52,12 +65,11 @@ const LAST_LEVEL = 3;
 const MINIMUM_CARGO = 2;
 
 const LEVEL_DESCRIPTIONS = {
-  1: 'Drive from the taxi rank to the CBD. Avoid traffic, protect your roof cargo and escape the pursuer.',
-  2: 'Take on the highway in the midday heat. Choose between the ground road and the flyover, avoid hazards and reach your delivery.',
-  3: 'Survive load shedding at night. Headlights help you see potholes but make you easier for the pursuer to detect.'
+  1: 'A whole household is strapped to your roof, and every driver at the rank wants the fare. Race out ahead of the other taxis, then run the CBD before the police pull over your overloaded taxi.',
+  2: 'The city streets are jammed, so you take the highway at midday. Choose the ground road or the flyover, and watch your straps: the faster you go, the looser they get.',
+  3: 'Load shedding: the power is out and the township is pitch black. Your headlights show the potholes but also give you away to the police, so choose when to switch them on.'
 };
 
-// Game phases keep the player from driving during menus.
 const GamePhase = Object.freeze({
   MENU: 'menu',
   INTRO: 'intro',
@@ -76,9 +88,6 @@ const results = [];
 // LOADING SCREEN
 // ============================================================
 
-// Must exist before the graphics systems and taxi below start
-// their loaders. The main menu only appears once everything has
-// loaded.
 new LoadingScreen({
   onComplete: () => showMainMenu()
 });
@@ -101,8 +110,11 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance'
 });
 
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(
+  window.innerWidth,
+  window.innerHeight
+);
+applyQuality(renderer, preferences.quality, window.devicePixelRatio);
 
 document.body.appendChild(renderer.domElement);
 
@@ -110,13 +122,18 @@ document.body.appendChild(renderer.domElement);
 // GRAPHICS SYSTEMS
 // ============================================================
 
-const lighting = new LightingManager({ scene, renderer });
+const lighting = new LightingManager({
+  scene,
+  renderer
+});
+
 const effects = new EffectsManager({ scene });
 const materials = new MaterialLibrary(renderer);
 const skyManager = new SkyManager({ scene, renderer });
-
+// Distant Johannesburg skyline for Levels 1 and 2.
+const skylineManager = new SkylineManager({ scene });
 // These arrays are shared with VehicleController.
-// LevelManager adds and removes each environment's objects.
+// LevelManager adds and removes environment objects.
 const collidableObjects = [];
 
 const potholes = MAIN_POTHOLES.map(pothole => ({
@@ -153,12 +170,15 @@ const cargoSystem = new CargoSystem({
   gravity: -22,
 
   onCargoLost: event => {
+    if (phase === GamePhase.PLAYING) audio.cue('cargo');
     // Don't trigger a second failure after the level has ended.
     if (
       phase === GamePhase.PLAYING &&
       event.remaining < MINIMUM_CARGO
     ) {
-      failLevel('Eish, the load came off the roof. Too much cargo was lost.');
+      failLevel(
+        'Eish, the load came off the roof. Too much cargo was lost.'
+      );
     }
   }
 });
@@ -174,14 +194,16 @@ const vehicle = new VehicleController({
   frontWheelPivots,
   cargoSystem,
   collidableObjects,
-  potholes
+  potholes,
+  onCollision: speed => {
+    if (phase === GamePhase.PLAYING && speed > 1) audio.cue('impact');
+  }
 });
 
 vehicle.setLevel(FIRST_LEVEL);
 vehicle.setGroundHeightProvider(null);
 vehicle.reset();
 
-// Don't allow driving until the player starts.
 vehicle.setEnabled(false);
 
 // ============================================================
@@ -225,22 +247,47 @@ const dustSystem = new DustSystem({
 // LEVEL VISUALS
 // ============================================================
 
-// The existing graphics managers already know what to do for
-// Level 1, 2 and 3. We simply call them automatically.
+// Nothing is visible beyond the fog's far distance, so the camera does not
+// draw further than that (plus a margin): on the long roads a far plane of
+// 1000 m would draw most of the level at once. The sky is scaled to fit.
+const VIEW_DISTANCE_MARGIN = 40;
+
+
+function applyGraphicsQuality() {
+  const lowQuality = preferences.quality === 'low';
+
+  // Disable shadow rendering on Low quality.
+  renderer.shadowMap.enabled = !lowQuality;
+  lighting.sun.castShadow = !lowQuality;
+
+  // Heat haze is only available in Level 2,
+  // and is disabled entirely on Low quality.
+  effects.setHeatHazeEnabled(
+    !lowQuality && currentLevel === 2
+  );
+
+  // Dust is only available outside Low quality.
+  // DustSystem handles which levels actually use it.
+  dustSystem.setEnabled(!lowQuality);
+}
+
+
 function applyLevelVisuals(level) {
   lighting.setLevel(level);
   effects.setLevel(level);
   dustSystem.setLevel(level);
   skyManager.setLevel(level);
+skylineManager.setLevel(level);
+  camera.far = scene.fog.far + VIEW_DISTANCE_MARGIN;
+  camera.updateProjectionMatrix();
+  skyManager.setViewDistance(camera.far);
+  applyGraphicsQuality();
 }
 
 // ============================================================
 // SCREEN UI
 // ============================================================
 
-// Styled in ui/theme.css. The shop-front backdrop only shows on
-// the menu screens (data-variant="menu"); in-game screens get a
-// translucent scrim over the 3D scene instead.
 const screen = document.createElement('div');
 screen.className = 'ss-screen';
 screen.innerHTML = menuBackdropHTML();
@@ -251,7 +298,6 @@ panel.className = 'ss-panel';
 screen.appendChild(panel);
 document.body.appendChild(screen);
 
-// Every button is wired through this object.
 const screenActions = {
   startGame: () => {
     results.length = 0;
@@ -287,52 +333,88 @@ const screenActions = {
   },
 
   mainMenu: () => {
-    // Rebuild Level 1 behind the menu so the previous level
-    // isn't left on screen.
     loadLevel(FIRST_LEVEL, { showIntro: false });
     phase = GamePhase.MENU;
     showMainMenu();
   },
 
-  // Menu sub-screens stay in the MENU phase, so Esc / P do
-  // nothing here.
   levelSelect: () => {
-    showScreen(levelSelectHTML(LEVELS, LEVEL_DESCRIPTIONS), 'menu');
+    showScreen(
+      levelSelectHTML(
+        LEVELS,
+        LEVEL_DESCRIPTIONS
+      ),
+      'menu'
+    );
   },
 
-  // All levels are unlocked; starts a fresh run from that level.
   playLevel: ({ level }) => {
     results.length = 0;
     loadLevel(Number(level));
   },
 
   credits: () => {
-    showScreen(creditsHTML(CREDITS), 'menu');
+    showScreen(
+      creditsHTML(CREDITS),
+      'menu'
+    );
   },
 
   backToMenu: () => {
     showMainMenu();
+  },
+
+  settings: () => {
+    if (phase !== GamePhase.MENU && phase !== GamePhase.PAUSED) return;
+    showScreen(settingsHTML(preferences), phase === GamePhase.MENU ? 'menu' : 'scrim');
+  },
+
+  closeSettings: () => {
+    if (phase === GamePhase.PAUSED) {
+      pauseGame();
+    } else {
+      showMainMenu();
+    }
   }
 };
 
-// Event delegation keeps all buttons functional even when the
-// screen's HTML changes.
 panel.addEventListener('click', event => {
-  const button = event.target.closest('button[data-action]');
+  const button = event.target.closest(
+    'button[data-action]'
+  );
 
   if (!button) return;
 
-  const action = screenActions[button.dataset.action];
+  const action = screenActions[
+    button.dataset.action
+  ];
 
   // data-* attributes (e.g. data-level) are passed through.
-  if (action) action(button.dataset);
+  if (action) {
+    void audio.unlock();
+    action(button.dataset);
+  }
 });
 
-// variant: 'menu' (shop-front backdrop hides the scene) or
-// 'scrim' (in-game screens over the 3D scene).
+panel.addEventListener('input', event => {
+  const input = event.target;
+  if (!['volume', 'muted', 'quality'].includes(input.name)) return;
+  const value = input.name === 'volume' ? Number(input.value) / 100
+    : input.name === 'muted' ? input.checked : input.value;
+  preferences = savePreferences(preferenceStorage, { ...preferences, [input.name]: value });
+  audio.setVolume(preferences.muted ? 0 : preferences.volume);
+  applyQuality(renderer, preferences.quality, window.devicePixelRatio);
+  const output = panel.querySelector('output');
+  if (output) output.value = `${Math.round(preferences.volume * 100)}%`;
+  // Update shadows, heat haze and dust immediately.
+applyGraphicsQuality();
+});
+
 function showScreen(html, variant = 'scrim') {
+  audio.setActive(false);
   panel.innerHTML = html;
   panel.scrollTop = 0;
+
   screen.dataset.variant = variant;
   screen.classList.add('visible');
 }
@@ -346,7 +428,10 @@ function hideScreen() {
 // ============================================================
 
 function showMainMenu() {
-  showScreen(mainMenuHTML(LEVELS), 'menu');
+  showScreen(
+    mainMenuHTML(LEVELS),
+    'menu'
+  );
 }
 
 // ============================================================
@@ -360,16 +445,22 @@ function showLevelIntro(level) {
   showScreen(`
     <div class="ss-column">
       <div class="sign">
-        <div class="sign-head">LEVEL ${level} OF ${LAST_LEVEL}</div>
+        <div class="sign-head">
+          LEVEL ${level} OF ${LAST_LEVEL}
+        </div>
 
         <div class="sign-body">
           <div class="sign-row ss-intro-title">
             <span class="sign-code">${route.code}</span>
             <span class="sign-name">${config.name}</span>
-            <span class="sign-arrow" aria-hidden="true">${route.arrow}</span>
+            <span class="sign-arrow" aria-hidden="true">
+              ${route.arrow}
+            </span>
           </div>
 
-          <p class="sign-text">${LEVEL_DESCRIPTIONS[level]}</p>
+          <p class="sign-text">
+            ${LEVEL_DESCRIPTIONS[level]}
+          </p>
 
           ${signStat('Objective', 'Reach the destination')}
           ${signStat('Minimum cargo', MINIMUM_CARGO)}
@@ -381,7 +472,9 @@ function showLevelIntro(level) {
 
       ${decalButton('beginLevel', `START LEVEL ${level}`)}
 
-      ${labelRow(labelButton('mainMenu', 'MAIN MENU'))}
+      ${labelRow(
+        labelButton('mainMenu', 'MAIN MENU')
+      )}
     </div>
   `);
 }
@@ -391,12 +484,12 @@ function showLevelIntro(level) {
 // ============================================================
 
 function completeLevel(event) {
-  if (phase !== GamePhase.PLAYING) return;
+  if (phase !== GamePhase.PLAYING) {
+    return;
+  }
 
   const cargo = event.cargo;
 
-  // Defensive check: a delivery only counts if enough cargo
-  // actually reaches the destination.
   if (cargo.remaining < MINIMUM_CARGO) {
     failLevel(
       'Eish, the load came off the roof. ' +
@@ -417,7 +510,6 @@ function completeLevel(event) {
     totalCargo: cargo.total
   };
 
-  // Replace any previous result for this level.
   const existingIndex = results.findIndex(
     item => item.level === currentLevel
   );
@@ -428,7 +520,6 @@ function completeLevel(event) {
     results.push(result);
   }
 
-  // The last successful delivery completes the entire game.
   if (currentLevel === LAST_LEVEL) {
     finishGame();
     return;
@@ -437,17 +528,42 @@ function completeLevel(event) {
   showScreen(`
     <div class="ss-column">
       ${lockup([
-        [{ text: 'laduma!', bg: 'ink', font: 'rye' }],
-        [{ text: 'DELIVERED', bg: 'maroon', font: 'bungee' }]
+        [
+          {
+            text: 'laduma!',
+            bg: 'ink',
+            font: 'rye'
+          }
+        ],
+        [
+          {
+            text: 'DELIVERED',
+            bg: 'maroon',
+            font: 'bungee'
+          }
+        ]
       ])}
 
       <div class="sign">
-        <div class="sign-head">LEVEL ${currentLevel} COMPLETE</div>
+        <div class="sign-head">
+          LEVEL ${currentLevel} COMPLETE
+        </div>
 
         <div class="sign-body">
-          ${signStat('Delivery time', `${event.time.toFixed(1)} s`)}
-          ${signStat('Cargo delivered', `${cargo.remaining} / ${cargo.total}`)}
-          ${signStat('Next destination', LEVELS[currentLevel + 1].name)}
+          ${signStat(
+            'Delivery time',
+            `${event.time.toFixed(1)} s`
+          )}
+
+          ${signStat(
+            'Cargo delivered',
+            `${cargo.remaining} / ${cargo.total}`
+          )}
+
+          ${signStat(
+            'Next destination',
+            LEVELS[currentLevel + 1].name
+          )}
         </div>
       </div>
 
@@ -465,9 +581,10 @@ function completeLevel(event) {
 // LEVEL FAILED
 // ============================================================
 
-// flavour: the Rye word in the GAME OVER lockup
 function failLevel(reason, flavour = 'eish') {
-  if (phase !== GamePhase.PLAYING) return;
+  if (phase !== GamePhase.PLAYING) {
+    return;
+  }
 
   phase = GamePhase.FAILED;
 
@@ -479,24 +596,43 @@ function failLevel(reason, flavour = 'eish') {
   showScreen(`
     <div class="ss-column">
       ${lockup([[
-        { text: flavour, bg: 'ink', font: 'rye' },
-        { text: 'GAME OVER', bg: 'maroon', font: 'bungee' }
+        {
+          text: flavour,
+          bg: 'ink',
+          font: 'rye'
+        },
+        {
+          text: 'GAME OVER',
+          bg: 'maroon',
+          font: 'bungee'
+        }
       ]])}
 
       <p class="ss-reason">${reason}</p>
 
       <div class="sign">
-        <div class="sign-head">DELIVERY FAILED</div>
+        <div class="sign-head">
+          DELIVERY FAILED
+        </div>
 
         <div class="sign-body">
-          ${signStat('Level', `${currentLevel} — ${LEVELS[currentLevel].name}`)}
-          ${signStat('Cargo remaining', `${cargo.remaining} / ${cargo.total}`)}
+          ${signStat(
+            'Level',
+            `${currentLevel} — ${LEVELS[currentLevel].name}`
+          )}
+
+          ${signStat(
+            'Cargo remaining',
+            `${cargo.remaining} / ${cargo.total}`
+          )}
         </div>
       </div>
 
       ${decalButton('retryLevel', 'RETRY LEVEL')}
 
-      ${labelRow(labelButton('mainMenu', 'MAIN MENU'))}
+      ${labelRow(
+        labelButton('mainMenu', 'MAIN MENU')
+      )}
     </div>
   `);
 }
@@ -506,7 +642,9 @@ function failLevel(reason, flavour = 'eish') {
 // ============================================================
 
 function pauseGame() {
-  if (phase !== GamePhase.PLAYING) return;
+  if (phase !== GamePhase.PLAYING && phase !== GamePhase.PAUSED) {
+    return;
+  }
 
   phase = GamePhase.PAUSED;
   vehicle.setEnabled(false);
@@ -516,17 +654,30 @@ function pauseGame() {
     <div class="ss-column">
       ${lockup([
         [
-          { text: 'take a breather', bg: 'ink', font: 'rye' },
-          { text: 'PAUSED', bg: 'mustard', font: 'slab' }
+          {
+            text: 'take a breather',
+            bg: 'ink',
+            font: 'rye'
+          },
+          {
+            text: 'PAUSED',
+            bg: 'mustard',
+            font: 'slab'
+          }
         ],
-        [{
-          text: `LEVEL ${currentLevel} · ${LEVELS[currentLevel].name.toUpperCase()}`,
-          bg: 'cream',
-          font: 'sign'
-        }]
+        [
+          {
+            text:
+              `LEVEL ${currentLevel} · ` +
+              LEVELS[currentLevel].name.toUpperCase(),
+            bg: 'cream',
+            font: 'sign'
+          }
+        ]
       ])}
 
       ${decalButton('resume', 'RESUME')}
+      ${labelButton('settings', 'SETTINGS')}
 
       ${labelRow(
         labelButton('retryLevel', 'RETRY'),
@@ -539,11 +690,15 @@ function pauseGame() {
 }
 
 function resumeGame() {
-  if (phase !== GamePhase.PAUSED) return;
+  if (phase !== GamePhase.PAUSED) {
+    return;
+  }
 
   phase = GamePhase.PLAYING;
+
   hideScreen();
   clearKeys();
+
   vehicle.setEnabled(true);
 
   // Discard the paused time so physics doesn't jump.
@@ -558,40 +713,74 @@ function resumeGame() {
 
 function finishGame() {
   phase = GamePhase.FINISHED;
+
   vehicle.setEnabled(false);
   clearKeys();
 
-  // A run started from level select only contains the levels
-  // that were played, so don't claim every load was delivered.
   const allLevelsDone = Object.keys(LEVELS)
-    .every(level => results.some(item => item.level === Number(level)));
+    .every(level =>
+      results.some(
+        item => item.level === Number(level)
+      )
+    );
 
   if (!allLevelsDone) {
-    const result = results.find(item => item.level === LAST_LEVEL);
+    const result = results.find(
+      item => item.level === LAST_LEVEL
+    );
 
     showScreen(`
-    <div class="ss-column">
-      ${lockup([
-        [{ text: 'laduma!', bg: 'ink', font: 'rye' }],
-        [{ text: 'DELIVERED', bg: 'maroon', font: 'bungee' }]
-      ])}
+      <div class="ss-column">
+        ${lockup([
+          [
+            {
+              text: 'laduma!',
+              bg: 'ink',
+              font: 'rye'
+            }
+          ],
+          [
+            {
+              text: 'DELIVERED',
+              bg: 'maroon',
+              font: 'bungee'
+            }
+          ]
+        ])}
 
-      <div class="sign">
-        <div class="sign-head">LEVEL ${LAST_LEVEL} COMPLETE</div>
+        <div class="sign">
+          <div class="sign-head">
+            LEVEL ${LAST_LEVEL} COMPLETE
+          </div>
 
-        <div class="sign-body">
-          ${signStat('Delivery time', `${result.time.toFixed(1)} s`)}
-          ${signStat('Cargo delivered', `${result.cargo} / ${result.totalCargo}`)}
+          <div class="sign-body">
+            ${signStat(
+              'Delivery time',
+              `${result.time.toFixed(1)} s`
+            )}
+
+            ${signStat(
+              'Cargo delivered',
+              `${result.cargo} / ${result.totalCargo}`
+            )}
+          </div>
         </div>
-      </div>
-      ${decalButton('retryLevel', `REPLAY LEVEL ${LAST_LEVEL}`)}
 
-      ${labelRow(
-        labelButton('playAgain', 'PLAY ALL FROM LEVEL 1'),
-        labelButton('mainMenu', 'MAIN MENU')
-      )}
-    </div>
-  `);
+        ${decalButton(
+          'retryLevel',
+          `REPLAY LEVEL ${LAST_LEVEL}`
+        )}
+
+        ${labelRow(
+          labelButton(
+            'playAgain',
+            'PLAY ALL FROM LEVEL 1'
+          ),
+          labelButton('mainMenu', 'MAIN MENU')
+        )}
+      </div>
+    `);
+
     return;
   }
 
@@ -602,27 +791,49 @@ function finishGame() {
 
   const resultRows = results
     .sort((a, b) => a.level - b.level)
-    .map(result => signStat(
-      `${ROUTES[result.level]?.code ?? `L${result.level}`} · ${result.name}`,
-      `${result.time.toFixed(1)} s`
-    ))
+    .map(result =>
+      signStat(
+        `${ROUTES[result.level]?.code ?? `L${result.level}`} · ${result.name}`,
+        `${result.time.toFixed(1)} s`
+      )
+    )
     .join('');
 
   showScreen(`
     <div class="ss-column">
       ${lockup([
-        [{ text: 'ayoba!', bg: 'ink', font: 'rye' }],
-        [{ text: 'ALL DELIVERED', bg: 'maroon', font: 'bungee' }]
+        [
+          {
+            text: 'ayoba!',
+            bg: 'ink',
+            font: 'rye'
+          }
+        ],
+        [
+          {
+            text: 'ALL DELIVERED',
+            bg: 'maroon',
+            font: 'bungee'
+          }
+        ]
       ])}
 
-      <p class="ss-reason">Sharp-sharp, driver. Every load delivered.</p>
+      <p class="ss-reason">
+        Sharp-sharp, driver. Every load delivered.
+      </p>
 
       <div class="sign">
-        <div class="sign-head">ALL DELIVERIES COMPLETE</div>
+        <div class="sign-head">
+          ALL DELIVERIES COMPLETE
+        </div>
 
         <div class="sign-body">
           ${resultRows}
-          ${signStat('Total driving time', `${totalTime.toFixed(1)} s`)}
+
+          ${signStat(
+            'Total driving time',
+            `${totalTime.toFixed(1)} s`
+          )}
         </div>
 
         <div class="sign-chevron chevron"></div>
@@ -631,7 +842,10 @@ function finishGame() {
       ${decalButton('playAgain', 'PLAY ALL AGAIN')}
 
       ${labelRow(
-        labelButton('retryLevel', `REPLAY LEVEL ${LAST_LEVEL}`),
+        labelButton(
+          'retryLevel',
+          `REPLAY LEVEL ${LAST_LEVEL}`
+        ),
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
@@ -653,16 +867,18 @@ const levelManager = new LevelManager({
 
   getHeadlightsEnabled,
 
-  // Your existing LevelManager calls this when the taxi
-  // reaches the destination and is slow enough.
   onDelivered: event => {
     completeLevel(event);
   },
 
-  // Your existing pursuit system triggers this if caught.
   onCaptured: () => {
-    failLevel('Haibo! The pursuer caught you.', 'haibo!');
-  }
+    failLevel(
+      'Haibo! The pursuer caught you.',
+      'haibo!'
+    );
+  },
+
+  onPedestrianHit: () => audio.cue('pedestrianHit')
 });
 
 // ============================================================
@@ -671,43 +887,50 @@ const levelManager = new LevelManager({
 
 function loadLevel(level, { showIntro = true } = {}) {
   if (!LEVELS[level]) {
-    console.error(`Level ${level} does not exist.`);
+    console.error(
+      `Level ${level} does not exist.`
+    );
     return;
   }
 
   // Disable gameplay while transitioning.
+  audio.setActive(false);
   phase = GamePhase.INTRO;
+
   vehicle.setEnabled(false);
   clearKeys();
 
   currentLevel = level;
 
-  // Update vehicle-specific handling and cargo stress settings.
+  // Vehicle-specific handling and cargo stress.
   vehicle.setLevel(level);
 
-  // Automatically change sun, fog, HDRI, sky, dust and heat haze.
+  // Lighting, fog, HDRI, sky, dust and heat haze.
   applyLevelVisuals(level);
 
-  // Builds the correct environment, traffic, hazards, pursuit,
-  // destination markers, spawn point and route.
+  // Environment, traffic, hazards, pursuit and spawn.
   const loaded = levelManager.load(level);
 
   if (!loaded) {
-    console.error(`Unable to load level ${level}.`);
+    console.error(
+      `Unable to load level ${level}.`
+    );
+
     phase = GamePhase.MENU;
     showMainMenu();
     return;
   }
 
-  // LevelManager.load() resets the taxi; keep controls disabled
-  // until the player presses START LEVEL.
   vehicle.setEnabled(false);
 
-  // Remove any particles left over from the previous level.
   dustSystem.reset();
 
-  // Every level starts with the headlights off.
+  // Every level starts with headlights off.
   setHeadlightsEnabled(false);
+
+  // NEW: Immediately reposition the directional
+  // shadow camera after LevelManager resets the taxi.
+  lighting.updateShadowTracking(taxi);
 
   if (showIntro) {
     showLevelIntro(level);
@@ -719,7 +942,6 @@ function loadLevel(level, { showIntro = true } = {}) {
 // ============================================================
 
 function retryCurrentLevel() {
-  // Rebuild the current level rather than jumping back to Level 1.
   loadLevel(currentLevel);
 }
 
@@ -728,6 +950,9 @@ function retryCurrentLevel() {
 // ============================================================
 
 const keys = {};
+
+// What the vehicle is given while the Level 1 countdown holds the taxi
+const NO_KEYS = Object.freeze({});
 
 function clearKeys() {
   for (const code in keys) {
@@ -744,13 +969,17 @@ window.addEventListener('keydown', event => {
     'Space'
   ];
 
+  if (event.target.matches?.('input, select, textarea')) return;
+
   if (movementKeys.includes(event.code)) {
     event.preventDefault();
   }
 
-  // Esc / P toggle pause, only from gameplay or the pause panel.
   if (
-    (event.code === 'Escape' || event.code === 'KeyP') &&
+    (
+      event.code === 'Escape' ||
+      event.code === 'KeyP'
+    ) &&
     !event.repeat
   ) {
     // The same Esc that dropped pointer lock already paused.
@@ -770,12 +999,17 @@ window.addEventListener('keydown', event => {
     return;
   }
 
-  // Only movement/gameplay keys are stored while playing.
-  if (phase !== GamePhase.PLAYING) return;
+  if (phase !== GamePhase.PLAYING) {
+    return;
+  }
+
+  if (!event.repeat) void audio.unlock();
 
   keys[event.code] = true;
 
-  if (event.repeat) return;
+  if (event.repeat) {
+    return;
+  }
 
   switch (event.code) {
     case 'KeyR':
@@ -795,7 +1029,7 @@ window.addEventListener('keydown', event => {
       break;
 
     // No Digit1 / Digit2 / Digit3 handlers.
-    // Levels are now unlocked by successful deliveries.
+    // Level progression is managed by the game.
   }
 });
 
@@ -803,13 +1037,16 @@ window.addEventListener('keyup', event => {
   keys[event.code] = false;
 });
 
-window.addEventListener('blur', clearKeys);
+window.addEventListener('blur', () => { clearKeys(); pauseGame(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) pauseGame();
+});
+window.addEventListener('pagehide', () => audio.dispose());
 
 // ============================================================
 // HUD
 // ============================================================
 
-// Built once; updateHUD() feeds it the live state each frame.
 const hud = new Hud();
 
 // ============================================================
@@ -820,10 +1057,13 @@ function formatCameraName(mode) {
   switch (mode) {
     case 'CHASE':
       return 'Chase';
+
     case 'BUMPER':
       return 'Bumper';
+
     case 'INTERIOR':
       return 'Interior';
+
     default:
       return mode;
   }
@@ -853,41 +1093,68 @@ const clock = new THREE.Clock();
 // ============================================================
 
 function animate() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const dt = Math.min(
+    clock.getDelta(),
+    0.05
+  );
+
   const elapsedTime = clock.getElapsedTime();
 
   // Keyboard keys, merged with the mouse when mouse drive is on.
   const input = mouseDrive.update(dt, keys, phase === GamePhase.PLAYING);
 
-  // Only run active vehicle physics during gameplay.
+  // Only run active vehicle physics during gameplay. The level can lock
+  // input (e.g. the rank-race countdown holds the taxi still until GO).
   if (phase === GamePhase.PLAYING) {
-    vehicle.update(dt, input);
+    vehicle.update(dt, levelManager.inputLocked ? NO_KEYS : input);
 
-    // Handles destination detection, pursuit and traffic.
-    // May call completeLevel() or failLevel() this frame.
+    // Destination detection, traffic and pursuit.
+    // This may change the game phase.
     if (phase === GamePhase.PLAYING) {
-      levelManager.update(dt, elapsedTime);
+      levelManager.update(
+        dt,
+        elapsedTime
+      );
     }
   } else if (phase !== GamePhase.PAUSED) {
-    // Allows already-detached cargo to continue falling.
-    // Frozen while paused, like the rest of the simulation.
+    // Detached cargo can finish falling outside gameplay.
     cargoSystem.updateDetached(dt);
   }
 
   cameraSystem.update(dt);
 
-  // Graphics continue animating in menus and completion screens.
-  updateVisualEffects(elapsedTime);
-  effects.update(elapsedTime);
-  skyManager.update(elapsedTime);
+  // ========================================================
+  // NEW: FOLLOW TAXI WITH DIRECTIONAL SUN SHADOWS
+  // ========================================================
 
+  // Keep the sun and its shadow target aligned with the
+  // taxi's latest position, including after restarts.
+  // The direction and intensity set by each level remain
+  // unchanged.
+  lighting.updateShadowTracking(taxi);
+
+  // ========================================================
+  // GRAPHICS
+  // ========================================================
+
+  updateVisualEffects(elapsedTime);
+
+  effects.update(elapsedTime);
+
+  skyManager.update(elapsedTime, taxi.position);
+// Keep the distant skyline following the taxi.
+skylineManager.update(taxi.position);
   if (phase === GamePhase.PLAYING) {
     dustSystem.update(dt);
   }
 
   updateHUD();
 
+  audio.setActive(phase === GamePhase.PLAYING && !document.hidden);
+  audio.update(dt, vehicle.getSpeed(), levelManager.getState().pursuit.state, keys.Space);
+
   renderer.render(scene, camera);
+
   requestAnimationFrame(animate);
 }
 
@@ -896,7 +1163,10 @@ function animate() {
 // ============================================================
 
 window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+  applyQuality(renderer, preferences.quality, window.devicePixelRatio);
+  camera.aspect =
+    window.innerWidth / window.innerHeight;
+
   camera.updateProjectionMatrix();
 
   renderer.setSize(
@@ -911,12 +1181,17 @@ window.addEventListener('resize', () => {
 
 // Build Level 1 behind the opening menu.
 vehicle.setLevel(FIRST_LEVEL);
+
 applyLevelVisuals(FIRST_LEVEL);
+
 levelManager.load(FIRST_LEVEL);
 
-// The vehicle must not move until PLAY GAME → START LEVEL.
+// NEW: Centre the starting shadow area on the taxi.
+lighting.updateShadowTracking(taxi);
+
+// The vehicle must not move until gameplay starts.
 vehicle.setEnabled(false);
 
-// The main menu is shown by the loading screen once every
-// asset has loaded.
+// The loading screen shows the main menu once
+// all required assets finish loading.
 animate();

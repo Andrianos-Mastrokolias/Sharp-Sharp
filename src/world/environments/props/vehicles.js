@@ -44,6 +44,8 @@ const WHEEL = 0x101112;
 const WHITE = 0xffffff;
 
 const TAIL_EMISSIVE = 0xff2418;
+// Warm-white LED headlights.
+const HEAD_EMISSIVE = 0xfff0ce;
 
 
 // width / length in metres, paint colour
@@ -239,21 +241,43 @@ export function createTrafficCar(
     )
   );
 
-  const paintGeometry =
-    mergeGeometries(paintParts);
+  // Two headlights on the front of the vehicle (local -Z).
+// Small emissive boxes avoid expensive real-time lights.
+const headParts = [-1, 1].map(
+  (side) => paint(
+    new THREE.BoxGeometry(0.32, 0.13, 0.05)
+      .translate(
+        side * (w / 2 - 0.28),
+        0.70,
+        -l / 2 - 0.02
+      ),
+    WHITE
+  )
+);
 
-  const tailGeometry =
-    mergeGeometries(tailParts);
+ // Combine each part category into one geometry.
+const paintGeometry = mergeGeometries(paintParts);
+const tailGeometry = mergeGeometries(tailParts);
+const headGeometry = mergeGeometries(headParts);
 
-  const geometry =
-    mergeGeometries(
-      [paintGeometry, tailGeometry],
-      true
-    );
+// One vehicle mesh with three material groups:
+// body, red taillights and warm-white headlights.
+const geometry = mergeGeometries(
+  [paintGeometry, tailGeometry, headGeometry],
+  true
+);
 
-  for (const part of [...paintParts, ...tailParts, paintGeometry, tailGeometry]) {
-    part.dispose();
-  }
+  // Dispose temporary geometry after merging.
+for (const part of [
+  ...paintParts,
+  ...tailParts,
+  ...headParts,
+  paintGeometry,
+  tailGeometry,
+  headGeometry
+]) {
+  part.dispose();
+}
 
   geometry.computeBoundingBox();
 
@@ -266,31 +290,49 @@ export function createTrafficCar(
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
 
-  return {
-    geometry,
-    material: [
-      cachedMaterial(
-        cache,
-        `paint:${spec.color}`,
-        () => new THREE.MeshStandardMaterial({
-          color: spec.color,
-          vertexColors: true,
-          roughness: 0.6,
-          metalness: 0.1
-        })
-      ),
-      cachedMaterial(
-        cache,
-        'tail',
-        () => new THREE.MeshStandardMaterial({
-          color: 0x2a0806,
-          emissive: TAIL_EMISSIVE,
-          emissiveIntensity: 0.9,
-          roughness: 0.5
-        })
-      )
-    ]
-  };
+  
+return {
+  geometry,
+
+  material: [
+    // Vehicle body material.
+    cachedMaterial(
+      cache,
+      `paint:${spec.color}`,
+      () => new THREE.MeshStandardMaterial({
+        color: spec.color,
+        vertexColors: true,
+        roughness: 0.6,
+        metalness: 0.1
+      })
+    ),
+
+    // Rear red emissive taillights.
+    cachedMaterial(
+      cache,
+      'tail',
+      () => new THREE.MeshStandardMaterial({
+        color: 0x2a0806,
+        emissive: TAIL_EMISSIVE,
+        emissiveIntensity: 0.9,
+        roughness: 0.5
+      })
+    ),
+
+    // Front warm-white emissive headlights.
+    cachedMaterial(
+      cache,
+      'head',
+      () => new THREE.MeshStandardMaterial({
+        color: 0x29251e,
+        emissive: HEAD_EMISSIVE,
+        emissiveIntensity: 1.2,
+        roughness: 0.35
+      })
+    )
+  ]
+};
+
 }
 
 

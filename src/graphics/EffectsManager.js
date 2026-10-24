@@ -4,6 +4,95 @@ import {
   createHeatHazeMaterial
 } from '../shaders/HeatHazeShader.js';
 
+import {
+  roadFor
+} from '../world/roads.js';
+
+
+// ==================================================
+// HEAT HAZE LAYOUT
+// --------------------------------------------------
+// Each haze layer is one plane laid over the road. A level's
+// road is far longer than a plane, so a layer is a row of
+// identical tiles sharing one geometry and one material.
+// The shader fades a tile to nothing at both ends, so tiles are
+// spaced at half their length: neighbours overlap by 50% and the
+// seams do not show. (Stretching one plane over the whole road
+// would stretch the shimmer bands.) Every tile is frustum
+// culled, so only the ones in view are drawn.
+//
+// The tiles keep the original planes' places: one tile of each
+// layer is exactly where that plane always was.
+// ==================================================
+
+const LOWER_HAZE = {
+  width: 16,
+  length: 240,
+  segments: [40, 120],
+  y: 0.13,
+  z: -45
+};
+
+const UPPER_HAZE = {
+  width: 15,
+  length: 210,
+  segments: [32, 100],
+  y: 0.28,
+  z: -40
+};
+
+// The small vertical shimmer; one every 190 m
+const HORIZON_HAZE = {
+  width: 18,
+  height: 7,
+  segments: [50, 20],
+  y: 2.2,
+  z: -95,
+  spacing: 190
+};
+
+
+// Centres of a row of tiles `length` long, `spacing` apart, one of
+// them at `z0`, that together cover [zMin, zMax]
+function tileCentres(
+  z0,
+  length,
+  spacing,
+  zMin,
+  zMax
+) {
+
+  const centres =
+    [];
+
+
+  for (
+    let k = Math.ceil(
+      (zMin - length / 2 - z0) /
+      spacing
+    );
+    z0 + k * spacing - length / 2 < zMax;
+    k++
+  ) {
+
+    const z =
+      z0 + k * spacing;
+
+
+    if (
+      z + length / 2 > zMin
+    ) {
+
+      centres.push(
+        z
+      );
+    }
+  }
+
+
+  return centres;
+}
+
 
 export class EffectsManager {
 
@@ -24,7 +113,7 @@ export class EffectsManager {
 
 
     // ==================================================
-    // HEAT HAZE MATERIAL
+    // HEAT HAZE MATERIALS
     // ==================================================
 
     this.heatHazeMaterial =
@@ -37,70 +126,6 @@ export class EffectsManager {
       .value =
         0;
 
-
-    // ==================================================
-    // LOWER ROAD HAZE
-    // ==================================================
-    //
-    // This is the main shimmer layer.
-    // ==================================================
-
-    const lowerGeometry =
-      new THREE.PlaneGeometry(
-
-        16,
-
-        240,
-
-        40,
-
-        120
-      );
-
-
-    this.lowerHeatHaze =
-      new THREE.Mesh(
-
-        lowerGeometry,
-
-        this.heatHazeMaterial
-      );
-
-
-    this.lowerHeatHaze.rotation.x =
-      -Math.PI / 2;
-
-
-    this.lowerHeatHaze.position.set(
-
-      0,
-
-      0.13,
-
-      -45
-    );
-
-
-    this.lowerHeatHaze.renderOrder =
-      4;
-
-
-    this.lowerHeatHaze.frustumCulled =
-      false;
-
-
-    this.scene.add(
-      this.lowerHeatHaze
-    );
-
-
-    // ==================================================
-    // UPPER HAZE LAYER
-    // ==================================================
-    //
-    // A second softer layer gives the heat effect more
-    // depth and makes it easier to see from chase view.
-    // ==================================================
 
     this.upperHeatHazeMaterial =
       createHeatHazeMaterial();
@@ -120,55 +145,6 @@ export class EffectsManager {
       .uIntensity
       .value =
         0;
-
-
-    const upperGeometry =
-      new THREE.PlaneGeometry(
-
-        15,
-
-        210,
-
-        32,
-
-        100
-      );
-
-
-    this.upperHeatHaze =
-      new THREE.Mesh(
-
-        upperGeometry,
-
-        this.upperHeatHazeMaterial
-      );
-
-
-    this.upperHeatHaze.rotation.x =
-      -Math.PI / 2;
-
-
-    this.upperHeatHaze.position.set(
-
-      0,
-
-      0.28,
-
-      -40
-    );
-
-
-    this.upperHeatHaze.renderOrder =
-      5;
-
-
-    this.upperHeatHaze.frustumCulled =
-      false;
-
-
-    this.scene.add(
-      this.upperHeatHaze
-    );
 
 
     // ==================================================
@@ -199,58 +175,155 @@ export class EffectsManager {
         0;
 
 
-    const horizonGeometry =
+    // ==================================================
+    // SHARED TILE GEOMETRIES
+    // ==================================================
+
+    this.lowerGeometry =
       new THREE.PlaneGeometry(
-
-        18,
-
-        7,
-
-        50,
-
-        20
+        LOWER_HAZE.width,
+        LOWER_HAZE.length,
+        ...LOWER_HAZE.segments
       );
 
 
-    this.horizonHeatHaze =
-      new THREE.Mesh(
-
-        horizonGeometry,
-
-        this.horizonHeatMaterial
+    this.upperGeometry =
+      new THREE.PlaneGeometry(
+        UPPER_HAZE.width,
+        UPPER_HAZE.length,
+        ...UPPER_HAZE.segments
       );
 
 
-    this.horizonHeatHaze.position.set(
-
-      0,
-
-      2.2,
-
-      -95
-    );
+    this.horizonGeometry =
+      new THREE.PlaneGeometry(
+        HORIZON_HAZE.width,
+        HORIZON_HAZE.height,
+        ...HORIZON_HAZE.segments
+      );
 
 
-    this.horizonHeatHaze.renderOrder =
-      6;
+    // The tiles of each layer (rebuilt for every level's road)
+    this.lowerTiles =
+      [];
+
+    this.upperTiles =
+      [];
+
+    this.horizonTiles =
+      [];
 
 
-    this.horizonHeatHaze.frustumCulled =
+    this.hazeEnabled =
       false;
 
-
-    this.scene.add(
-      this.horizonHeatHaze
-    );
-
-
-    // ==================================================
-    // START DISABLED
-    // ==================================================
 
     this.setHeatHazeEnabled(
       false
     );
+  }
+
+
+  // ==================================================
+  // TILES
+  // ==================================================
+
+  // One row of tiles of a layer over the road [zMin, zMax]
+  buildTiles(
+    list,
+    {
+      geometry,
+      material,
+      renderOrder,
+      y,
+      z,
+      length,
+      spacing,
+      flat
+    },
+    zMin,
+    zMax
+  ) {
+
+    for (
+      const centre
+      of tileCentres(
+        z,
+        length,
+        spacing,
+        zMin,
+        zMax
+      )
+    ) {
+
+      const tile =
+        new THREE.Mesh(
+          geometry,
+          material
+        );
+
+
+      if (
+        flat
+      ) {
+
+        tile.rotation.x =
+          -Math.PI / 2;
+      }
+
+
+      tile.position.set(
+        0,
+        y,
+        centre
+      );
+
+
+      tile.renderOrder =
+        renderOrder;
+
+
+      tile.visible =
+        this.hazeEnabled;
+
+
+      this.scene.add(
+        tile
+      );
+
+
+      list.push(
+        tile
+      );
+    }
+  }
+
+
+  clearTiles() {
+
+    for (
+      const list
+      of [
+        this.lowerTiles,
+        this.upperTiles,
+        this.horizonTiles
+      ]
+    ) {
+
+      for (
+        const tile
+        of list
+      ) {
+
+        this.scene.remove(
+          tile
+        );
+      }
+
+
+      list.length =
+        0;
+    }
   }
 
 
@@ -264,50 +337,126 @@ export class EffectsManager {
       level;
 
 
-    // ----------------------------------------------
-    // LEVEL 1
-    // ----------------------------------------------
-
-    if (
-      level === 1
-    ) {
-
-      this.setHeatHazeEnabled(
-        false
-      );
+    this.clearTiles();
 
 
-      return;
-    }
-
-
-    // ----------------------------------------------
-    // LEVEL 2
-    // ----------------------------------------------
+    // Only Level 2 (midday on the motorway) has heat haze
 
     if (
       level === 2
     ) {
 
-      this.setHeatHazeEnabled(
-        true
+      const {
+        zMin,
+        zMax
+      } =
+        roadFor(
+          level
+        );
+
+
+      this.hazeEnabled =
+        true;
+
+
+      this.buildTiles(
+        this.lowerTiles,
+        {
+          geometry:
+            this.lowerGeometry,
+
+          material:
+            this.heatHazeMaterial,
+
+          renderOrder:
+            4,
+
+          y:
+            LOWER_HAZE.y,
+
+          z:
+            LOWER_HAZE.z,
+
+          length:
+            LOWER_HAZE.length,
+
+          spacing:
+            LOWER_HAZE.length / 2,
+
+          flat:
+            true
+        },
+        zMin,
+        zMax
       );
 
 
-      return;
-    }
+      this.buildTiles(
+        this.upperTiles,
+        {
+          geometry:
+            this.upperGeometry,
+
+          material:
+            this.upperHeatHazeMaterial,
+
+          renderOrder:
+            5,
+
+          y:
+            UPPER_HAZE.y,
+
+          z:
+            UPPER_HAZE.z,
+
+          length:
+            UPPER_HAZE.length,
+
+          spacing:
+            UPPER_HAZE.length / 2,
+
+          flat:
+            true
+        },
+        zMin,
+        zMax
+      );
 
 
-    // ----------------------------------------------
-    // LEVEL 3
-    // ----------------------------------------------
+      this.buildTiles(
+        this.horizonTiles,
+        {
+          geometry:
+            this.horizonGeometry,
 
-    if (
-      level === 3
-    ) {
+          material:
+            this.horizonHeatMaterial,
+
+          renderOrder:
+            6,
+
+          y:
+            HORIZON_HAZE.y,
+
+          z:
+            HORIZON_HAZE.z,
+
+          length:
+            0,
+
+          spacing:
+            HORIZON_HAZE.spacing,
+
+          flat:
+            false
+        },
+        zMin,
+        zMax
+      );
+
 
       this.setHeatHazeEnabled(
-        false
+        true
       );
 
 
@@ -325,60 +474,49 @@ export class EffectsManager {
   // ENABLE / DISABLE
   // ==================================================
 
-  setHeatHazeEnabled(
-    enabled
-  ) {
+  
+  // ==================================================
+  // ENABLE / DISABLE
+  // ==================================================
 
-    this.lowerHeatHaze.visible =
-      enabled;
+  setHeatHazeEnabled(enabled) {
 
+    // Store whether the heat haze is active.
+    this.hazeEnabled = enabled;
 
-    this.upperHeatHaze.visible =
-      enabled;
+    // Show or hide every haze tile.
+    for (const list of [
+      this.lowerTiles,
+      this.upperTiles,
+      this.horizonTiles
+    ]) {
+      for (const tile of list) {
+        tile.visible = enabled;
+      }
+    }
 
+    // Reduced intensity prevents neighbouring lower tiles
+    // from creating an excessively bright road surface.
+    this.heatHazeMaterial.uniforms.uIntensity.value =
+      enabled ? 0.70 : 0;
 
-    this.horizonHeatHaze.visible =
-      enabled;
+    // Keep the upper shimmer subtle so overlapping layers
+    // blend naturally with the road.
+    this.upperHeatHazeMaterial.uniforms.uIntensity.value =
+      enabled ? 0.45 : 0;
 
-
-    this.heatHazeMaterial
-      .uniforms
-      .uIntensity
-      .value =
-
-        enabled
-          ? 1.15
-          : 0;
-
-
-    this.upperHeatHazeMaterial
-      .uniforms
-      .uIntensity
-      .value =
-
-        enabled
-          ? 0.75
-          : 0;
-
-
-    this.horizonHeatMaterial
-      .uniforms
-      .uIntensity
-      .value =
-
-        enabled
-          ? 0.65
-          : 0;
+    // The distant shimmer should remain faint.
+    this.horizonHeatMaterial.uniforms.uIntensity.value =
+      enabled ? 0.40 : 0;
   }
+
 
 
   // ==================================================
   // UPDATE
   // ==================================================
 
-  update(
-    elapsedTime
-  ) {
+  update(elapsedTime) {
 
     this.heatHazeMaterial
       .uniforms
@@ -408,9 +546,9 @@ export class EffectsManager {
     // slightly independent.
     // --------------------------------------------------
 
-    this.upperHeatHaze.position.y =
+    const upperY =
 
-      0.28 +
+      UPPER_HAZE.y +
 
       Math.sin(
         elapsedTime *
@@ -420,9 +558,19 @@ export class EffectsManager {
       0.025;
 
 
-    this.horizonHeatHaze.position.y =
+    for (
+      const tile
+      of this.upperTiles
+    ) {
 
-      2.2 +
+      tile.position.y =
+        upperY;
+    }
+
+
+    const horizonY =
+
+      HORIZON_HAZE.y +
 
       Math.sin(
         elapsedTime *
@@ -430,5 +578,15 @@ export class EffectsManager {
       ) *
 
       0.08;
+
+
+    for (
+      const tile
+      of this.horizonTiles
+    ) {
+
+      tile.position.y =
+        horizonY;
+    }
   }
 }

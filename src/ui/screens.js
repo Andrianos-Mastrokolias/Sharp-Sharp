@@ -195,7 +195,8 @@ export function mainMenuHTML(levels) {
             ${controlsList()}
           </details>`,
           labelButton('levelSelect', 'SELECT LEVEL'),
-          labelButton('credits', 'CREDITS')
+          labelButton('credits', 'CREDITS'),
+          labelButton('settings', 'SETTINGS')
         )}
       </div>
 

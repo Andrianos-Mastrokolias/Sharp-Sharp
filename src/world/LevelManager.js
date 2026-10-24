@@ -5,7 +5,9 @@ import {
   ELEVATION_ENTRY_TOLERANCE
 } from './PursuitSystem.js';
 import { TrafficSystem } from './TrafficSystem.js';
+import { RivalTaxiSystem } from './RivalTaxis.js';
 import { buildEnvironment } from './environments/index.js';
+import { ROADS, vehicleBounds } from './roads.js';
 
 // ==================================================
 // LEVEL DEFINITIONS
@@ -20,15 +22,22 @@ import { buildEnvironment } from './environments/index.js';
 // VehicleController.reset()).
 // ==================================================
 
-// Sent to vehicle.setBounds() on load. Level 2 is still squeezed
-// into the old +-30 / +-190 box; give a level its own numbers
-// here when it needs more room - warnIfRouteOutOfBounds() will
-// flag any route that outgrows them.
-const VEHICLE_BOUNDS = {
-  minX: -30,
-  maxX: 30,
-  minZ: -190,
-  maxZ: 190
+// A level's length is data: its road (z range) lives in roads.js,
+// and what is sent to vehicle.setBounds() on load (x +-30 and the
+// road's z range less a 10 m margin at each end) is derived from it.
+// warnIfRouteOutOfBounds() flags any route that outgrows them.
+const L1_ROAD = ROADS[1];
+const L2_ROAD = ROADS[2];
+const L3_ROAD = ROADS[3];
+
+// What running over a pedestrian does to the taxi (vehicle.applyHit): it
+// loses 30% of its speed, the cargo takes a little stress and the suspension a
+// kick. Nothing happens to the police. On Level 1 it also costs 50 points
+// (registerPedestrianHit, L1_RACE.points.pedestrian).
+const PEDESTRIAN_HIT = {
+  speedLoss: 0.3,
+  stress: 2,
+  kick: 0.3
 };
 
 // A raised section only lifts the taxi if it is already near the
@@ -47,14 +56,27 @@ const VEHICLE_BOUNDS = {
 // PursuitSystem.js.
 // ==================================================
 
-// Level 1: appears near the end of the run
-const L1_PURSUIT_TRIGGER_PROGRESS = 0.66;  // along spawn -> destination
-const L1_PURSUIT_SPAWN_DISTANCE = 30;      // behind the taxi
+// Level 1: the police appear once the taxi is 0.55 of the 900 m run along,
+// z -325, about 400 m before the goal. spawnDistance is the head start with no
+// rival beaten; LevelManager lengthens it for every rival beaten, from the
+// count at the moment the police spawn (see L1_RACE.headStart).
+const L1_PURSUIT_TRIGGER_PROGRESS = 0.55;  // along spawn -> destination
+const L1_PURSUIT_SPAWN_DISTANCE = 25;      // behind the taxi, nobody beaten
 const L1_PURSUIT_SPEED = 1.15;
 const L1_PURSUIT_LOSE_RANGE = 120;
 const L1_PURSUIT_LOSE_TIME = 5;
 const L1_PURSUIT_CAPTURE_DISTANCE = 6.4;
 const L1_PURSUIT_CAPTURE_TIME = 1.5;
+
+// Balance (tests/tools/pursuit-balance.mjs): the police held the taxi tight for
+// the whole stumbleSurgeTime after a stumble (a drop of 8 m/s or more), and
+// that was longer than captureTime, so one mistake caught the player. The
+// surge is now shorter, and the pressure line (the speed below which the gap
+// closes, a fraction of top speed) lower and slower to build. PursuitSystem.js's
+// own defaults are 2 s, 0.9 and 0.5, and Level 3 keeps them.
+const L1_PURSUIT_STUMBLE_SURGE_TIME = 1.4;       // s (the catch rate falls off a cliff at 1.3: do not go lower)
+const L1_PURSUIT_PRESSURE_SPEED_FRACTION = 0.8;
+const L1_PURSUIT_PRESSURE_RISE_RATE = 0.3;       // per second, at a standstill
 
 // Level 2: on the ground lane from the start, at the taxi's top speed.
 // It follows onto the flyover too (ramp toe -> deck -> back down), a
@@ -67,32 +89,41 @@ const L2_PURSUIT_LOSE_RANGE = 120;
 const L2_PURSUIT_LOSE_TIME = 3;
 const L2_PURSUIT_CAPTURE_DISTANCE = 6.4;
 const L2_PURSUIT_CAPTURE_TIME = 1.5;
+const L2_PURSUIT_STUMBLE_SURGE_TIME = 1.25;      // s (see the Level 1 note above)
+const L2_PURSUIT_PRESSURE_SPEED_FRACTION = 0.8;
+const L2_PURSUIT_PRESSURE_RISE_RATE = 0.3;
 const L2_PURSUIT_LANE_MIN_X = -9;
 const L2_PURSUIT_LANE_MAX_X = 2;           // ground lane; flyover starts at x 3
 
 // Level 3: detection range is the stealth tradeoff against
 // the unlit potholes (lights on = seen from far away).
-// The taxi spawns at z -170 and the pursuer's 30 m spawn offset is
-// clamped by the world bounds to ~15 m behind it. The 1 s start delay
+// The taxi spawns at z -600 and the pursuer's 30 m spawn offset fits
+// inside the world bounds (road z -660, bounds -650). The 1 s start delay
 // and the 120 m lights-on radius mean a taxi that starts with its
 // lights on is always inside the radius when the pursuer wakes (no
 // activateAfterDelay needed), while lights off (15 m) stays unseen.
+
 const L3_PURSUIT_START_DELAY = 1;
-const L3_PURSUIT_SPAWN_DISTANCE = 30;      // behind the spawn
+const L3_PURSUIT_SPAWN_DISTANCE = 30;
 const L3_PURSUIT_SPEED = 1.15;
+
+// HEADLIGHT DETECTION
 const L3_PURSUIT_DETECTION_LIGHTS_ON = 120;
 const L3_PURSUIT_DETECTION_LIGHTS_OFF = 15;
+
+// LOSING THE PURSUER
 const L3_PURSUIT_LOSE_RANGE_LIGHTS_ON = 170;
 const L3_PURSUIT_LOSE_RANGE_LIGHTS_OFF = 30;
 const L3_PURSUIT_LOSE_TIME = 4;
+
+// CAPTURE
 const L3_PURSUIT_CAPTURE_DISTANCE = 6.4;
 const L3_PURSUIT_CAPTURE_TIME = 1.5;
-// Patrol: woken without seeing the taxi, it drives +Z down its lane at
-// this speed (a blind taxi above it pulls away, one below it is caught
-// up) and stops 40 m short of the destination. Reaction: first sighting
-// makes it stop and flash this long before the chase starts.
+
+// PATROL AND REACTION
 const L3_PURSUIT_PATROL_SPEED = 17;
 const L3_PURSUIT_REACTION_TIME = 1.5;
+
 
 
 // ==================================================
@@ -102,7 +133,7 @@ const L3_PURSUIT_REACTION_TIME = 1.5;
 // +1 = oncoming), speed (m/s, constant), count, variants (any of
 // hatchback / sedan / bakkie / minibus). At most 10 cars a level.
 // Lanes run across the whole road (zLo..zHi, inside the vehicle's
-// z +-190): cars enter at one end and leave at the other, far from
+// z bounds): cars enter at one end and leave at the other, far from
 // the spawn. The clearances only shape the initial layout. See
 // TrafficSystem.js. Level 3 (stealth) has no traffic.
 //
@@ -111,9 +142,23 @@ const L3_PURSUIT_REACTION_TIME = 1.5;
 // taxi, and ~3.5 m to the road edge (x +-9).
 // ==================================================
 
-// The stretch of road the lanes run on
-const TRAFFIC_LANE_Z_LO = -185;
-const TRAFFIC_LANE_Z_HI = 185;
+// The stretch of road the lanes run on: the vehicle's z bounds less 5 m
+// at each end (the original -185..185)
+const TRAFFIC_LANE_END_MARGIN = 5;
+
+const trafficLaneRange = road => {
+  const bounds = vehicleBounds(road);
+
+  return {
+    zLo: bounds.minZ + TRAFFIC_LANE_END_MARGIN,
+    zHi: bounds.maxZ - TRAFFIC_LANE_END_MARGIN
+  };
+};
+
+// Cars per metre as on the original 370 m lanes (Level 1: 4 + 4,
+// Level 2: 3 + 4), so the count follows the road: Level 1's lanes now start
+// after the rank's exit line (they are 680 m: 7 + 7 cars, cap 16). Level 2's
+// are 1130 m; its cap is 16 (7 + 9), a little under the original density.
 
 // At the start nobody is this close to the spawn bay / the delivery zone
 const TRAFFIC_SPAWN_CLEARANCE = 40;
@@ -122,20 +167,82 @@ const TRAFFIC_DESTINATION_CLEARANCE = 35;
 const L1_TRAFFIC_SEED = 1101;
 const L1_TRAFFIC_SAME_X = -4.5;
 const L1_TRAFFIC_SAME_SPEED = 9;
-const L1_TRAFFIC_SAME_COUNT = 4;
+const L1_TRAFFIC_SAME_COUNT = 7;
 const L1_TRAFFIC_ONCOMING_X = 4.5;
 const L1_TRAFFIC_ONCOMING_SPEED = 12;
-const L1_TRAFFIC_ONCOMING_COUNT = 4;
+const L1_TRAFFIC_ONCOMING_COUNT = 7;
+const L1_TRAFFIC_MAX_CARS = 16;
+
+// ==================================================
+// LEVEL 1: THE RANK RACE (hand-tunable)
+// --------------------------------------------------
+// The taxi starts in the middle of a bunched grid of 8 rival minibuses on
+// the rank (z 170 to -60, exit line at -60). After a 3 s countdown (the
+// taxi and the rivals held still) the rivals launch. Phases: countdown ->
+// racing -> cbd (taxi over the exit line) -> chase (police spawned).
+//
+// Grid: 3 columns (x -6, 0, 6) by 3 rows (z 158, 170, 182, 12 m apart), the
+// taxi in the middle cell (0, 170) which is the spawn. The minibus is 1.97 x
+// 5.30 m and the taxi's box 2.70 x 4.60 m, so in a column the taxi is 7.05 m
+// and two rivals 6.7 m clear of each other, and across the columns the taxi is
+// 3.67 m and two rivals 4.03 m clear; the outermost rival edge is at |x| 6.99,
+// inside the road (x +-9) and short of the Level 1 kerb zone (|x| 7.2), and the
+// rank's solid props are all outside |x| 9. tests/rank-race.test.mjs checks it.
+// ==================================================
+
+const L1_RANK_EXIT_Z = -60;
+
+const L1_RACE = {
+
+  countdown: 3,                       // s, taxi and rivals held
+
+  road: { halfWidth: 9 },
+
+  // The line the first car over wins the bonus for
+  exitZ: L1_RANK_EXIT_Z,
+
+  // After the exit line, each rival is released (removed) once it is at
+  // least gap m behind the taxi and the taxi is past z; all the rest are
+  // released when the taxi passes allZ
+  release: { z: -140, allZ: -250, gap: 25 },
+
+  points: { beaten: 100, firstOut: 300, pedestrian: -50 },
+
+  // Police head start (m behind the taxi) = base + perRival x rivals beaten,
+  // read at the moment they spawn, capped
+  headStart: {
+    base: L1_PURSUIT_SPAWN_DISTANCE,
+    perRival: 10,
+    max: 105
+  },
+
+  // The car straight ahead of the taxi is a racer (it pulls away at launch):
+  // a brake-checker there stops dead 12 m in front of a taxi that launches
+  // straight, and the first contact freezes it (RivalTaxiSystem.blocked)
+  grid: [
+    { x: -6, z: 158, personality: 'weaver', topSpeed: 20 },
+    { x: 0, z: 158, personality: 'racer', topSpeed: 22 },
+    { x: 6, z: 158, personality: 'cutter', topSpeed: 22 },
+
+    { x: -6, z: 170, personality: 'brake-checker', topSpeed: 18 },
+    { x: 6, z: 170, personality: 'racer', topSpeed: 21 },
+
+    { x: -6, z: 182, personality: 'cutter', topSpeed: 21 },
+    { x: 0, z: 182, personality: 'weaver', topSpeed: 19 },
+    { x: 6, z: 182, personality: 'brake-checker', topSpeed: 17 }
+  ]
+};
 
 // Level 2: same direction only. Flyover footprint is x >= 3 (traffic
 // must stay at x < 2), so both lanes sit on the ground side.
 const L2_TRAFFIC_SEED = 2202;
 const L2_TRAFFIC_LANE_A_X = 0;
 const L2_TRAFFIC_LANE_A_SPEED = 13;
-const L2_TRAFFIC_LANE_A_COUNT = 3;
+const L2_TRAFFIC_LANE_A_COUNT = 7;
 const L2_TRAFFIC_LANE_B_X = -3.6;
 const L2_TRAFFIC_LANE_B_SPEED = 17;
-const L2_TRAFFIC_LANE_B_COUNT = 4;
+const L2_TRAFFIC_LANE_B_COUNT = 9;
+const L2_TRAFFIC_MAX_CARS = 16;
 
 
 // Spawn bay / destination ring / beam are unlit (MeshBasicMaterial), so
@@ -159,30 +266,37 @@ export const LEVELS = {
   1: {
     name: 'Rank to CBD',
 
+    road: L1_ROAD,
+
+    // 900 m run towards -z from the top of the road
     spawn: {
       x: 0,
-      z: 60,
+      z: 170,
       heading: 0
     },
 
     // Waypoints are for the route guide / future traffic
     // and pursuit paths. The last one is the destination.
     route: [
-      { x: 0, z: 60 },
-      { x: 0, z: -150 }
+      { x: 0, z: 170 },
+      { x: 0, z: -730 }
     ],
 
     destination: {
       x: 0,
-      z: -150,
+      z: -730,
       radius: 8,
 
       // Taxi must be (nearly) stopped inside the zone
       maxDeliverSpeed: 4
     },
 
-    // Pursuit begins near the end: a pursuer appears behind the
-    // taxi once it is two thirds along the route.
+    // The rank race (see L1_RACE) and no yellow spawn bay under the grid
+    race: L1_RACE,
+
+    spawnBay: false,
+
+    // Pursuit begins once the taxi is 0.55 of the way along the route.
     pursuit: {
       mode: 'trigger',
       triggerProgress: L1_PURSUIT_TRIGGER_PROGRESS,
@@ -192,13 +306,20 @@ export const LEVELS = {
       loseRange: L1_PURSUIT_LOSE_RANGE,
       loseTime: L1_PURSUIT_LOSE_TIME,
       captureDistance: L1_PURSUIT_CAPTURE_DISTANCE,
-      captureTime: L1_PURSUIT_CAPTURE_TIME
+      captureTime: L1_PURSUIT_CAPTURE_TIME,
+      stumbleSurgeTime: L1_PURSUIT_STUMBLE_SURGE_TIME,
+      pressureSpeedFraction: L1_PURSUIT_PRESSURE_SPEED_FRACTION,
+      pressureRiseRate: L1_PURSUIT_PRESSURE_RISE_RATE
     },
 
     traffic: {
       seed: L1_TRAFFIC_SEED,
-      zLo: TRAFFIC_LANE_Z_LO,
-      zHi: TRAFFIC_LANE_Z_HI,
+      maxCars: L1_TRAFFIC_MAX_CARS,
+
+      // Nothing in the rank: the lanes start just past its exit line, so
+      // a car never wraps near the start
+      zLo: trafficLaneRange(L1_ROAD).zLo,
+      zHi: L1_RANK_EXIT_Z - 5,
       spawnClearance: TRAFFIC_SPAWN_CLEARANCE,
       destinationClearance: TRAFFIC_DESTINATION_CLEARANCE,
       lanes: [
@@ -221,17 +342,21 @@ export const LEVELS = {
 
     markerBrightness: 1,
 
-    // The vehicle also hard-clamps to x +-30, z +-190
-    boundaries: VEHICLE_BOUNDS
+    // The vehicle also hard-clamps to x +-30 and the road's z range
+    boundaries: vehicleBounds(L1_ROAD)
   },
 
 
   2: {
     name: 'The Highway',
 
+    road: L2_ROAD,
+
     // Midday visuals/speed tuning are applied elsewhere
     // (applyLevelVisuals / vehicle.setLevel).
 
+    // 1100 m run towards -z; the speed bump (z 25), the potholes
+    // (z 5, -20, -50) and the flyover (z 10..-110) are where they were
     spawn: {
       x: 0,
       z: 170,
@@ -241,7 +366,7 @@ export const LEVELS = {
     // Default guide route (the ground lane).
     route: [
       { x: 0, z: 170 },
-      { x: 0, z: -165 }
+      { x: 0, z: -930 }
     ],
 
     // Route choice: both end at the same destination.
@@ -254,7 +379,7 @@ export const LEVELS = {
         id: 'ground',
         waypoints: [
           { x: 0, z: 170 },
-          { x: 0, z: -165 }
+          { x: 0, z: -930 }
         ]
       },
       {
@@ -265,9 +390,22 @@ export const LEVELS = {
           { x: 6.2, z: 15 },
           { x: 6.2, z: -105 },
           { x: 0, z: -135 },
-          { x: 0, z: -165 }
+          { x: 0, z: -930 }
         ]
       }
+    ],
+
+    // Level 2 physical speed bump.
+    // Matches the visible bump on the ground route.
+    speedBumps: [
+    {
+      x: 0,
+      z: 25,
+      width: 14,
+      depth: 3,
+      height: 0.35,
+      heading: 0
+    }
     ],
 
     // Raised sections, fed to the vehicle through
@@ -299,7 +437,7 @@ export const LEVELS = {
 
     destination: {
       x: 0,
-      z: -165,
+      z: -930,
       radius: 8,
       maxDeliverSpeed: 4
     },
@@ -316,6 +454,9 @@ export const LEVELS = {
       loseTime: L2_PURSUIT_LOSE_TIME,
       captureDistance: L2_PURSUIT_CAPTURE_DISTANCE,
       captureTime: L2_PURSUIT_CAPTURE_TIME,
+      stumbleSurgeTime: L2_PURSUIT_STUMBLE_SURGE_TIME,
+      pressureSpeedFraction: L2_PURSUIT_PRESSURE_SPEED_FRACTION,
+      pressureRiseRate: L2_PURSUIT_PRESSURE_RISE_RATE,
       lane: {
         minX: L2_PURSUIT_LANE_MIN_X,
         maxX: L2_PURSUIT_LANE_MAX_X
@@ -326,8 +467,8 @@ export const LEVELS = {
     // of the flyover footprint (checked by TrafficSystem.configure).
     traffic: {
       seed: L2_TRAFFIC_SEED,
-      zLo: TRAFFIC_LANE_Z_LO,
-      zHi: TRAFFIC_LANE_Z_HI,
+      maxCars: L2_TRAFFIC_MAX_CARS,
+      ...trafficLaneRange(L2_ROAD),
       spawnClearance: TRAFFIC_SPAWN_CLEARANCE,
       destinationClearance: TRAFFIC_DESTINATION_CLEARANCE,
       lanes: [
@@ -350,10 +491,7 @@ export const LEVELS = {
 
     markerBrightness: 1,
 
-    // TODO(setBounds): shared with every level for now - see
-    // VEHICLE_BOUNDS. This route is squeezed into the road
-    // (x +-9) and z +-170 purely because of that clamp.
-    boundaries: VEHICLE_BOUNDS
+    boundaries: vehicleBounds(L2_ROAD)
   },
 
 
@@ -363,17 +501,23 @@ export const LEVELS = {
     // Night visuals (fog, sun, HDRI) come from the graphics
     // managers via applyLevelVisuals(3).
 
+    road: L3_ROAD,
+
     // Drives the road the other way round (+Z), so heading is PI.
+    // 900 m run from z -600 to +300.
     spawn: {
       x: 0,
-      z: -170,
+      z: -600,
       heading: Math.PI
     },
 
     // A back road: wanders across the carriageway rather than
-    // running straight. Guide only - nothing enforces it.
+    // running straight. Guide only - nothing enforces it. The
+    // wander (and the three hidden potholes below) stays where it was;
+    // the road runs straight before and after it.
     route: [
-      { x: 0, z: -170 },
+      { x: 0, z: -600 },
+      { x: 0, z: -150 },
       { x: 0, z: -130 },
       { x: 5, z: -100 },
       { x: 5, z: -70 },
@@ -382,7 +526,8 @@ export const LEVELS = {
       { x: 3, z: 50 },
       { x: 3, z: 90 },
       { x: 0, z: 125 },
-      { x: 0, z: 165 }
+      { x: 0, z: 165 },
+      { x: 0, z: 300 }
     ],
 
     // Unlit potholes on the route. They are registered with the
@@ -398,7 +543,7 @@ export const LEVELS = {
 
     destination: {
       x: 0,
-      z: 165,
+      z: 300,
       radius: 8,
       maxDeliverSpeed: 4
     },
@@ -424,7 +569,7 @@ export const LEVELS = {
     // Night: the unlit spawn bay and destination ring would glare
     markerBrightness: 0.5,
 
-    boundaries: VEHICLE_BOUNDS
+    boundaries: vehicleBounds(L3_ROAD)
   }
 };
 
@@ -440,7 +585,9 @@ export class LevelManager {
     materials = null,
     getHeadlightsEnabled = null,
     onDelivered = null,
-    onCaptured = null
+    onCaptured = null,
+    onScore = null,
+    onPedestrianHit = null
   }) {
 
     // The array main.js hands to VehicleController for its ground
@@ -468,6 +615,14 @@ export class LevelManager {
     this.taxi = taxi;
     this.onDelivered = onDelivered;
     this.onCaptured = onCaptured;
+
+    // ({ delta, reason: 'beaten' | 'firstOut' | 'pedestrian', points })
+    // for the HUD's pop-ups
+    this.onScore = onScore;
+
+    // ({ x, z }) when the taxi has knocked a pedestrian down: the place for
+    // the sound cue (the score pop-up comes through onScore)
+    this.onPedestrianHit = onPedestrianHit;
 
     this.levelId = null;
     this.config = null;
@@ -500,6 +655,30 @@ export class LevelManager {
       taxiCollisionBox: this.vehicle.localTaxiCollisionBox ?? null
     });
 
+    // The Level 1 rival taxis: solid obstacles through the same
+    // registerCollidable / setCollidableActive as the traffic
+    this.rivals = new RivalTaxiSystem({
+      parent: this.group,
+      registerCollidable: mesh => this.registerCollidable(mesh),
+      setCollidableActive: (mesh, active) =>
+        this.setCollidableActive(mesh, active),
+      onBeaten: () => this.rivalBeaten()
+    });
+
+    // The rank race. phase: 'none' (a level without one) | 'countdown' |
+    // 'racing' | 'cbd' | 'chase'; countdown in seconds left
+    this.race = { active: false, phase: 'none', countdown: 0 };
+
+    this.score = {
+      points: 0,
+      beaten: 0,
+      firstOut: null,       // null | 'player' | 'rival': first car over the exit line
+      pedestriansHit: 0
+    };
+
+    this.exitCrossed = false;
+    this.rivalsReleased = false;
+
     this.zoneMaterial =
       new THREE.MeshBasicMaterial({
         color: 0xffcf4a,
@@ -513,8 +692,8 @@ export class LevelManager {
     // headlight beam picks it out at night.
     this.hazardMaterial =
       new THREE.MeshStandardMaterial({
-        color: 0x0b0b0c,
-        roughness: 1
+        color: 0x18181b,
+        roughness: 0.95
       });
 
     this.concreteMaterial =
@@ -577,14 +756,51 @@ export class LevelManager {
         : null
     );
 
+    // --------------------------------------------------
+// Register level-specific speed bumps
+// --------------------------------------------------
+
+if (
+  typeof this.vehicle.setLevelSpeedBumps === 'function'
+) {
+  this.vehicle.setLevelSpeedBumps(
+    this.config.speedBumps ?? []
+  );
+}
+
+
+
     this.buildMarkers();
     this.buildElevated();
     this.buildHazards();
     this.pursuit.configure(this.config);
     this.traffic.configure(this.config);
+    this.configureRivals();
     this.reset();
 
     return true;
+  }
+
+
+  // The rival grid of a level that has a race (none otherwise)
+  configureRivals() {
+
+    const { race, road } = this.config;
+
+    if (!race) {
+      this.rivals.dispose();
+      return;
+    }
+
+    this.rivals.configure({
+      rivals: race.grid,
+      road: {
+        halfWidth: race.road.halfWidth,
+        zMin: road.zMin,
+        zMax: road.zMax
+      },
+      direction: -1
+    });
   }
 
 
@@ -632,7 +848,216 @@ export class LevelManager {
     this.pursuit.reset();
     this.traffic.reset();
 
+    this.resetRace();
+
+    // everyone knocked down is back on their feet
+    this.environment?.pedestrians?.reset();
+
     this.setZoneDelivered(false);
+  }
+
+
+  // The taxi has knocked a pedestrian down (the environment's pedestrian
+  // field calls this once per hit): the speed loss, the points (Level 1)
+  // and the callback. Not the police's business.
+  pedestrianHit(x, z) {
+
+    this.vehicle.applyHit?.(PEDESTRIAN_HIT);
+
+    this.registerPedestrianHit();
+
+    this.onPedestrianHit?.({ x, z });
+  }
+
+
+  // --------------------------------------------------
+  // The rank race (Level 1)
+  // --------------------------------------------------
+
+  resetRace() {
+
+    const { race } = this.config;
+
+    this.score.points = 0;
+    this.score.beaten = 0;
+    this.score.firstOut = null;
+    this.score.pedestriansHit = 0;
+
+    this.exitCrossed = false;
+    this.rivalsReleased = false;
+
+    this.race.active = Boolean(race);
+    this.race.phase = race ? 'countdown' : 'none';
+    this.race.countdown = race ? race.countdown : 0;
+
+    if (race) {
+      this.rivals.reset();
+      this.applyHeadStart();
+    }
+  }
+
+
+  // True while the countdown holds the taxi: main.js passes the vehicle
+  // no keys then (it stays enabled, so its physics keeps settling)
+  get inputLocked() {
+    return this.race.active && this.race.phase === 'countdown';
+  }
+
+
+  // Ends the countdown now (tests; the game lets it run)
+  skipCountdown() {
+
+    if (this.race.active && this.race.phase === 'countdown') {
+      this.race.countdown = 0;
+      this.startRace();
+    }
+  }
+
+
+  startRace() {
+
+    this.race.phase = 'racing';
+    this.race.countdown = 0;
+    this.rivals.launch();
+  }
+
+
+  award(delta, reason) {
+
+    this.score.points += delta;
+
+    this.onScore?.({
+      delta,
+      reason,
+      points: this.score.points
+    });
+  }
+
+
+  // Called by the rival system, once for each rival, when the taxi has
+  // got ahead of it
+  rivalBeaten() {
+
+    this.score.beaten++;
+    this.award(this.config.race.points.beaten, 'beaten');
+  }
+
+
+  // Hook for the pedestrian hits (not implemented yet): -50 each
+  registerPedestrianHit() {
+
+    if (!this.race.active || this.status !== 'driving') {
+      return;
+    }
+
+    this.score.pedestriansHit++;
+    this.award(this.config.race.points.pedestrian, 'pedestrian');
+  }
+
+
+  // The police head start for the rivals beaten so far. Written every
+  // frame until the pursuer spawns, so it is the count at that moment.
+  applyHeadStart() {
+
+    const { race } = this.config;
+    const config = this.pursuit.config;
+
+    if (!race || !config || this.pursuit.spawned) {
+      return;
+    }
+
+    const { base, perRival, max } = race.headStart;
+
+    config.spawnDistance =
+      Math.min(max, base + perRival * this.score.beaten);
+  }
+
+
+  updateCountdown(dt) {
+
+    this.race.countdown -= dt;
+
+    if (this.race.countdown <= 0) {
+      this.startRace();
+    }
+  }
+
+
+  // Per frame while racing: rivals, the exit line, releasing the rivals
+  updateRace(dt) {
+
+    const { race } = this.config;
+
+    if (!race || !this.race.active) {
+      return;
+    }
+
+    const taxiZ = this.taxi.position.z;
+
+    this.rivals.update(dt, this.taxi.position);
+
+    // The first car over the exit line. Rivals are checked first, so a
+    // tie in one frame goes to them.
+    if (this.score.firstOut === null) {
+
+      const rivals = this.rivals.rivals;
+
+      for (let i = 0; i < rivals.length; i++) {
+        if (rivals[i].z <= race.exitZ) {
+          this.score.firstOut = 'rival';
+          break;
+        }
+      }
+    }
+
+    if (!this.exitCrossed && taxiZ <= race.exitZ) {
+
+      this.exitCrossed = true;
+
+      if (this.score.firstOut === null) {
+        this.score.firstOut = 'player';
+        this.award(race.points.firstOut, 'firstOut');
+      }
+    }
+
+    if (!this.rivalsReleased && taxiZ <= race.release.z) {
+      this.releaseRivals(taxiZ);
+    }
+
+    this.race.phase =
+      this.pursuit.spawned
+        ? 'chase'
+        : this.exitCrossed
+          ? 'cbd'
+          : 'racing';
+  }
+
+
+  // Past the release line a rival goes once it is gap m behind the taxi
+  // (so nobody vanishes in view ahead); past allZ, all of them go
+  releaseRivals(taxiZ) {
+
+    const { release } = this.config.race;
+    const rivals = this.rivals.rivals;
+    const all = taxiZ <= release.allZ;
+    let remaining = 0;
+
+    for (let i = 0; i < rivals.length; i++) {
+
+      const rival = rivals[i];
+
+      if (rival.released) {
+        continue;
+      }
+
+      if (all || rival.z - taxiZ >= release.gap) {
+        this.rivals.release(rival.index);
+      } else {
+        remaining++;
+      }
+    }
+
+    this.rivalsReleased = remaining === 0;
   }
 
 
@@ -643,6 +1068,12 @@ export class LevelManager {
   update(dt, time = 0) {
 
     if (this.status !== 'driving') {
+      return;
+    }
+
+    // The countdown holds everything: the clock, traffic and pursuit
+    if (this.inputLocked) {
+      this.updateCountdown(dt);
       return;
     }
 
@@ -661,11 +1092,21 @@ export class LevelManager {
 
     this.traffic.update(dt);
 
+    this.updateRace(dt);
+
+    // Levels without pedestrians (2 and 3 so far) have no field
+    this.environment?.pedestrians?.update(
+      dt,
+      this.taxi,
+      this.vehicle.getSpeed()
+    );
+
     if (this.isInDeliveryZone()) {
       this.deliver();
       return;
     }
 
+    this.applyHeadStart();
     this.pursuit.update(dt);
 
     if (this.pursuit.captured) {
@@ -844,6 +1285,22 @@ export class LevelManager {
       //   pressure 0-1 }
       pursuit: this.pursuit.getState(),
 
+      // The rank race (null score and phase 'none' on the other levels)
+      score: this.race.active
+        ? {
+            points: this.score.points,
+            beaten: this.score.beaten,
+            rivalsTotal: this.rivals.rivals.length,
+            firstOut: this.score.firstOut,
+            pedestriansHit: this.score.pedestriansHit
+          }
+        : null,
+
+      race: {
+        phase: this.race.phase,
+        countdown: Math.max(0, this.race.countdown)
+      },
+
       distanceToDestination:
         Math.hypot(
           this.taxi.position.x - destination.x,
@@ -885,15 +1342,18 @@ export class LevelManager {
         (1 - BEAM_BRIGHTNESS_FLOOR) * brightness
       );
 
-    // Taxi rank bay
-    const rank = new THREE.Mesh(
-      new THREE.PlaneGeometry(6, 9),
-      this.rankMaterial
-    );
+    // Taxi rank bay (not on Level 1, where the spawn is in the rival grid)
+    if (this.config.spawnBay !== false) {
 
-    rank.rotation.x = -Math.PI / 2;
-    rank.position.set(spawn.x, 0.03, spawn.z);
-    this.group.add(rank);
+      const rank = new THREE.Mesh(
+        new THREE.PlaneGeometry(6, 9),
+        this.rankMaterial
+      );
+
+      rank.rotation.x = -Math.PI / 2;
+      rank.position.set(spawn.x, 0.03, spawn.z);
+      this.group.add(rank);
+    }
 
     // Destination ring + light beam
     const ring = new THREE.Mesh(
@@ -1116,6 +1576,21 @@ export class LevelManager {
     for (const mesh of this.environment.collidables) {
       this.registerCollidable(mesh);
     }
+
+    // The pedestrian hit test, if the level has people on foot
+    const pedestrians = this.environment.pedestrians;
+
+    if (pedestrians) {
+
+      const box = this.vehicle.localTaxiCollisionBox;
+
+      if (box) {
+        pedestrians.halfX = (box.max.x - box.min.x) / 2;
+        pedestrians.halfZ = (box.max.z - box.min.z) / 2;
+      }
+
+      pedestrians.onHit = (x, z) => this.pedestrianHit(x, z);
+    }
   }
 
 
@@ -1163,6 +1638,9 @@ export class LevelManager {
     // Removes the cars (their collidable entries went above) and
     // disposes their shared geometry and materials
     this.traffic.dispose();
+
+    // Removes the rivals (their collidable entries went above too)
+    this.rivals.dispose();
 
     for (const child of [...this.group.children]) {
       this.group.remove(child);

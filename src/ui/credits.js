@@ -11,6 +11,49 @@ const POLY_HAVEN_HDRI = 'Poly Haven (polyhaven.com) — CC0 1.0';
 
 export const CREDITS = [
   {
+    heading: 'Sound & music',
+    entries: [{
+      name: 'Abdur-Rahman Perin — procedural audio integration',
+      detail: 'Original Web Audio synthesis and procedural music prepared for Sharp-Sharp with Codex assistance; no sampled recordings or third-party music.',
+      files: ['src/audio/GameAudio.js']
+    }]
+  },
+  {
+    heading: 'Recorded audio (CC0)',
+    entries: [
+      {
+        name: 'Bus Engine Idling — bikesnbassboi',
+        detail: 'https://freesound.org/people/bikesnbassboi/sounds/540398/ — CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/). HQ MP3 recording excerpt, mono, filtered, level adjusted and crossfaded for looping. The original procedural integration credited above remains as a fallback.',
+        files: ['audio/engine-idle.mp3']
+      },
+      {
+        name: 'Diesel drive in Belgium — gecop',
+        detail: 'https://freesound.org/people/gecop/sounds/521768/ — CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/). Interior 1900 cc turbo-diesel recording; steady driving excerpt, mono, filtered, level adjusted and crossfaded for looping.',
+        files: ['audio/engine-drive.mp3']
+      },
+      {
+        name: 'MISC_Police_Siren_Wailer_Static_001.wav — conleec',
+        detail: 'https://freesound.org/people/conleec/sounds/159753/ — CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/). Recorded stationary American police wail; HQ MP3 excerpt, mono, filtered, level adjusted and crossfaded for looping.',
+        files: ['audio/police-wail.mp3']
+      },
+      {
+        name: 'Car Crash — squareal',
+        detail: 'https://freesound.org/people/squareal/sounds/237375/ — CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/). Recorded metal-cabinet and grit/glass foley, not an actual vehicle crash. HQ MP3 excerpt, mono, filtered, level adjusted and faded.',
+        files: ['audio/body-impact.mp3']
+      },
+      {
+        name: 'Heavy Metal Thud on Ground — 7of9Designs',
+        detail: 'https://freesound.org/people/7of9Designs/sounds/640204/ — CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/). Recorded heavy metal object hitting dirt; HQ MP3, mono, filtered, level adjusted and faded.',
+        files: ['audio/cargo-thud.mp3']
+      },
+      {
+        name: 'precipitate — gonpulvo',
+        detail: 'https://weeklybeats.com/gonpulvo/music/precipitate — CC0, as published by the author (https://creativecommons.org/publicdomain/zero/1.0/). Afro-house/IDM instrumental made with the M8; 64-bar excerpt at 126 BPM, filtered, level adjusted and crossfaded for looping. All six local recordings are re-encoded MP3 derivatives; no live third-party audio requests are made by the game.',
+        files: ['audio/township-drive.mp3']
+      }
+    ]
+  },
+  {
     heading: 'Team EagleStack',
     entries: [
       { name: 'Kayura Govindsammy' },
@@ -123,13 +166,16 @@ export const CREDITS = [
   {
     heading: 'Models',
     entries: [
-      {
-        name: 'Sesfikile minibus taxi',
-        detail:
-          "Toyota HiAce 'Sesfikile' minibus model — downloaded from SketchUp 3D Warehouse, " +
-          'original author unknown; modified and exported in Blender.',
-        files: ['models/sesfikile.glb']
-      },
+      
+{
+  name: "Toyota Ses'fikile minibus taxi — googlenaut",
+  detail:
+    "Original 3D model uploaded by googlenaut to SketchUp 3D Warehouse. " +
+    "Source: https://embed-3dwarehouse-classic.sketchup.com/model/93cd92b6-5bd0-421e-9d41-9e4952468c14/Toyota-Sesfikile. " +
+    "Modified and exported in Blender for use in Sharp-Sharp.",
+  files: ['models/sesfikile.glb']
+},
+
       {
         name: 'Pursuer, traffic cars, pedestrians and street props',
         detail: 'Built in code by the team'

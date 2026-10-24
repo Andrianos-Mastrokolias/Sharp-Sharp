@@ -145,13 +145,17 @@ export function createBarrierMesh({
 
 // The visible panel joints: slightly fatter short slices of
 // the same profile, every `spacing` metres, on each x in
-// `xs`. One InstancedMesh, not collidable.
+// `xs`. One InstancedMesh, not collidable. They run from
+// `zFrom` (default: -length / 2, a road centred on the origin)
+// to zFrom + length, so a long road can be given as several
+// windows.
 export function createBarrierRibs({
   length,
   spacing,
   xs,
   material,
-  ribDepth = 0.14
+  ribDepth = 0.14,
+  zFrom = -length / 2
 }) {
 
   const count =
@@ -198,7 +202,7 @@ export function createBarrierRibs({
       matrix.makeTranslation(
         x,
         0,
-        -length / 2 +
+        zFrom +
         (i + 0.5) *
         spacing
       );
