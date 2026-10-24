@@ -501,6 +501,7 @@ function completeLevel(event) {
   phase = GamePhase.COMPLETE;
   vehicle.setEnabled(false);
   clearKeys();
+  hud.clearScorePopups();
 
   const result = {
     level: currentLevel,
@@ -590,6 +591,7 @@ function failLevel(reason, flavour = 'eish') {
 
   vehicle.setEnabled(false);
   clearKeys();
+  hud.clearScorePopups();
 
   const cargo = cargoSystem.getState();
 
@@ -878,6 +880,11 @@ const levelManager = new LevelManager({
     );
   },
 
+  // Level 1 rank-race points: +100 beaten, +300 first out, -50 pedestrian
+  onScore: event => {
+    hud.showScorePopup(event);
+  },
+
   onPedestrianHit: () => audio.cue('pedestrianHit')
 });
 
@@ -899,6 +906,7 @@ function loadLevel(level, { showIntro = true } = {}) {
 
   vehicle.setEnabled(false);
   clearKeys();
+  hud.clearScorePopups();
 
   currentLevel = level;
 

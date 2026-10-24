@@ -22,6 +22,29 @@ export function tailText(state, percent) {
   return `${percent}%`;
 }
 
+// ---------- Level 1 rank-race score ----------
+
+// How long a score pop-up stays up (matches hud-popup in theme.css)
+// and how many can stack before the oldest is dropped.
+const POPUP_TIME = 1600;
+const MAX_POPUPS = 4;
+
+const SCORE_REASONS = {
+  beaten: 'Rival beaten',
+  firstOut: 'First out',
+  pedestrian: 'Pedestrian'
+};
+
+// levelManager's onScore event -> "+100 Rival beaten", "-50 Pedestrian"
+export function scorePopupText({ delta, reason }) {
+  const sign = delta < 0 ? '-' : '+';
+  return `${sign}${Math.abs(delta)} ${SCORE_REASONS[reason] ?? reason}`;
+}
+
+export function rivalsBeatenText(score) {
+  return `Rivals beaten ${score.beaten}/${score.rivalsTotal}`;
+}
+
 export class Hud {
 
   constructor() {
@@ -30,17 +53,29 @@ export class Hud {
     this.element.className = 'hud';
 
     this.element.innerHTML = `
-      <div class="hud-route sign">
-        <div class="sign-head" data-hud="route"></div>
-        <div class="sign-body">
-          <div class="sign-row">
-            <span class="sign-code" data-hud="code"></span>
-            <span data-hud="destination"></span>
-            <span class="hud-distance" data-hud="distance"></span>
-            <span class="sign-arrow" data-hud="arrow"></span>
+      <div class="hud-left">
+        <div class="hud-route sign">
+          <div class="sign-head" data-hud="route"></div>
+          <div class="sign-body">
+            <div class="sign-row">
+              <span class="sign-code" data-hud="code"></span>
+              <span data-hud="destination"></span>
+              <span class="hud-distance" data-hud="distance"></span>
+              <span class="sign-arrow" data-hud="arrow"></span>
+            </div>
           </div>
         </div>
+
+        <div class="hud-score" data-hud="score" hidden>
+          <div class="hud-score-head">
+            <span>POINTS</span>
+            <span class="hud-score-points" data-hud="points"></span>
+          </div>
+          <div class="hud-score-body" data-hud="beaten"></div>
+        </div>
       </div>
+
+      <div class="hud-popups" data-hud="popups"></div>
 
       <div class="hud-right">
         <div class="hud-tail" data-hud="tailBox">
@@ -95,6 +130,9 @@ export class Hud {
     this.last = {};
     this.boxes = [];
 
+    // Score pop-up removal timers, cleared on restart
+    this.popupTimers = new Set();
+
     document.body.appendChild(this.element);
   }
 
@@ -148,6 +186,21 @@ export class Hud {
       this.fields.tailFill.style.width = `${percent}%`;
     }
 
+    // ---------- Score (Level 1 only; null elsewhere) ----------
+
+    const score = objective.score ?? null;
+    const scored = score !== null;
+
+    if (this.last.scored !== scored) {
+      this.last.scored = scored;
+      this.fields.score.hidden = !scored;
+    }
+
+    if (scored) {
+      this.setText('points', score.points);
+      this.setText('beaten', rivalsBeatenText(score));
+    }
+
     // ---------- Labels and speed ----------
 
     this.setText('camera', `CAMERA: ${cameraMode.toUpperCase()}`);
@@ -173,6 +226,42 @@ export class Hud {
       this.last.secure = secure;
       this.fields.status.classList.toggle('secure', secure);
     }
+  }
+
+
+  // A short-lived pop-up for levelManager's onScore event.
+  // Several can stack; the oldest goes once there are too many.
+  showScorePopup(event) {
+
+    const popup = document.createElement('div');
+    popup.className = `hud-popup ${event.delta < 0 ? 'negative' : 'positive'}`;
+    popup.textContent = scorePopupText(event);
+
+    const container = this.fields.popups;
+    container.appendChild(popup);
+
+    while (container.childElementCount > MAX_POPUPS) {
+      container.firstElementChild.remove();
+    }
+
+    const timer = setTimeout(() => {
+      this.popupTimers.delete(timer);
+      popup.remove();
+    }, POPUP_TIME);
+
+    this.popupTimers.add(timer);
+  }
+
+
+  // Restart / level change: no pop-ups carried over.
+  clearScorePopups() {
+
+    for (const timer of this.popupTimers) {
+      clearTimeout(timer);
+    }
+
+    this.popupTimers.clear();
+    this.fields.popups.replaceChildren();
   }
 
 
