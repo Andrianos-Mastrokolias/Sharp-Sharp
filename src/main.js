@@ -37,6 +37,8 @@ import {
   labelButton,
   labelRow,
   signStat,
+  scoreStats,
+  formatPoints,
   controlsList,
   menuBackdropHTML,
   mainMenuHTML,
@@ -509,7 +511,9 @@ function completeLevel(event) {
     name: LEVELS[currentLevel].name,
     time: event.time,
     cargo: cargo.remaining,
-    totalCargo: cargo.total
+    totalCargo: cargo.total,
+    // Level 1 rank-race score; null on levels without one
+    score: levelManager.getState().score
   };
 
   const existingIndex = results.findIndex(
@@ -561,6 +565,8 @@ function completeLevel(event) {
             'Cargo delivered',
             `${cargo.remaining} / ${cargo.total}`
           )}
+
+          ${scoreStats(result.score)}
 
           ${signStat(
             'Next destination',
@@ -766,6 +772,8 @@ function finishGame() {
               'Cargo delivered',
               `${result.cargo} / ${result.totalCargo}`
             )}
+
+            ${scoreStats(result.score)}
           </div>
         </div>
 
@@ -802,6 +810,17 @@ function finishGame() {
     )
     .join('');
 
+  // Rank-race points for the levels that have them (Level 1)
+  const pointsRows = results
+    .filter(result => result.score)
+    .map(result =>
+      signStat(
+        `${ROUTES[result.level]?.code ?? `L${result.level}`} · Points`,
+        formatPoints(result.score.points)
+      )
+    )
+    .join('');
+
   showScreen(`
     <div class="ss-column">
       ${lockup([
@@ -832,6 +851,8 @@ function finishGame() {
 
         <div class="sign-body">
           ${resultRows}
+
+          ${pointsRows}
 
           ${signStat(
             'Total driving time',

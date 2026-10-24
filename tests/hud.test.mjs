@@ -9,6 +9,7 @@ import {
   CLEAR_STATES, SPOTTED_STATE, tailText, scorePopupText, rivalsBeatenText
 } from '../src/ui/Hud.js';
 import { CountdownTracker, GO_TIME } from '../src/ui/countdown.js';
+import { formatPoints, scoreStats } from '../src/ui/screens.js';
 import { LevelManager } from '../src/world/LevelManager.js';
 
 const DT = 1 / 60;
@@ -57,6 +58,22 @@ test('score pop-ups: an unknown reason still shows its points', () => {
 test('rivals beaten line', () => {
   assert.equal(rivalsBeatenText({ points: 0, beaten: 0, rivalsTotal: 8 }), 'Rivals beaten 0/8');
   assert.equal(rivalsBeatenText({ points: 800, beaten: 8, rivalsTotal: 8 }), 'Rivals beaten 8/8');
+});
+
+test('results: Level 1 shows points and rivals beaten', () => {
+  const html = scoreStats({ points: 1050, beaten: 7, rivalsTotal: 8, firstOut: 'player', pedestriansHit: 1 });
+  assert.match(html, /Points[\s\S]*1050 pts/);
+  assert.match(html, /Rivals beaten[\s\S]*7 \/ 8/);
+});
+
+test('results: levels without a score add nothing', () => {
+  assert.equal(scoreStats(null), '');
+  assert.equal(scoreStats(undefined), '');
+});
+
+test('results: negative points are shown as they are', () => {
+  assert.equal(formatPoints(-50), '-50 pts');
+  assert.equal(formatPoints(0), '0 pts');
 });
 
 // ---------- Countdown ----------
