@@ -45,6 +45,7 @@ export class Hud {
         <div class="hud-labels">
           <div class="label"><span data-hud="camera"></span></div>
           <div class="label"><span data-hud="lights"></span></div>
+          <div class="label"><span data-hud="mouseDrive"></span></div>
         </div>
       </div>
 
@@ -99,7 +100,7 @@ export class Hud {
 
   // Called with the current game state every frame.
   // objective: levelManager.getState(), cargo: cargoSystem.getState()
-  update({ level, levelName, objective, cargo, speedKmh, cameraMode, headlightsOn }) {
+  update({ level, levelName, objective, cargo, speedKmh, cameraMode, headlightsOn, mouseDrive }) {
 
     // ---------- Route sign ----------
 
@@ -133,6 +134,7 @@ export class Hud {
 
     this.setText('camera', `CAMERA: ${cameraMode.toUpperCase()}`);
     this.setText('lights', `LIGHTS: ${headlightsOn ? 'ON' : 'OFF'}`);
+    this.setText('mouseDrive', `MOUSE DRIVE: ${mouseDrive ? 'ON' : 'OFF'}`);
     this.setText('speed', Math.round(speedKmh));
 
     // ---------- Roof load ----------

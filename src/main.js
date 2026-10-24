@@ -15,6 +15,7 @@ import { createTaxi } from './vehicle/Taxi.js';
 import { CargoSystem } from './vehicle/CargoSystem.js';
 import { VehicleController } from './vehicle/VehicleController.js';
 import { CameraSystem } from './cameras/CameraSystem.js';
+import { MouseDrive } from './input/MouseDrive.js';
 
 import { LightingManager } from './graphics/LightingManager.js';
 import { EffectsManager } from './graphics/EffectsManager.js';
@@ -194,6 +195,23 @@ const cameraSystem = new CameraSystem({
 });
 
 // ============================================================
+// MOUSE DRIVE
+// ============================================================
+
+// Optional mouse driving (M). Losing pointer lock while driving
+// (Esc) pauses, like Esc does without the lock.
+let lockLostPauseTime = -Infinity;
+
+const mouseDrive = new MouseDrive({
+  canvas: renderer.domElement,
+  isPlaying: () => phase === GamePhase.PLAYING,
+  onLockLost: () => {
+    lockLostPauseTime = performance.now();
+    pauseGame();
+  }
+});
+
+// ============================================================
 // DUST
 // ============================================================
 
@@ -246,6 +264,7 @@ const screenActions = {
     clearKeys();
     vehicle.setEnabled(true);
     clock.getDelta();
+    mouseDrive.requestLock();
   },
 
   retryLevel: () => {
@@ -529,6 +548,8 @@ function resumeGame() {
 
   // Discard the paused time so physics doesn't jump.
   clock.getDelta();
+
+  mouseDrive.requestLock();
 }
 
 // ============================================================
@@ -732,6 +753,14 @@ window.addEventListener('keydown', event => {
     (event.code === 'Escape' || event.code === 'KeyP') &&
     !event.repeat
   ) {
+    // The same Esc that dropped pointer lock already paused.
+    if (
+      event.code === 'Escape' &&
+      performance.now() - lockLostPauseTime < 300
+    ) {
+      return;
+    }
+
     if (phase === GamePhase.PLAYING) {
       pauseGame();
     } else if (phase === GamePhase.PAUSED) {
@@ -759,6 +788,10 @@ window.addEventListener('keydown', event => {
 
     case 'KeyL':
       toggleHeadlights();
+      break;
+
+    case 'KeyM':
+      mouseDrive.toggle();
       break;
 
     // No Digit1 / Digit2 / Digit3 handlers.
@@ -804,7 +837,8 @@ function updateHUD() {
     cargo: cargoSystem.getState(),
     speedKmh: Math.abs(vehicle.getSpeed()) * 3.6,
     cameraMode: formatCameraName(cameraSystem.getMode()),
-    headlightsOn: getHeadlightsEnabled()
+    headlightsOn: getHeadlightsEnabled(),
+    mouseDrive: mouseDrive.enabled
   });
 }
 
@@ -822,9 +856,12 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const elapsedTime = clock.getElapsedTime();
 
+  // Keyboard keys, merged with the mouse when mouse drive is on.
+  const input = mouseDrive.update(dt, keys, phase === GamePhase.PLAYING);
+
   // Only run active vehicle physics during gameplay.
   if (phase === GamePhase.PLAYING) {
-    vehicle.update(dt, keys);
+    vehicle.update(dt, input);
 
     // Handles destination detection, pursuit and traffic.
     // May call completeLevel() or failLevel() this frame.

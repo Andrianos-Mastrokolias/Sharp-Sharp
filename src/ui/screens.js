@@ -137,6 +137,7 @@ const CONTROLS = [
   ['L', 'Lights'],
   ['R', 'Retry'],
   ['Esc / P', 'Pause'],
+  ['M', 'Mouse drive (LMB throttle, RMB brake, move to steer)'],
   ['Mouse drag', 'Look around (chase camera)'],
   ['Mouse wheel', 'Zoom (chase camera)']
 ];
