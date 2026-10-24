@@ -59,6 +59,23 @@ let preferences = readPreferences(preferenceStorage);
 const audio = new GameAudio();
 audio.setVolume(preferences.muted ? 0 : preferences.volume);
 
+// TODO(Abdur-Rahman): GameAudio has no sounds for these cues yet. Add them
+// to CUES / RECORDINGS in src/audio/GameAudio.js under these names:
+//   'countdown'      beep on each of 3, 2, 1 (Level 1 rank race)
+//   'go'             GO! at the end of the countdown
+//   'beaten'         +100, a rival taxi beaten
+//   'firstOut'       +300, first car out of the rank
+//   'pedestrianHit'  -50, a pedestrian knocked down
+// GameAudio.cue() returns false for a name it doesn't know, so until then
+// these calls are silent no-ops.
+function playCue(name) {
+  audio.cue?.(name);
+}
+
+// onScore reasons with their own cue ('pedestrian' plays through
+// onPedestrianHit, which also fires on levels without a score)
+const SCORE_CUES = { beaten: 'beaten', firstOut: 'firstOut' };
+
 // ============================================================
 // GAME CONFIGURATION
 // ============================================================
@@ -905,9 +922,13 @@ const levelManager = new LevelManager({
   // Level 1 rank-race points: +100 beaten, +300 first out, -50 pedestrian
   onScore: event => {
     hud.showScorePopup(event);
+
+    if (SCORE_CUES[event.reason]) {
+      playCue(SCORE_CUES[event.reason]);
+    }
   },
 
-  onPedestrianHit: () => audio.cue('pedestrianHit')
+  onPedestrianHit: () => playCue('pedestrianHit')
 });
 
 // ============================================================
@@ -1189,6 +1210,11 @@ skylineManager.update(taxi.position);
   // Only counts down (and runs the GO! timer) while playing
   if (phase === GamePhase.PLAYING) {
     countdown.update(objective.race, dt);
+
+    // Once per number (3, 2, 1) and once for GO!
+    if (countdown.cue) {
+      playCue(countdown.cue);
+    }
   }
 
   updateHUD(objective);

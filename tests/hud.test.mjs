@@ -11,6 +11,7 @@ import {
 import { CountdownTracker, GO_TIME } from '../src/ui/countdown.js';
 import { formatPoints, scoreStats } from '../src/ui/screens.js';
 import { LevelManager } from '../src/world/LevelManager.js';
+import { GameAudio } from '../src/audio/GameAudio.js';
 
 const DT = 1 / 60;
 
@@ -206,6 +207,28 @@ test('countdown + LevelManager: Level 1 plays 3, 2, 1, GO!; retry and level 2 re
   assert.equal(lm.getState().race.phase, 'none');
   assert.deepEqual(play(lm, tracker, 2), []);
   assert.equal(tracker.text, '');
+});
+
+// ---------- Audio cues ----------
+
+// The cue names main.js plays. Until GameAudio has them, cue() must be a
+// safe no-op (false); once added it plays them (true). Never throws.
+test('audio: the HUD cue names are safe to play whether or not GameAudio has them', () => {
+  const param = () => ({
+    value: 0, setTargetAtTime() {}, setValueAtTime() {}, exponentialRampToValueAtTime() {}
+  });
+  const context = {
+    state: 'running', currentTime: 1,
+    createGain: () => ({ gain: param(), connect: (t) => t, disconnect() {} }),
+    createOscillator: () => ({ frequency: param(), connect: (t) => t, disconnect() {}, start() {}, stop() {} })
+  };
+  const audio = new GameAudio(() => context);
+  audio.context = context;
+  audio.master = context.createGain();
+
+  for (const name of ['countdown', 'go', 'beaten', 'firstOut', 'pedestrianHit']) {
+    assert.equal(typeof audio.cue(name), 'boolean', name);
+  }
 });
 
 
