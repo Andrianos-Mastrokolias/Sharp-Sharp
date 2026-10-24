@@ -923,6 +923,16 @@ summary.label:focus-visible {
   font-size: 1.3rem;
 }
 
+/* Siren pause on first sighting: the value block flashes maroon */
+.hud-tail.spotted .lk-mustard {
+  animation: hud-spotted 0.5s steps(1, end) infinite;
+}
+
+@keyframes hud-spotted {
+  0%   { background: var(--maroon); color: var(--cream); }
+  50%  { background: var(--mustard); color: var(--ink); }
+}
+
 .hud-tail-track {
   width: 100%;
   height: 28px;

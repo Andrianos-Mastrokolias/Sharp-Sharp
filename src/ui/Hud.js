@@ -8,8 +8,19 @@ import { ROUTES, routeName, lockup, decalStripes } from './screens.js';
 // update() runs every frame and only writes text / styles
 // that have actually changed.
 
-// Pursuit states with nobody chasing the taxi.
-const CLEAR_STATES = ['none', 'idle'];
+// Pursuit states with nobody chasing the taxi (PursuitSystem.js).
+export const CLEAR_STATES = ['none', 'idle', 'patrolling'];
+
+// First sighting: the pursuer brakes and holds still with its
+// siren going before it gives chase.
+export const SPOTTED_STATE = 'reacting';
+
+// Text for the "on your tail" block.
+export function tailText(state, percent) {
+  if (CLEAR_STATES.includes(state)) return 'clear';
+  if (state === SPOTTED_STATE) return 'SPOTTED';
+  return `${percent}%`;
+}
 
 export class Hud {
 
@@ -32,7 +43,7 @@ export class Hud {
       </div>
 
       <div class="hud-right">
-        <div class="hud-tail">
+        <div class="hud-tail" data-hud="tailBox">
           ${lockup([[
             { text: 'on your tail', bg: 'ink', font: 'rye' },
             { text: '<span data-hud="tail">clear</span>', bg: 'mustard', font: 'slab' }
@@ -119,11 +130,18 @@ export class Hud {
     // ---------- Pursuer meter ----------
 
     const pursuit = objective.pursuit;
-    const clear = !driving || !pursuit || CLEAR_STATES.includes(pursuit.state);
+    const state = driving && pursuit ? pursuit.state : 'none';
+    const clear = CLEAR_STATES.includes(state);
     const pressure = clear ? 0 : Math.min(Math.max(pursuit.pressure ?? 0, 0), 1);
     const percent = Math.round(pressure * 100);
+    const spotted = state === SPOTTED_STATE;
 
-    this.setText('tail', clear ? 'clear' : `${percent}%`);
+    this.setText('tail', tailText(state, percent));
+
+    if (this.last.spotted !== spotted) {
+      this.last.spotted = spotted;
+      this.fields.tailBox.classList.toggle('spotted', spotted);
+    }
 
     if (this.last.tailFill !== percent) {
       this.last.tailFill = percent;
