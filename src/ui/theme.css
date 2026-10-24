@@ -982,6 +982,36 @@ summary.label:focus-visible {
   100% { opacity: 0; transform: translateY(-28px); }
 }
 
+/* ---------- Centre: Level 1 race countdown ---------- */
+
+.hud-countdown {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+
+  color: var(--cream);
+  font-family: var(--font-title);
+  font-size: 9rem;
+  line-height: 1;
+  -webkit-text-stroke: 6px var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 6px 0 var(--ink);
+}
+
+.hud-countdown.go {
+  color: var(--route-yellow);
+}
+
+.hud-countdown.animate {
+  animation: hud-countdown 0.6s ease-out;
+}
+
+@keyframes hud-countdown {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(1.8); }
+  35%  { opacity: 1; transform: translate(-50%, -50%) scale(0.92); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
 /* ---------- Top-right: pursuer meter + labels ---------- */
 
 .hud-right {

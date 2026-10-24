@@ -77,6 +77,8 @@ export class Hud {
 
       <div class="hud-popups" data-hud="popups"></div>
 
+      <div class="hud-countdown" data-hud="countdown" hidden></div>
+
       <div class="hud-right">
         <div class="hud-tail" data-hud="tailBox">
           ${lockup([[
@@ -148,8 +150,9 @@ export class Hud {
 
 
   // Called with the current game state every frame.
-  // objective: levelManager.getState(), cargo: cargoSystem.getState()
-  update({ level, levelName, objective, cargo, speedKmh, cameraMode, headlightsOn, mouseDrive }) {
+  // objective: levelManager.getState(), cargo: cargoSystem.getState(),
+  // countdown: CountdownTracker text ('' hides the overlay)
+  update({ level, levelName, objective, cargo, speedKmh, cameraMode, headlightsOn, mouseDrive, countdown = '' }) {
 
     // ---------- Route sign ----------
 
@@ -201,6 +204,10 @@ export class Hud {
       this.setText('beaten', rivalsBeatenText(score));
     }
 
+    // ---------- Race countdown (3, 2, 1, GO!) ----------
+
+    this.updateCountdown(countdown);
+
     // ---------- Labels and speed ----------
 
     this.setText('camera', `CAMERA: ${cameraMode.toUpperCase()}`);
@@ -226,6 +233,25 @@ export class Hud {
       this.last.secure = secure;
       this.fields.status.classList.toggle('secure', secure);
     }
+  }
+
+
+  // Re-runs the pop animation each time the text changes.
+  updateCountdown(text) {
+
+    if (this.last.countdown === text) return;
+    this.last.countdown = text;
+
+    const node = this.fields.countdown;
+
+    node.hidden = text === '';
+    node.textContent = text;
+    node.classList.toggle('go', text === 'GO!');
+
+    // Restart the CSS animation (only on a change, not per frame)
+    node.classList.remove('animate');
+    void node.offsetWidth;
+    node.classList.add('animate');
   }
 
 

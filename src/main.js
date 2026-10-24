@@ -45,6 +45,7 @@ import {
 } from './ui/screens.js';
 
 import { Hud } from './ui/Hud.js';
+import { CountdownTracker } from './ui/countdown.js';
 import { CREDITS } from './ui/credits.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { readPreferences, savePreferences, applyQuality } from './game/preferences.js';
@@ -907,6 +908,7 @@ function loadLevel(level, { showIntro = true } = {}) {
   vehicle.setEnabled(false);
   clearKeys();
   hud.clearScorePopups();
+  countdown.reset();
 
   currentLevel = level;
 
@@ -1057,6 +1059,9 @@ window.addEventListener('pagehide', () => audio.dispose());
 
 const hud = new Hud();
 
+// Level 1 "3, 2, 1, GO!" overlay; reset on every level load
+const countdown = new CountdownTracker();
+
 // ============================================================
 // HUD HELPERS
 // ============================================================
@@ -1077,16 +1082,18 @@ function formatCameraName(mode) {
   }
 }
 
-function updateHUD() {
+function updateHUD(objective) {
   hud.update({
     level: currentLevel,
     levelName: LEVELS[currentLevel].name,
-    objective: levelManager.getState(),
+    objective,
     cargo: cargoSystem.getState(),
     speedKmh: Math.abs(vehicle.getSpeed()) * 3.6,
     cameraMode: formatCameraName(cameraSystem.getMode()),
     headlightsOn: getHeadlightsEnabled(),
-    mouseDrive: mouseDrive.enabled
+    mouseDrive: mouseDrive.enabled,
+    // Hidden behind the intro / pause screens
+    countdown: phase === GamePhase.PLAYING ? countdown.text : ''
   });
 }
 
@@ -1156,10 +1163,17 @@ skylineManager.update(taxi.position);
     dustSystem.update(dt);
   }
 
-  updateHUD();
+  const objective = levelManager.getState();
+
+  // Only counts down (and runs the GO! timer) while playing
+  if (phase === GamePhase.PLAYING) {
+    countdown.update(objective.race, dt);
+  }
+
+  updateHUD(objective);
 
   audio.setActive(phase === GamePhase.PLAYING && !document.hidden);
-  audio.update(dt, vehicle.getSpeed(), levelManager.getState().pursuit.state, keys.Space);
+  audio.update(dt, vehicle.getSpeed(), objective.pursuit.state, keys.Space);
 
   renderer.render(scene, camera);
 
