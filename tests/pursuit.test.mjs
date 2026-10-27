@@ -1365,7 +1365,8 @@ test('capture does not touch collidables', () => {
   const e = make();
   e.lm.load(3);
   const before = e.lm.collidables.length;
-  assert.equal(before, 0);
+  // Level 3 has no scenery in this harness, only its night traffic cars
+  assert.equal(before, e.lm.traffic.cars.length);
 });
 
 test('level without pursuit config: no pursuer, state none', () => {

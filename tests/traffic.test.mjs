@@ -156,7 +156,7 @@ test('createTrafficCar: 4 variants, <400 tris, ground origin, faces -Z, emissive
 // The cars follow the road's length at the original density: the original lanes were
 // 370 m (L1: 4 + 4 cars, L2: 3 + 4); L1's are 680 m now, from the rank's exit line (7 + 7,
 // cap 16) and L2's 1130 m (7 + 9, cap 16: a little under the original density)
-test('per-level config: L1 two lanes (7+7), L2 same-direction lanes (7+9), L3 none, per-level car caps, lanes start after the rank', () => {
+test('per-level config: L1 two lanes (7+7), L2 same-direction lanes (7+9), L3 night traffic (6+6), per-level car caps, lanes start after the rank', () => {
   const l1 = LEVELS[1].traffic.lanes;
   assert.deepEqual(l1.map(({ x, dir, speed, count }) => ({ x, dir, speed, count })), [
     { x: -4.5, dir: -1, speed: 9, count: 7 },
@@ -166,7 +166,7 @@ test('per-level config: L1 two lanes (7+7), L2 same-direction lanes (7+9), L3 no
   // nothing in the rank (z 170 to -60): the lanes start 5 m past its exit line
   assert.equal(LEVELS[1].traffic.zHi, LEVELS[1].race.exitZ - 5);
   assert.equal(LEVELS[2].traffic.maxCars, 16);
-  for (const level of [1, 2]) {
+  for (const level of [1, 2, 3]) {
     const { zLo, zHi } = LEVELS[level].traffic;
     const b = LEVELS[level].boundaries;
     assert.ok(zLo >= b.minZ && zHi <= b.maxZ, `level ${level}: lane range inside the vehicle bounds`);
@@ -177,8 +177,16 @@ test('per-level config: L1 two lanes (7+7), L2 same-direction lanes (7+9), L3 no
     { x: 0, dir: -1, speed: 13, count: 7 },
     { x: -3.6, dir: -1, speed: 17, count: 9 }
   ]);
-  assert.equal(LEVELS[3].traffic, undefined);
-  for (const level of [1, 2]) {
+  // Level 3: slow same-direction night traffic, driving +z like the taxi
+  assert.deepEqual(LEVELS[3].traffic.lanes.map(({ x, dir, speed, count }) => ({ x, dir, speed, count })), [
+    { x: -4.5, dir: 1, speed: 8, count: 6 },
+    { x: 4.5, dir: 1, speed: 11, count: 6 }
+  ]);
+  assert.equal(LEVELS[3].traffic.maxCars, 12);
+  assert.equal(LEVELS[3].traffic.zLo, -645);
+  assert.equal(LEVELS[3].traffic.zHi, 315);
+  assert.ok(LEVELS[3].traffic.lanes.every((l) => !l.variants.includes('hatchback')));
+  for (const level of [1, 2, 3]) {
     const { lanes, maxCars } = LEVELS[level].traffic;
     assert.ok(lanes.reduce((n, l) => n + l.count, 0) <= maxCars);
     assert.ok(maxCars <= MAX_TRAFFIC_CARS_CEILING);
@@ -188,7 +196,7 @@ test('per-level config: L1 two lanes (7+7), L2 same-direction lanes (7+9), L3 no
 });
 
 test('every car is a childless Mesh in the collidables, sharing geometry/material per variant', () => {
-  for (const [level, expected] of [[1, 14], [2, 16]]) {
+  for (const [level, expected] of [[1, 14], [2, 16], [3, 12]]) {
     const { lm, collidables, scene } = make();
     lm.load(level);
     assert.equal(lm.traffic.cars.length, expected);
@@ -213,7 +221,7 @@ test('every car is a childless Mesh in the collidables, sharing geometry/materia
 });
 
 test('lane spacing never drops below the minimum, over a long loop', () => {
-  for (const level of [1, 2]) {
+  for (const level of [1, 2, 3]) {
     const { lm } = make();
     lm.load(level);
     let minGap = Infinity;
@@ -237,7 +245,7 @@ test('lane spacing never drops below the minimum, over a long loop', () => {
 });
 
 test('initial layout: no car within 40 m of the spawn or 35 m of the destination, 8 m gaps (every seed tried)', () => {
-  for (const level of [1, 2]) {
+  for (const level of [1, 2, 3]) {
     const { lm, scene } = make();
     lm.load(level);
     const { spawn, destination } = LEVELS[level];
@@ -316,7 +324,7 @@ test('L2: traffic stays clear of the flyover footprint, ramps, rails and pillars
 
 test('lane ranges: enter at one end, leave at the other; wraps only at the ends, as far from spawn and destination as the bounds allow', () => {
   const rows = [];
-  for (const level of [1, 2]) {
+  for (const level of [1, 2, 3]) {
     const { lm } = make();
     lm.load(level);
     parkTaxi(lm.taxi, 40, 0);                      // clear of every lane: no hold
@@ -374,19 +382,21 @@ test('lane ranges: enter at one end, leave at the other; wraps only at the ends,
   rows.forEach((r) => console.log('  ' + r));
 });
 
-test('cars face along their lane: heading 0 is -z, oncoming cars are turned round', () => {
+test('cars face along their lane: heading 0 is -z, cars driving +z (oncoming, and all of Level 3) are turned round', () => {
+  for (const level of [1, 3]) {
   const { lm } = make();
-  lm.load(1);
+  lm.load(level);
   for (const c of lm.traffic.cars) {
     const lane = lm.traffic.lanes[c.laneIndex];
     assert.ok(Math.abs(c.mesh.rotation.y - (lane.dir < 0 ? 0 : Math.PI)) < 1e-9);
     assert.equal(c.mesh.position.x, lane.x);
     assert.equal(c.mesh.position.y, 0);
   }
+  }
 });
 
 test('deterministic: same layout and same motion on every load; reset() restores it', () => {
-  for (const level of [1, 2]) {
+  for (const level of [1, 2, 3]) {
     const a = make();
     const b = make();
     a.lm.load(level);
@@ -417,7 +427,7 @@ test('1 -> 2 -> 3 -> 1 cycles leave no duplicates or leaks, even while cars are 
   };
   const seen = { 1: null, 2: null, 3: null };
   const disposedGeometries = [];
-  const expected = { 1: 14, 2: 16, 3: 0 };
+  const expected = { 1: 14, 2: 16, 3: 12 };
 
   for (let cycle = 0; cycle < 3; cycle++) {
     for (const level of [1, 2, 3, 1]) {
@@ -486,9 +496,12 @@ test('1 -> 2 -> 3 -> 1 cycles leave no duplicates or leaks, even while cars are 
   assert.ok(disposedGhost.every((f) => f.d), 'ghost materials disposed');
 
   lm.load(3);
-  assert.equal(collidables.filter((m) => m.userData.traffic).length, 0);
-  assert.equal(lm.traffic.cars.length, 0);
+  assert.equal(collidables.filter((m) => m.userData.traffic).length, 12);
+  assert.equal(lm.traffic.cars.length, 12);
+  assert.equal(countCars(), 12);
+  lm.clearMarkers();
   assert.equal(countCars(), 0);
+  assert.equal(collidables.length, 0);
 });
 
 test('ghost materials: preallocated, one per colour, shared, transparent, swapped by reference', () => {
@@ -519,16 +532,17 @@ test('ghost materials: preallocated, one per colour, shared, transparent, swappe
 
 test('zone ghost: non-solid inside 18 m of the destination centre, solid again exactly once on leaving', () => {
   assert.equal(GHOST_ZONE_RADIUS, 18);
-  for (const level of [1, 2]) {
+  for (const level of [1, 2, 3]) {
     const { lm, collidables, taxi } = make();
     lm.load(level);
     parkTaxi(taxi, 40, 0);                                 // nowhere near
     const dest = LEVELS[level].destination;
-    const car = lm.traffic.cars.find((c) => lm.traffic.lanes[c.laneIndex].dir < 0);
+    const car = lm.traffic.cars[0];
     const lane = lm.traffic.lanes[car.laneIndex];
     isolate(lm, car);
-    // start 25 m before the zone (z is greater: it drives towards -z)
-    car.u = lane.centreHi - (dest.z + 25);
+    // start 25 m before the zone (dir -1 drives towards -z, dir +1 towards +z)
+    const startZ = dest.z - lane.dir * 25;
+    car.u = lane.dir < 0 ? lane.centreHi - startZ : startZ - lane.centreLo;
     lm.traffic.place(car);
     const base = collidables.length;
 
@@ -551,7 +565,7 @@ test('zone ghost: non-solid inside 18 m of the destination centre, solid again e
     assert.ok(enteredAt <= GHOST_ZONE_RADIUS + 1e-9 && enteredAt > GHOST_ZONE_RADIUS - 1.5, `became ghost at ${enteredAt}`);
     // Where the lane ends inside the zone (Level 2: the -z end is 17.4 m from the destination centre)
     // the car cannot leave it by driving: it turns solid when it re-enters at the far end
-    const endDistance = Math.hypot(lane.x - dest.x, lane.centreLo - dest.z);
+    const endDistance = Math.hypot(lane.x - dest.x, (lane.dir < 0 ? lane.centreLo : lane.centreHi) - dest.z);
     if (endDistance > GHOST_ZONE_RADIUS) {
       assert.ok(leftAt > GHOST_ZONE_RADIUS && leftAt < GHOST_ZONE_RADIUS + 1.5, `solid again at ${leftAt}`);
     } else {
@@ -749,7 +763,7 @@ test('lane hold: every car of the lane stops on the same frame, waits 1.0 s, res
 });
 
 test('lane hold: the 8 m gap holds through repeated stops and restarts, across the wrap', () => {
-  for (const level of [1, 2]) {
+  for (const level of [1, 2, 3]) {
     const { lm, taxi } = make();
     lm.load(level);
     const traffic = lm.traffic;
@@ -810,7 +824,7 @@ test('a taxi driving alongside in the middle of the road (x = 0, L1 gap 2.16 m) 
 });
 
 test('zone ghosts never trigger a hold, and never block the delivery', () => {
-  for (const level of [1, 2]) {
+  for (const level of [1, 2, 3]) {
     const { lm, collidables, taxi } = make();
     lm.load(level);
     const traffic = lm.traffic;
@@ -968,11 +982,13 @@ test('wrap hold: lanes that drive the way the taxi does are marked; the oncoming
   assert.deepEqual(lm.traffic.lanes.map((l) => [l.dir, l.sameDirection]), [[-1, true], [1, false]]);
   lm.load(2);
   assert.ok(lm.traffic.lanes.every((l) => l.sameDirection));
+  lm.load(3);
+  assert.deepEqual(lm.traffic.lanes.map((l) => [l.dir, l.sameDirection]), [[1, true], [1, true]]);
   assert.equal(WRAP_HOLD_RADIUS, 40);
 });
 
 test('wrap hold: a car at the exit end waits while the taxi is within 40 m of the entry point, then wraps', () => {
-  for (const [level, laneIndex] of [[1, 0], [2, 0], [2, 1]]) {
+  for (const [level, laneIndex] of [[1, 0], [2, 0], [2, 1], [3, 0], [3, 1]]) {
     const { lm, taxi } = make();
     lm.load(level);
     const traffic = lm.traffic;
@@ -1051,6 +1067,121 @@ test('wrap hold: nothing changes with the taxi far from the entry (no hold, same
   for (let t = 0; t < 20; t += DT) traffic.update(DT);
   assert.equal(lane.wrapHeld, false);
   assert.ok(traffic.cars.every((c) => c.u >= 0 && c.u < traffic.lanes[c.laneIndex].trackLength));
+});
+
+// ---- Level 3: the taxi drives +z (heading PI) through the night traffic
+
+// Taxi at (x, z) heading PI: the vehicle's translateZ(-speed) then moves it towards +z
+function parkTaxiL3(taxi, x, z) {
+  taxi.rotation.y = Math.PI;
+  parkTaxi(taxi, x, z);
+}
+
+test('L3: the taxi driving the road at 28 m/s overtakes the cars between the lanes, with no contact and no hold', () => {
+  const { lm, collidables, taxi } = make();
+  lm.load(3);
+  const traffic = lm.traffic;
+  const { spawn } = LEVELS[3];
+  parkTaxiL3(taxi, spawn.x, spawn.z);
+  const sim = makeVehicleSim({ taxi, collidables, lm });
+  sim.speed = 28;
+
+  const cars = traffic.cars;
+  const prevZ = cars.map((c) => c.mesh.position.z);
+  let taxiPrevZ = taxi.position.z;
+  let passed = 0;
+  let held = 0;
+  for (let t = 0; t < 40 && taxi.position.z < 270; t += DT) {
+    sim.step(DT);
+    held += traffic.lanes.filter((l) => l.scale < 1).length;
+    cars.forEach((c, i) => {
+      const z = c.mesh.position.z;
+      const jumped = Math.abs(z - prevZ[i]) > 5;
+      if (!jumped && prevZ[i] > taxiPrevZ && z < taxi.position.z) passed++;
+      prevZ[i] = z;
+    });
+    taxiPrevZ = taxi.position.z;
+  }
+  assert.ok(taxi.position.z >= 270, `the taxi drove the road (z = ${taxi.position.z.toFixed(0)})`);
+  assert.equal(sim.hits, 0, 'no contact');
+  assert.equal(held, 0, 'no lane held');
+  assert.ok(passed >= 6, `overtook ${passed} cars`);
+  console.log(`  L3 drive at 28 m/s: ${passed} cars overtaken, ${sim.hits} hits, taxi reached z = ${taxi.position.z.toFixed(0)}`);
+});
+
+test('L3: driving into the back of a slow car: exactly one stress, that lane stops for ~1 s, the other lane keeps going', () => {
+  const { lm, collidables, taxi } = make();
+  lm.load(3);
+  const traffic = lm.traffic;
+  const lane = traffic.lanes[0];
+  const car = traffic.cars.find((c) => c.laneIndex === 0);
+  isolate(lm, car);
+  car.u = -300 - lane.centreLo;                       // z = -300, away from both ends and the goal
+  traffic.place(car);
+  const other = traffic.cars.find((c) => c.laneIndex === 1);
+  other.mesh.position.x = 4.5;
+  other.u = -300 - traffic.lanes[1].centreLo;
+  traffic.place(other);
+  parkTaxiL3(taxi, lane.x, car.mesh.position.z - 40);
+  const sim = makeVehicleSim({ taxi, collidables, lm });
+  sim.speed = 28;
+
+  let overlapFrames = 0;
+  let held = false;
+  let otherMovedWhileHeld = false;
+  let frame = 0;
+  let lastContact = null;
+  let restart = null;
+  for (let t = 0; t < 5; t += DT) {
+    const otherZ = other.mesh.position.z;
+    const z = car.mesh.position.z;
+    sim.step(DT);
+    frame++;
+    if (overlapsNow(lm, taxi, car)) overlapFrames++;
+    if (lane.sinceContact === 0) lastContact = frame;
+    if (lane.scale === 0) {
+      held = true;
+      if (other.mesh.position.z !== otherZ) otherMovedWhileHeld = true;
+    } else if (held && restart === null && car.mesh.position.z !== z) {
+      restart = frame;
+    }
+  }
+  assert.equal(sim.hits, 1, `${sim.hits} stress applications`);
+  assert.equal(overlapFrames, 0, 'the car never overlaps the taxi after the detecting frame');
+  assert.ok(held, 'the lane was held');
+  assert.ok(otherMovedWhileHeld, 'the other lane kept moving');
+
+  // The lane starts again HOLD_TIME after the last contact
+  assert.ok(lastContact !== null && restart !== null, 'the lane stopped and restarted');
+  const stopped = restart - lastContact;
+  assert.ok(Math.abs(stopped - HOLD_TIME / DT) <= 2, `stopped ${stopped} frames after the last contact, want ${HOLD_TIME / DT}`);
+  console.log(`  L3 contact: ${sim.hits} stress application, lane stopped ${(stopped * DT).toFixed(2)} s after the last contact`);
+});
+
+test('L3: cars near the goal are ghosts; the taxi drives through one and the delivery is not blocked', () => {
+  const { lm, collidables, taxi } = make();
+  lm.load(3);
+  const traffic = lm.traffic;
+  const dest = LEVELS[3].destination;
+  const lane = traffic.lanes[0];
+  const car = traffic.cars.find((c) => c.laneIndex === 0);
+  isolate(lm, car);
+  car.u = 292 - lane.centreLo;                        // 8 m short of the goal centre, in the taxi's lane
+  traffic.place(car);
+  lm.traffic.update(0);
+  assert.equal(car.solid, false, 'a car 8 m from the goal is a ghost');
+  assert.ok(!collidables.includes(car.mesh));
+
+  parkTaxiL3(taxi, lane.x, 270);
+  const sim = makeVehicleSim({ taxi, collidables, lm });
+  sim.speed = 8;
+  for (let t = 0; t < 8 && lm.status === 'driving'; t += DT) {
+    sim.step(DT);
+    lm.update(DT, t);
+    for (const l of traffic.lanes) assert.equal(l.scale, 1, 'a ghost never holds its lane');
+  }
+  assert.equal(sim.hits, 0, 'no contact with a ghost');
+  assert.equal(lm.status, 'delivered', 'delivered');
 });
 
 let failed = 0;
