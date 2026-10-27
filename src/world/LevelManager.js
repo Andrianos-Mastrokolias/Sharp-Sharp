@@ -135,7 +135,7 @@ const L3_PURSUIT_REACTION_TIME = 1.5;
 // Lanes run across the whole road (zLo..zHi, inside the vehicle's
 // z bounds): cars enter at one end and leave at the other, far from
 // the spawn. The clearances only shape the initial layout. See
-// TrafficSystem.js. Level 3 (stealth) has no traffic.
+// TrafficSystem.js.
 //
 // Taxi: 2.7 m wide, spawns at x = 0. Widest car 1.97 m (minibus):
 // a car in an x = +-4.5 lane leaves ~2.2 m between its side and the
@@ -243,6 +243,17 @@ const L2_TRAFFIC_LANE_B_X = -3.6;
 const L2_TRAFFIC_LANE_B_SPEED = 17;
 const L2_TRAFFIC_LANE_B_COUNT = 9;
 const L2_TRAFFIC_MAX_CARS = 16;
+
+// Level 3: slow night traffic, same direction only (the taxi drives +z).
+// Cars show as red tail-lights and in the headlight beam. Lanes sit at
+// x +-4.5 like Level 1, clear of the shoulder objects (|x| >= 7.5).
+const L3_TRAFFIC_SEED = 3303;
+const L3_TRAFFIC_LANE_A_X = -4.5;
+const L3_TRAFFIC_LANE_A_SPEED = 8;
+const L3_TRAFFIC_LANE_B_X = 4.5;
+const L3_TRAFFIC_LANE_B_SPEED = 11;
+const L3_TRAFFIC_PER_LANE = 6;
+const L3_TRAFFIC_MAX_CARS = 12;
 
 
 // Spawn bay / destination ring / beam are unlit (MeshBasicMaterial), so
@@ -564,6 +575,30 @@ export const LEVELS = {
       captureTime: L3_PURSUIT_CAPTURE_TIME,
       patrolSpeed: L3_PURSUIT_PATROL_SPEED,
       reactionTime: L3_PURSUIT_REACTION_TIME
+    },
+
+    traffic: {
+      seed: L3_TRAFFIC_SEED,
+      maxCars: L3_TRAFFIC_MAX_CARS,
+      ...trafficLaneRange(L3_ROAD),
+      spawnClearance: TRAFFIC_SPAWN_CLEARANCE,
+      destinationClearance: TRAFFIC_DESTINATION_CLEARANCE,
+      lanes: [
+        {
+          x: L3_TRAFFIC_LANE_A_X,
+          dir: 1,
+          speed: L3_TRAFFIC_LANE_A_SPEED,
+          count: L3_TRAFFIC_PER_LANE,
+          variants: ['sedan', 'bakkie', 'minibus']
+        },
+        {
+          x: L3_TRAFFIC_LANE_B_X,
+          dir: 1,
+          speed: L3_TRAFFIC_LANE_B_SPEED,
+          count: L3_TRAFFIC_PER_LANE,
+          variants: ['minibus', 'sedan', 'bakkie']
+        }
+      ]
     },
 
     // Night: the unlit spawn bay and destination ring would glare

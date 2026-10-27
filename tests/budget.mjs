@@ -53,7 +53,8 @@ export const ORIGINAL_COLLIDABLES = { 1: 26, 2: 2, 3: 32 };
 // Traffic cars LevelManager registers on top of that. They follow the
 // road's length at the original density: Level 1 runs 10 + 10 cars (the
 // original 4 + 4 on 370 m lanes), Level 2 7 + 9 (the original 3 + 4).
-export const TRAFFIC_COLLIDABLES = { 1: 14, 2: 16, 3: 0 };
+// Level 3's night traffic is 6 + 6 cars.
+export const TRAFFIC_COLLIDABLES = { 1: 14, 2: 16, 3: 12 };
 
 // Level 1's lanes now start after the rank (680 m: 7 + 7 cars, the original
 // density), and the rank race adds 8 rival minibuses, which are counted as

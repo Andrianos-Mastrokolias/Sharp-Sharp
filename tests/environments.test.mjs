@@ -281,7 +281,9 @@ function checkTownship(step, lm, scene, collidables) {
   // 32), all childless single Meshes (checked for every level above); only
   // these kinds are collidable
   assert.ok(env.collidables.length <= 110, `step ${step}: township collidable budget (${env.collidables.length})`);
-  assert.ok(collidables.length <= 110, 'shared collidable array budget');
+  // (the shared array also holds the 12 night traffic cars)
+  assert.equal(lm.traffic.cars.length, 12, 'level 3 traffic cars');
+  assert.ok(collidables.length - lm.traffic.cars.length <= 110, 'shared collidable array budget');
   const kinds = new Set(['township-houses', 'township-fence', 'township-wreck', 'township-bin']);
   assert.ok(env.collidables.every((m) => kinds.has(m.name)), 'unexpected collidable kind');
   for (const kind of kinds) {
