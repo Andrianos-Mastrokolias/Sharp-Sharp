@@ -8,7 +8,6 @@ import {
   createGeometryCache,
   MAIN_POTHOLES,
   ROAD_TILE_LENGTH,
-  SPEED_BUMP,
   disposeObjectTree
 } from './helpers.js';
 
@@ -413,35 +412,11 @@ export function createTownship({
   }
 
   // ----------------------------------------------
-  // SPEED BUMP AND POTHOLES
+  // POTHOLES
   // Same positions as the vehicle physics expects;
   // dark and unmarked so only the headlights show them.
+  // Level 3 has no speed bump (no physics there), so none is drawn.
   // ----------------------------------------------
-
-  const speedBump =
-    createBox(
-      SPEED_BUMP.width,
-      SPEED_BUMP.height,
-      SPEED_BUMP.depth,
-      0x2d2c2a
-    );
-
-
-  speedBump.position.set(
-    SPEED_BUMP.x,
-    SPEED_BUMP.height / 2,
-    SPEED_BUMP.z
-  );
-
-
-  speedBump.material.roughness =
-    1;
-
-
-  group.add(
-    speedBump
-  );
-
 
   const potholeMaterial =
     new THREE.MeshStandardMaterial({

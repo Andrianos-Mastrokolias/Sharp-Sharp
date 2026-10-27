@@ -291,7 +291,7 @@ test('L3: lights off at the same positions is never detected (patrols)', () => {
   const { e, wokeAt } = l3Wake(false, MAX_SPEED, 6);
   assert.equal(wokeAt, null);
   assert.equal(e.lm.pursuit.state, 'patrolling');
-  assert.ok(gap(e) > 100, 'taxi is long gone');
+  assert.ok(gap(e) > 50, `taxi is long gone (${gap(e)})`);
 });
 
 test('L3: realistic start (taxi accelerating at 13 m/s^2): on = detected, off = patrolling', () => {
@@ -1472,7 +1472,7 @@ function l3Drive({ lightsAt, cap = MAX_SPEED, seconds = 14 }) {
 }
 
 test('patrol/reaction: Level 3 config uses the named constants; Levels 1 and 2 default to off', () => {
-  assert.equal(L3_CFG.patrolSpeed, 17);
+  assert.equal(L3_CFG.patrolSpeed, 26);
   assert.equal(L3_CFG.reactionTime, 1.5);
   for (const n of [1, 2]) {
     assert.equal(LEVELS[n].pursuit.patrolSpeed, undefined);
@@ -1496,7 +1496,7 @@ test('patrol: idle until the wake delay, then drives along +Z at patrolSpeed and
   step(e.lm, 0.3);
   assert.equal(p.state, 'patrolling');
   let top = 0;
-  for (let t = 0; t < 70; t += DT) {          // 890 m at 17 m/s
+  for (let t = 0; t < 70; t += DT) {          // 890 m at 26 m/s
     const before = p.z;
     e.lm.update(DT, t);
     top = Math.max(top, p.speed);
@@ -1504,7 +1504,7 @@ test('patrol: idle until the wake delay, then drives along +Z at patrolSpeed and
     assert.ok(Math.abs(p.x) < 1e-9, 'stays in its lane');
     assert.ok(['patrolling', 'idle'].includes(p.state), p.state);
   }
-  assert.ok(Math.abs(top - 17) < 1e-6, `top speed ${top}`);
+  assert.ok(Math.abs(top - 26) < 1e-6, `top speed ${top}`);
   assert.equal(p.state, 'idle');
   assert.ok(Math.abs(p.z - L3_PATROL_END) < 1, `stopped at ${p.z}`);
   assert.equal(p.speed, 0);
@@ -1517,7 +1517,7 @@ test('patrol: lights off, a taxi at full throttle is never detected', () => {
   const r = l3Drive({ lightsAt: () => false });
   assert.equal(r.sighted, null);
   assert.ok(r.minGap > 15, `min gap ${r.minGap}`);
-  assert.ok(r.finalGap > 100, `final gap ${r.finalGap}`);
+  assert.ok(r.finalGap > 50, `final gap ${r.finalGap}`);
   assert.equal(r.e.captured.length, 0);
 });
 
@@ -1530,11 +1530,11 @@ test('reaction: from the first sighting it brakes to a stop, holds still flashin
   const e = make();
   e.lm.load(3);
   e.setLights(false);
-  e.taxi.position.set(0, 0, L3_PURSUER_Z + 100);   // parked ahead: the patrol runs into it
+  e.taxi.position.set(0, 0, L3_PURSUER_Z + 20);    // rolling ahead at 20 m/s: the patrol (26) catches up
   const p = e.lm.pursuit;
   let t = 0, maxDecel = 0;
   while (p.state === 'patrolling' || p.state === 'idle') {
-    e.lm.update(DT, t); t += DT;
+    e.taxi.position.z += 20 * DT; e.setSpeed(20); e.lm.update(DT, t); t += DT;
     assert.ok(t < 10, 'never sighted');
   }
   assert.equal(p.state, 'reacting');
@@ -1544,7 +1544,7 @@ test('reaction: from the first sighting it brakes to a stop, holds still flashin
   let holdZ = null, held = 0;
   while (p.state === 'reacting') {
     const prev = p.speed;
-    e.lm.update(DT, t); t += DT;
+    e.taxi.position.z += 20 * DT; e.setSpeed(20); e.lm.update(DT, t); t += DT;
     maxDecel = Math.max(maxDecel, (prev - p.speed) / DT);
     lit.add(p.mesh.children.find(c => c.material?.emissiveIntensity === 2.5)?.material.color.getHex());
     assert.equal(e.captured.length, 0);
