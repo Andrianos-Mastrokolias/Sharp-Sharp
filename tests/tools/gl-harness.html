@@ -61,7 +61,7 @@ window.loadLevel = async (level, trafficSeconds = 0) => {
   camera.far = VIEW_DISTANCE[level];
   camera.updateProjectionMatrix();
   sky.setViewDistance(camera.far);
-  env = buildEnvironment(level, { materials });
+  env = buildEnvironment(level, { materials, runners: LEVELS[level].runners, route: LEVELS[level].route });
   scene.add(env.group);
   traffic = new TrafficSystem({ parent: scene });
   traffic.configure(LEVELS[level]);

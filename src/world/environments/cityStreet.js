@@ -18,6 +18,9 @@ import {
 import {
   createLife,
   createPedestrianField,
+  createRunners,
+  planRunnerZs,
+  routeXAt,
   LIFE_DENSITY
 } from './life.js';
 
@@ -82,7 +85,11 @@ const CHUNK_SIZE = 120;
 // --------------------------------------------------
 export function createCityStreet({
   materials,
-  road: roadExtent = DEFAULT_ROAD
+  road: roadExtent = DEFAULT_ROAD,
+
+  // the level's runners (LEVELS[1].runners) and route, if it has any
+  runners = null,
+  route = null
 }) {
 
 const ROAD_Z_MIN =
@@ -1501,6 +1508,71 @@ if (
           400
         )
     }
+  });
+}
+
+
+// ==================================================
+// RUNNERS
+// --------------------------------------------------
+// People who wait at the kerb and dash across when the taxi is about to
+// reach them (see life.js). Each crosses where both sidewalks are there
+// (not at a side street's mouth: 6 m clear of every side street), 5 m from
+// the middle of every slot (where the shopfronts are). Nobody else is within
+// 2.5 m of a runner's kerb: the street's people keep to |x| 11.9 and more.
+// ==================================================
+
+if (
+  runners
+) {
+
+  const slabs =
+    [
+      ...lifeLayout.sidewalks,
+      ...lifeLayoutAdded.sidewalks
+    ];
+
+  const onSidewalk =
+    (side, z) =>
+      slabs.some(
+        (slab) =>
+          slab.side === side &&
+          z >= slab.z0 + 2 &&
+          z <= slab.z1 - 2
+      );
+
+  const zs =
+    planRunnerZs({
+      ...runners,
+
+      accept: (z) =>
+        onSidewalk(-1, z) &&
+        onSidewalk(1, z) &&
+        sideStreets.every(
+          (street) =>
+            z < street.z0 - 6 ||
+            z > street.z1 + 6
+        ) &&
+        slotList.every(
+          (slot) =>
+            Math.abs(
+              z - (SLOT_Z0 + slot * SLOT_SPACING)
+            ) >= 5
+        )
+    });
+
+  createRunners({
+    group,
+    field: pedestrians,
+    zs,
+    sign: runners.sign,
+    aimX:
+      route
+        ? (z) => routeXAt(route, z)
+        : 0,
+    // between the sidewalk (0.2) and the road (0)
+    y: 0.1,
+    seed: runners.seed
   });
 }
 

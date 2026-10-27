@@ -49,6 +49,15 @@ slower.
    person can be hit once per load, there is a 0.5 s cooldown between hits, and
    a retry puts everyone back. The people are animated in a shader, so
    `life.js` keeps a CPU copy of their paths for the hit test.
+10. **Runners.** Six people on the CBD stretch (z -130 to -640, after the exit
+    gantry, clear of side streets and shopfronts) wait at the kerb and dash
+    across at 5 m/s when the taxi is about to reach them. A runner starts about
+    1.9 s before the taxi arrives (the time it needs to reach the taxi's line),
+    or when the taxi is 35 m away if it is slower than about 18 m/s, so a
+    driver who holds a straight line hits one (-50 points, 30% of the speed)
+    and one who brakes after it starts, or drives 2.5 m or more to one side,
+    misses. Each runner goes once per load, is removed on the far side, and a
+    retry puts them all back. Data: `LEVELS[1].runners`.
 
 **Say:** the world is data (a level config), traffic, rivals and pursuit are
 separate systems that read it, and all are deterministic so they can be tested.
@@ -91,6 +100,12 @@ the hazards but the pursuer can follow, so neither route is strictly safer.
    after the lose time (4 s) out of range: 170 m with lights on, 30 m with
    lights off.
 5. Trade-off to point out: lights off hides you but hides the potholes too.
+6. **Runners.** Eight people (z -540 to 240, none in the first or last 60 m)
+   wait on the shoulder and dash across when the taxi is about to reach them,
+   the same rule as Level 1 (they aim at the route's x at that z, so on the
+   wander they start from the side that gives them about 2.5 s). No lights are
+   added: they only show in the headlights, in light clothes. A hit costs the
+   usual speed and cargo stress and no points. Data: `LEVELS[3].runners`.
 
 **Say:** the same pursuit system, configured differently, produces a different
 game: stealth instead of a straight chase.
@@ -100,7 +115,7 @@ game: stealth instead of a straight chase.
 - `src/world/LevelManager.js`: `LEVELS` configs (spawn, route, destination, hazards, pursuit, traffic, elevated sections); level load/reset.
 - `src/world/roads.js`: per-level road length and bounds shared by the world, traffic and vehicle limits.
 - `src/world/environments/cityStreet.js`, `motorway.js`, `township.js`: scenery for Levels 1, 2 and 3.
-- `src/world/environments/life.js` and `props/people.js`: the pedestrians (shader walk, `personPosition` CPU copy, `createPedestrianField` hit test and dust).
+- `src/world/environments/life.js` and `props/people.js`: the pedestrians (shader walk, `personPosition` CPU copy, `createPedestrianField` hit test and dust) and the runners (`createRunners`, `planRunnerZs`, the trigger in the field's `update`).
 - `src/world/TrafficSystem.js`: seeded lanes, lane hold, wrap hold, zone ghosting, no per-frame allocation.
 - `src/world/RivalTaxis.js`: the rival taxis (Level 1 rank race); `LevelManager` owns the countdown, points, releasing and the police head start.
 - `src/world/PursuitSystem.js`: chase, patrol/reaction, flyover keep-out, capture and catch lunge.
@@ -109,7 +124,7 @@ game: stealth instead of a straight chase.
 
 ## Performance (from `tests/budget.mjs`)
 
-Worst-case view with overhead (rivals counted all in view): Level 1 about 413 draws and 59k triangles,
-Level 2 about 161 draws and 49k, Level 3 about 154 draws and 31k.
+Worst-case view with overhead (rivals counted all in view, the runners included): Level 1 about 415 draws and 60k triangles,
+Level 2 about 161 draws and 49k, Level 3 about 175 draws and 33k.
 Level 1 is the heaviest because of buildings and street life. **(check live)**
 frame rate on the demo machine at Low, Medium and High quality.

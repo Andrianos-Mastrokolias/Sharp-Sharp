@@ -307,6 +307,18 @@ export const LEVELS = {
 
     spawnBay: false,
 
+    // Six runners on the CBD stretch (after the exit gantry at z -60): they
+    // wait at the kerb and dash across when the taxi is about to reach them
+    // (life.js). One per band of zFrom..zTo, placed by the environment.
+    runners: {
+      count: 6,
+      zFrom: -130,
+      zTo: -640,
+      minGap: 60,
+      sign: -1,
+      seed: 7101
+    },
+
     // Pursuit begins once the taxi is 0.55 of the way along the route.
     pursuit: {
       mode: 'trigger',
@@ -551,6 +563,21 @@ export const LEVELS = {
       { type: 'pothole', x: -5, z: -10, radius: 1.7, depth: 0.45 },
       { type: 'pothole', x: 3, z: 70, radius: 2.0, depth: 0.4 }
     ],
+
+    // Eight runners between z -540 and 240 (not in the first or last 60 m of
+    // the road): they wait on the shoulder and dash across when the taxi is
+    // about to reach them. No lights, so the headlights are all that show
+    // them. They keep 4.5 m clear of the potholes above (avoidZ) as well as
+    // the wrecks, bins and lamps (township.js).
+    runners: {
+      count: 8,
+      zFrom: -540,
+      zTo: 240,
+      minGap: 60,
+      sign: 1,
+      seed: 7303,
+      avoidZ: [-85, -10, 70]
+    },
 
     destination: {
       x: 0,
@@ -1603,7 +1630,13 @@ if (
 
     this.environment = buildEnvironment(
       levelId,
-      { materials: this.materials }
+      {
+        materials: this.materials,
+
+        // the runners (Levels 1 and 3) and the route they aim at
+        runners: this.config?.runners,
+        route: this.config?.route
+      }
     );
 
     this.scene.add(this.environment.group);
