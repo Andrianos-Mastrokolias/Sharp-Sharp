@@ -631,7 +631,11 @@ for (const [step, level] of SEQUENCE.entries()) {
       o.geometry?.type === 'BoxGeometry' && o.geometry.parameters.depth === SPEED_BUMP.depth &&
       o.geometry.parameters.height === SPEED_BUMP.height) bump = o;
   });
-  assert.ok(bump, `step ${step}: level ${level} lost the speed bump`);
+  if (level === 3) {
+    assert.equal(bump, null, `step ${step}: level 3 draws a speed bump it has no physics for`);
+  } else {
+    assert.ok(bump, `step ${step}: level ${level} lost the speed bump`);
+  }
 
   // The vehicle's own pothole list is untouched by environments
   assert.deepEqual(

@@ -129,6 +129,22 @@ export function signStat(label, value) {
   `;
 }
 
+// Level 1 rank-race points, e.g. "1100 pts"
+export function formatPoints(points) {
+  return `${points} pts`;
+}
+
+// Points and rivals beaten for a results screen; '' for a level
+// without a score (levelManager.getState().score is null there).
+export function scoreStats(score) {
+  if (!score) return '';
+
+  return (
+    signStat('Points', formatPoints(score.points)) +
+    signStat('Rivals beaten', `${score.beaten} / ${score.rivalsTotal}`)
+  );
+}
+
 const CONTROLS = [
   ['W / S', 'Drive'],
   ['A / D', 'Steer'],
@@ -137,6 +153,7 @@ const CONTROLS = [
   ['L', 'Lights'],
   ['R', 'Retry'],
   ['Esc / P', 'Pause'],
+  ['M', 'Mouse drive (LMB throttle, RMB brake, move to steer)'],
   ['Mouse drag', 'Look around (chase camera)'],
   ['Mouse wheel', 'Zoom (chase camera)']
 ];

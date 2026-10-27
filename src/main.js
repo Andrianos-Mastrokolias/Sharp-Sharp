@@ -15,6 +15,7 @@ import { createTaxi } from './vehicle/Taxi.js';
 import { CargoSystem } from './vehicle/CargoSystem.js';
 import { VehicleController } from './vehicle/VehicleController.js';
 import { CameraSystem } from './cameras/CameraSystem.js';
+import { MouseDrive } from './input/MouseDrive.js';
 
 import { LightingManager } from './graphics/LightingManager.js';
 import { EffectsManager } from './graphics/EffectsManager.js';
@@ -36,6 +37,8 @@ import {
   labelButton,
   labelRow,
   signStat,
+  scoreStats,
+  formatPoints,
   controlsList,
   menuBackdropHTML,
   mainMenuHTML,
@@ -44,6 +47,7 @@ import {
 } from './ui/screens.js';
 
 import { Hud } from './ui/Hud.js';
+import { CountdownTracker } from './ui/countdown.js';
 import { CREDITS } from './ui/credits.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { readPreferences, savePreferences, applyQuality } from './game/preferences.js';
@@ -54,6 +58,23 @@ try { preferenceStorage = window.localStorage; } catch { /* Storage is optional.
 let preferences = readPreferences(preferenceStorage);
 const audio = new GameAudio();
 audio.setVolume(preferences.muted ? 0 : preferences.volume);
+
+// TODO(Abdur-Rahman): GameAudio has no sounds for these cues yet. Add them
+// to CUES / RECORDINGS in src/audio/GameAudio.js under these names:
+//   'countdown'      beep on each of 3, 2, 1 (Level 1 rank race)
+//   'go'             GO! at the end of the countdown
+//   'beaten'         +100, a rival taxi beaten
+//   'firstOut'       +300, first car out of the rank
+//   'pedestrianHit'  -50, a pedestrian knocked down
+// GameAudio.cue() returns false for a name it doesn't know, so until then
+// these calls are silent no-ops.
+function playCue(name) {
+  audio.cue?.(name);
+}
+
+// onScore reasons with their own cue ('pedestrian' plays through
+// onPedestrianHit, which also fires on levels without a score)
+const SCORE_CUES = { beaten: 'beaten', firstOut: 'firstOut' };
 
 // ============================================================
 // GAME CONFIGURATION
@@ -216,6 +237,23 @@ const cameraSystem = new CameraSystem({
 });
 
 // ============================================================
+// MOUSE DRIVE
+// ============================================================
+
+// Optional mouse driving (M). Losing pointer lock while driving
+// (Esc) pauses, like Esc does without the lock.
+let lockLostPauseTime = -Infinity;
+
+const mouseDrive = new MouseDrive({
+  canvas: renderer.domElement,
+  isPlaying: () => phase === GamePhase.PLAYING,
+  onLockLost: () => {
+    lockLostPauseTime = performance.now();
+    pauseGame();
+  }
+});
+
+// ============================================================
 // DUST
 // ============================================================
 
@@ -292,6 +330,7 @@ const screenActions = {
     clearKeys();
     vehicle.setEnabled(true);
     clock.getDelta();
+    mouseDrive.requestLock();
   },
 
   retryLevel: () => {
@@ -482,13 +521,16 @@ function completeLevel(event) {
   phase = GamePhase.COMPLETE;
   vehicle.setEnabled(false);
   clearKeys();
+  hud.clearScorePopups();
 
   const result = {
     level: currentLevel,
     name: LEVELS[currentLevel].name,
     time: event.time,
     cargo: cargo.remaining,
-    totalCargo: cargo.total
+    totalCargo: cargo.total,
+    // Level 1 rank-race score; null on levels without one
+    score: levelManager.getState().score
   };
 
   const existingIndex = results.findIndex(
@@ -541,6 +583,8 @@ function completeLevel(event) {
             `${cargo.remaining} / ${cargo.total}`
           )}
 
+          ${scoreStats(result.score)}
+
           ${signStat(
             'Next destination',
             LEVELS[currentLevel + 1].name
@@ -571,6 +615,7 @@ function failLevel(reason, flavour = 'eish') {
 
   vehicle.setEnabled(false);
   clearKeys();
+  hud.clearScorePopups();
 
   const cargo = cargoSystem.getState();
 
@@ -684,6 +729,8 @@ function resumeGame() {
 
   // Discard the paused time so physics doesn't jump.
   clock.getDelta();
+
+  mouseDrive.requestLock();
 }
 
 // ============================================================
@@ -742,6 +789,8 @@ function finishGame() {
               'Cargo delivered',
               `${result.cargo} / ${result.totalCargo}`
             )}
+
+            ${scoreStats(result.score)}
           </div>
         </div>
 
@@ -778,6 +827,17 @@ function finishGame() {
     )
     .join('');
 
+  // Rank-race points for the levels that have them (Level 1)
+  const pointsRows = results
+    .filter(result => result.score)
+    .map(result =>
+      signStat(
+        `${ROUTES[result.level]?.code ?? `L${result.level}`} · Points`,
+        formatPoints(result.score.points)
+      )
+    )
+    .join('');
+
   showScreen(`
     <div class="ss-column">
       ${lockup([
@@ -808,6 +868,8 @@ function finishGame() {
 
         <div class="sign-body">
           ${resultRows}
+
+          ${pointsRows}
 
           ${signStat(
             'Total driving time',
@@ -857,7 +919,16 @@ const levelManager = new LevelManager({
     );
   },
 
-  onPedestrianHit: () => audio.cue('pedestrianHit')
+  // Level 1 rank-race points: +100 beaten, +300 first out, -50 pedestrian
+  onScore: event => {
+    hud.showScorePopup(event);
+
+    if (SCORE_CUES[event.reason]) {
+      playCue(SCORE_CUES[event.reason]);
+    }
+  },
+
+  onPedestrianHit: () => playCue('pedestrianHit')
 });
 
 // ============================================================
@@ -878,6 +949,8 @@ function loadLevel(level, { showIntro = true } = {}) {
 
   vehicle.setEnabled(false);
   clearKeys();
+  hud.clearScorePopups();
+  countdown.reset();
 
   currentLevel = level;
 
@@ -961,6 +1034,14 @@ window.addEventListener('keydown', event => {
     ) &&
     !event.repeat
   ) {
+    // The same Esc that dropped pointer lock already paused.
+    if (
+      event.code === 'Escape' &&
+      performance.now() - lockLostPauseTime < 300
+    ) {
+      return;
+    }
+
     if (phase === GamePhase.PLAYING) {
       pauseGame();
     } else if (phase === GamePhase.PAUSED) {
@@ -995,6 +1076,10 @@ window.addEventListener('keydown', event => {
       toggleHeadlights();
       break;
 
+    case 'KeyM':
+      mouseDrive.toggle();
+      break;
+
     // No Digit1 / Digit2 / Digit3 handlers.
     // Level progression is managed by the game.
   }
@@ -1016,6 +1101,9 @@ window.addEventListener('pagehide', () => audio.dispose());
 
 const hud = new Hud();
 
+// Level 1 "3, 2, 1, GO!" overlay; reset on every level load
+const countdown = new CountdownTracker();
+
 // ============================================================
 // HUD HELPERS
 // ============================================================
@@ -1036,17 +1124,18 @@ function formatCameraName(mode) {
   }
 }
 
-function updateHUD() {
+function updateHUD(objective) {
   hud.update({
     level: currentLevel,
     levelName: LEVELS[currentLevel].name,
-    objective: levelManager.getState(),
+    objective,
     cargo: cargoSystem.getState(),
     speedKmh: Math.abs(vehicle.getSpeed()) * 3.6,
-    cameraMode: formatCameraName(
-      cameraSystem.getMode()
-    ),
-    headlightsOn: getHeadlightsEnabled()
+    cameraMode: formatCameraName(cameraSystem.getMode()),
+    headlightsOn: getHeadlightsEnabled(),
+    mouseDrive: mouseDrive.enabled,
+    // Hidden behind the intro / pause screens
+    countdown: phase === GamePhase.PLAYING ? countdown.text : ''
   });
 }
 
@@ -1068,9 +1157,13 @@ function animate() {
 
   const elapsedTime = clock.getElapsedTime();
 
-  // Only update driving physics during gameplay.
+  // Keyboard keys, merged with the mouse when mouse drive is on.
+  const input = mouseDrive.update(dt, keys, phase === GamePhase.PLAYING);
+
+  // Only run active vehicle physics during gameplay. The level can lock
+  // input (e.g. the rank-race countdown holds the taxi still until GO).
   if (phase === GamePhase.PLAYING) {
-    vehicle.update(dt, levelManager.inputLocked ? NO_KEYS : keys);
+    vehicle.update(dt, levelManager.inputLocked ? NO_KEYS : input);
 
     // Destination detection, traffic and pursuit.
     // This may change the game phase.
@@ -1112,10 +1205,22 @@ skylineManager.update(taxi.position);
     dustSystem.update(dt);
   }
 
-  updateHUD();
+  const objective = levelManager.getState();
+
+  // Only counts down (and runs the GO! timer) while playing
+  if (phase === GamePhase.PLAYING) {
+    countdown.update(objective.race, dt);
+
+    // Once per number (3, 2, 1) and once for GO!
+    if (countdown.cue) {
+      playCue(countdown.cue);
+    }
+  }
+
+  updateHUD(objective);
 
   audio.setActive(phase === GamePhase.PLAYING && !document.hidden);
-  audio.update(dt, vehicle.getSpeed(), levelManager.getState().pursuit.state, keys.Space);
+  audio.update(dt, vehicle.getSpeed(), objective.pursuit.state, keys.Space);
 
   renderer.render(scene, camera);
 

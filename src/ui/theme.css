@@ -855,12 +855,20 @@ summary.label:focus-visible {
   position: absolute;
 }
 
-/* ---------- Top-left: route sign ---------- */
+.hud [hidden] {
+  display: none !important;
+}
 
-.hud-route {
+/* ---------- Top-left: route sign + score ---------- */
+
+.hud-left {
   top: 1rem;
   left: 1rem;
   width: 17rem;
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
 }
 
 .hud-route .sign-head {
@@ -887,6 +895,121 @@ summary.label:focus-visible {
 .hud-distance {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+}
+
+/* Level 1 rank-race score, styled like the roof load panel */
+.hud-score {
+  overflow: hidden;
+  border: 4px solid var(--ink);
+  border-radius: 16px;
+}
+
+.hud-score-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 0.3rem 0.8rem;
+
+  background: var(--mustard);
+  border-bottom: 4px solid var(--ink);
+
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.hud-score-points {
+  color: var(--maroon);
+  font-family: var(--font-title);
+  font-size: 1.8rem;
+  letter-spacing: 0;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-score-body {
+  padding: 0.4rem 0.8rem;
+  background: var(--cream);
+
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Upper centre: score pop-ups ---------- */
+
+.hud-popups {
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* 1.6 s: keep in step with POPUP_TIME in Hud.js */
+.hud-popup {
+  padding: 0.3rem 0.9rem;
+
+  border: 4px solid var(--ink);
+  border-radius: 12px;
+
+  font-family: var(--font-title);
+  font-size: 1.5rem;
+  white-space: nowrap;
+
+  animation: hud-popup 1.6s ease-out forwards;
+}
+
+.hud-popup.positive {
+  background: var(--sign-green);
+  color: var(--sign-white);
+}
+
+.hud-popup.negative {
+  background: var(--chevron-red);
+  color: var(--sign-white);
+}
+
+@keyframes hud-popup {
+  0%   { opacity: 0; transform: translateY(12px) scale(0.6); }
+  12%  { opacity: 1; transform: translateY(0) scale(1.1); }
+  22%  { transform: translateY(0) scale(1); }
+  75%  { opacity: 1; transform: translateY(-10px); }
+  100% { opacity: 0; transform: translateY(-28px); }
+}
+
+/* ---------- Centre: Level 1 race countdown ---------- */
+
+.hud-countdown {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+
+  color: var(--cream);
+  font-family: var(--font-title);
+  font-size: 9rem;
+  line-height: 1;
+  -webkit-text-stroke: 6px var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 6px 0 var(--ink);
+}
+
+.hud-countdown.go {
+  color: var(--route-yellow);
+}
+
+.hud-countdown.animate {
+  animation: hud-countdown 0.6s ease-out;
+}
+
+@keyframes hud-countdown {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(1.8); }
+  35%  { opacity: 1; transform: translate(-50%, -50%) scale(0.92); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
 /* ---------- Top-right: pursuer meter + labels ---------- */
@@ -921,6 +1044,16 @@ summary.label:focus-visible {
   min-width: 4.2rem;
   justify-content: center;
   font-size: 1.3rem;
+}
+
+/* Siren pause on first sighting: the value block flashes maroon */
+.hud-tail.spotted .lk-mustard {
+  animation: hud-spotted 0.5s steps(1, end) infinite;
+}
+
+@keyframes hud-spotted {
+  0%   { background: var(--maroon); color: var(--cream); }
+  50%  { background: var(--mustard); color: var(--ink); }
 }
 
 .hud-tail-track {
