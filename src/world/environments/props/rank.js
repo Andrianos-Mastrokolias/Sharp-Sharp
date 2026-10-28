@@ -85,11 +85,43 @@ export function createTaxiRank({
     roughness: 0.85
   });
 
-  const glassMaterial = new THREE.MeshStandardMaterial({
-    color: 0x263d49,
-    metalness: 0.15,
-    roughness: 0.2
+  
+  // ==========================================================
+  // REFRACTIVE GLASS — CGV GRAPHICS DEMONSTRATION
+  // ==========================================================
+
+  // Physically based glass for the taxi marshal's booth.
+  // Transmission allows light from the background scene
+  // to pass through the surface.
+  // IOR controls how strongly light bends in the glass.
+  const glassMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xe5f5ff,
+
+    // Allow most light to pass through the glass.
+    transmission: 0.92,
+
+    // Typical refractive index for glass.
+    ior: 1.5,
+
+    // Approximate thickness for the refractive effect.
+    thickness: 0.25,
+
+    // Smooth glass surface.
+    roughness: 0.06,
+    metalness: 0,
+
+    // Subtle clear-glass highlights.
+    clearcoat: 1,
+    clearcoatRoughness: 0.05,
+
+    // Keep the material fully opaque in the alpha sense;
+    // transmission handles optical transparency.
+    opacity: 1,
+
+    // Avoid blocking other transparent surfaces.
+    depthWrite: false
   });
+
 
   const stallRed = new THREE.MeshStandardMaterial({
     color: 0xb94b33,
@@ -406,13 +438,20 @@ const shelterB = zMax - 60;
       { solid: true, shadow: true }
     );
 
-    // Window enclosure.
+    
+    // Window enclosure with physically based refraction.
+    // Keep this glass mesh separate from the normal
+    // geometry batches for correct material rendering.
     addBox(
       3.0, 1.15, 3.15,
       glassMaterial,
       boothX, 1.85, boothZ,
-      { shadow: true }
+      {
+        shadow: false,
+        batched: false
+      }
     );
+
 
     // Roof.
     addBox(

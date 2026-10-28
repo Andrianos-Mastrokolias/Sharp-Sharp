@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createTaxiRank } from './props/rank.js';
+import { createHeightMapTerrain } from '../../graphics/HeightMapTerrain.js';
 import {
   createBox,
   createTexturedBox,
@@ -164,6 +165,26 @@ ground.position.z =
 group.add(
   ground
 );
+
+// ==================================================
+// HEIGHT MAP TERRAIN — CGV GRAPHICS DEMONSTRATION
+// ==================================================
+
+// Hills are positioned beside the taxi rank, away
+// from the carriageway and the vehicle's collision path.
+const heightMapTerrain = createHeightMapTerrain({
+  width: 54,
+  depth: 90,
+  segments: 32,
+  maxHeight: 5
+});
+
+// Keep the terrain outside the driving corridor.
+// This is visual scenery, not a collidable obstacle.
+heightMapTerrain.position.x = 57;
+heightMapTerrain.position.z = 95;
+
+group.add(heightMapTerrain);
 
 
 // ==================================================
