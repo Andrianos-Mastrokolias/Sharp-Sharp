@@ -31,11 +31,14 @@ const L2_ROAD = ROADS[2];
 const L3_ROAD = ROADS[3];
 
 // What running over a pedestrian does to the taxi (vehicle.applyHit): it
-// loses 30% of its speed, the cargo takes a little stress and the suspension a
+// loses 25% of its speed, the cargo takes a little stress and the suspension a
 // kick. Nothing happens to the police. On Level 1 it also costs 50 points
 // (registerPedestrianHit, L1_RACE.points.pedestrian).
+// 25%, not 30%: at 28 to 31 m/s a 30% loss is 8.4 to 9.3 m/s, past the
+// pursuit's STUMBLE_SPEED_DROP (8 m/s), so a hit held the police tight like a
+// crash. 25% is 7 to 7.75 m/s, under it.
 const PEDESTRIAN_HIT = {
-  speedLoss: 0.3,
+  speedLoss: 0.25,
   stress: 2,
   kick: 0.3
 };
@@ -73,7 +76,7 @@ const L1_PURSUIT_CAPTURE_TIME = 1.5;
 // that was longer than captureTime, so one mistake caught the player. The
 // surge is now shorter, and the pressure line (the speed below which the gap
 // closes, a fraction of top speed) lower and slower to build. PursuitSystem.js's
-// own defaults are 2 s, 0.9 and 0.5, and Level 3 keeps them.
+// own defaults are 2 s, 0.9 and 0.5 (Level 3 now sets its own, see below).
 const L1_PURSUIT_STUMBLE_SURGE_TIME = 1.4;       // s (the catch rate falls off a cliff at 1.3: do not go lower)
 const L1_PURSUIT_PRESSURE_SPEED_FRACTION = 0.8;
 const L1_PURSUIT_PRESSURE_RISE_RATE = 0.3;       // per second, at a standstill
@@ -123,6 +126,12 @@ const L3_PURSUIT_CAPTURE_TIME = 1.5;
 // PATROL AND REACTION
 const L3_PURSUIT_PATROL_SPEED = 26;
 const L3_PURSUIT_REACTION_TIME = 1.5;
+
+// BALANCE (tests/tools/pursuit-balance.mjs): as on Levels 1 and 2, instead of
+// PursuitSystem.js's own 2 s, 0.9 and 0.5
+const L3_PURSUIT_STUMBLE_SURGE_TIME = 1.25;      // s (see the Level 1 note above)
+const L3_PURSUIT_PRESSURE_SPEED_FRACTION = 0.8;
+const L3_PURSUIT_PRESSURE_RISE_RATE = 0.3;
 
 
 
@@ -307,11 +316,12 @@ export const LEVELS = {
 
     spawnBay: false,
 
-    // Six runners on the CBD stretch (after the exit gantry at z -60): they
+    // Four runners on the CBD stretch (after the exit gantry at z -60): they
     // wait at the kerb and dash across when the taxi is about to reach them
     // (life.js). One per band of zFrom..zTo, placed by the environment.
     runners: {
-      count: 6,
+      count: 4,
+      minDistance: 50,
       zFrom: -130,
       zTo: -640,
       minGap: 60,
@@ -571,6 +581,7 @@ export const LEVELS = {
     // the wrecks, bins and lamps (township.js).
     runners: {
       count: 8,
+      minDistance: 35,
       zFrom: -540,
       zTo: 240,
       minGap: 60,
@@ -601,7 +612,10 @@ export const LEVELS = {
       captureDistance: L3_PURSUIT_CAPTURE_DISTANCE,
       captureTime: L3_PURSUIT_CAPTURE_TIME,
       patrolSpeed: L3_PURSUIT_PATROL_SPEED,
-      reactionTime: L3_PURSUIT_REACTION_TIME
+      reactionTime: L3_PURSUIT_REACTION_TIME,
+      stumbleSurgeTime: L3_PURSUIT_STUMBLE_SURGE_TIME,
+      pressureSpeedFraction: L3_PURSUIT_PRESSURE_SPEED_FRACTION,
+      pressureRiseRate: L3_PURSUIT_PRESSURE_RISE_RATE
     },
 
     traffic: {

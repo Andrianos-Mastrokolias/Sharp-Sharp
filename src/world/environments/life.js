@@ -119,7 +119,8 @@ export const RUNNER = {
 
   // the taxi must be at least this far (m) for a runner to start, so a driver
   // can always do something about it; a frame that steps over it by up to
-  // slack m still counts
+  // slack m still counts. The default: a level can set its own
+  // (LEVELS[n].runners.minDistance, through createRunners)
   minDistance: 35,
   slack: 2,
 
@@ -426,6 +427,9 @@ export function createPedestrianField({
   const runnerLength =
     [];
 
+  const runnerMinDistance =
+    [];
+
   // 0 waiting at the kerb, 1 crossing, 2 done (gone, or hit)
   const runnerState =
     [];
@@ -462,7 +466,7 @@ export function createPedestrianField({
   // distance still to go dz (along the taxi's direction of travel) is at most
   // max(MIN_DISTANCE, lead * max(speed, FLOOR_SPEED)), and at least
   // MIN_DISTANCE less a little slack for a frame that stepped over it. So a
-  // taxi at speed v starts it lead seconds out, and a slow one at 35 m. A
+  // taxi at speed v starts it lead seconds out, and a slow one at its minDistance (35 m by default). A
   // crossing runner is removed when it has covered its path.
   const updateRunners =
     (speed, tz, now) => {
@@ -502,10 +506,10 @@ export function createPedestrianField({
 
           if (
             dz <= Math.max(
-              RUNNER.minDistance,
+              runnerMinDistance[k],
               runnerLead[k] * v
             ) &&
-            dz > RUNNER.minDistance - RUNNER.slack
+            dz > runnerMinDistance[k] - RUNNER.slack
           ) {
 
             runnerState[k] =
@@ -797,13 +801,14 @@ export function createPedestrianField({
     // updateRunners). sign is the direction the taxi travels along z (-1 on
     // Level 1, +1 on Level 3), lead the seconds before the taxi's arrival
     // that it starts, length the path length.
-    addRunner(id, { z, sign, lead, length }) {
+    addRunner(id, { z, sign, lead, length, minDistance = RUNNER.minDistance }) {
 
       runnerIds.push(id);
       runnerZ.push(z);
       runnerSign.push(sign);
       runnerLead.push(lead);
       runnerLength.push(length);
+      runnerMinDistance.push(minDistance);
       runnerState.push(0);
       runnerStart.push(0);
 
@@ -1074,6 +1079,7 @@ export function createPedestrianField({
         runnerSign.length =
         runnerLead.length =
         runnerLength.length =
+        runnerMinDistance.length =
         runnerState.length =
         runnerStart.length =
         0;
@@ -1969,6 +1975,9 @@ export function createRunners({
   // the height of the ground they stand on
   y = 0,
 
+  // the level's own RUNNER.minDistance (m), if it has one
+  minDistance = RUNNER.minDistance,
+
   seed
 }) {
 
@@ -2113,7 +2122,8 @@ export function createRunners({
             z: person.z,
             sign,
             lead: entry.lead,
-            length
+            length,
+            minDistance
           }
         );
       }

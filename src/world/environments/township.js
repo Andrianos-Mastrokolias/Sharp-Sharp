@@ -1481,6 +1481,7 @@ export function createTownship({
           ? (z) => routeXAt(route, z)
           : 0,
       y: 0,
+      minDistance: runners.minDistance,
       seed: runners.seed
     });
   }

@@ -3,7 +3,7 @@
 //   N=300 node tests/tools/pursuit-balance.mjs
 //
 // Runs the REAL LevelManager and PursuitSystem against simulated drivers
-// on Levels 1 and 2 and reports how often each driver is caught before the
+// on Levels 1, 2 and 3 and reports how often each driver is caught before the
 // goal. A driver cruises at a fraction of the taxi's top speed and hits
 // random incidents (pothole, bump, collision) that cut its speed.
 //
@@ -11,6 +11,10 @@
 //   average : 90% of top speed, an incident every ~8 s
 //   rough   : 85% of top speed, an incident every ~6 s (big losses)
 //   sloppy  : 78% of top speed, an incident every ~4 s (big losses)
+//
+// The taxi moves in the level's direction of travel (towards -z on Levels 1 and
+// 2, +z on Level 3: the sign from spawn to destination) with the headlights on, so
+// Level 3's pursuer sees it from 120 m.
 //
 // Level 1 is a rank race now: lm.skipCountdown() ends the 3 s countdown at once,
 // the 8 rivals launch (the simulated taxi passes through them, so some count as
@@ -54,7 +58,9 @@ const TUNES = [
   { label: 'L1 new numbers, z -325, no rival beaten', level: 1, tune: {}, rivals: false },
   { label: 'L1 new numbers, z -325, rivals as in game', level: 1, tune: {} },
   { label: 'L2 old numbers', level: 2, tune: OLD },
-  { label: 'L2 new numbers', level: 2, tune: {} }
+  { label: 'L2 new numbers', level: 2, tune: {} },
+  { label: 'L3 now (defaults 2 s, 0.9, 0.5)', level: 3, tune: OLD },
+  { label: 'L3 new numbers (1.25 s, 0.8, 0.3)', level: 3, tune: {} }
 ];
 
 function rng(seed) {
@@ -94,6 +100,7 @@ function trial({ level, profile, tune, seed, headStart = null, rivals = true }) 
   lm.skipCountdown?.();                                    // Level 1's rank race: no 3 s wait
   if (race && !rivals) lm.rivals.launched = false;         // the rivals stay on the grid: nobody is beaten
   const goalZ = LEVELS[level].destination.z;
+  const dir = Math.sign(goalZ - taxi.position.z);        // the level's direction of travel along z (reset() has put the taxi at the spawn)
   const cruise = profile.cruiseFrac * TOP;
   let next = 3 - Math.log(1 - r()) * profile.meanGap;
   let result = { captured: false, time: null, beaten: 0, headStart: null };
@@ -104,14 +111,14 @@ function trial({ level, profile, tune, seed, headStart = null, rivals = true }) 
       next = t + 0.8 - Math.log(1 - r()) * profile.meanGap;
     }
     speed = Math.min(cruise, speed + ACCEL * DT);
-    taxi.position.z -= speed * DT;
+    taxi.position.z += dir * speed * DT;
     lm.update(DT, t);
     if (result.headStart === null && lm.pursuit.spawned) {
       result.headStart = lm.pursuit.config.spawnDistance;
       result.beaten = lm.score.beaten;
     }
     if (captured !== null) { result = { ...result, captured: true, time: t }; break; }
-    if (taxi.position.z <= goalZ + 8) { result = { ...result, captured: false, time: t }; break; }
+    if ((goalZ - taxi.position.z) * dir <= 8) { result = { ...result, captured: false, time: t }; break; }
   }
   for (const k of Object.keys(cfg)) delete cfg[k];
   Object.assign(cfg, saved);

@@ -1572,6 +1572,7 @@ if (
         : 0,
     // between the sidewalk (0.2) and the road (0)
     y: 0.1,
+    minDistance: runners.minDistance,
     seed: runners.seed
   });
 }

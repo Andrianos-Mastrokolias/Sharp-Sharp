@@ -6,7 +6,10 @@
 // is about to reach it (life.js). For each level this drives the taxi at one runner
 // and reports whether it was hit, the speed and points before and after, and when
 // the runner started, was removed and was reloaded:
-//   - holding a straight line at 20 and at 28 m/s
+//   - holding a straight line at 20 and at 28 m/s (Level 1 starts its runners at 50 m, so at 20
+//     the runner is 2.5 s early and across the line first: a miss; Level 3 keeps 35 m: a hit)
+//   - the pursuit's view of a hit at 28 and 31 m/s: does the speed drop count as a stumble?
+//     (STUMBLE_SPEED_DROP 8 m/s) With the 25% loss no; with the old 30% yes
 //   - braking after the runner starts at 28 m/s
 //   - holding the line 1, 2 and 3 m to either side
 //   - crawling at 8 m/s
@@ -84,14 +87,17 @@ function chooseRunner(field, level) {
 // Drive at the runner from 90 m away
 //   mode 'hold'   the speed is held at `speed` (full throttle, then set back)
 //   mode 'brake'  held until the runner has started, then the brake (S) until stopped
-function drive(level, runner, field, { speed, mode = 'hold', offset = 0 }) {
+//   track true    feed the speed to the REAL pursuit's trackTaxiSpeed every frame (the pursuit
+//                 itself is stopped) and note whether a stumble was seen; the speed is not
+//                 forced back after a hit
+function drive(level, runner, field, { speed, mode = 'hold', offset = 0, track = false }) {
   const z0 = runner.z - runner.sign * 90;
   vehicle.reset({ x: runner.aim + offset, z: z0, heading: runner.heading });
   vehicle.speed = speed;
   hits.length = 0;
 
   const o = {
-    start: null, hit: null, done: null, arrival: null, minZ: null, finalSpeed: null,
+    start: null, hit: null, done: null, arrival: null, minZ: null, finalSpeed: null, stumbled: false,
     pointsAtStart: lm.getState().score?.points ?? null
   };
 
@@ -101,13 +107,17 @@ function drive(level, runner, field, { speed, mode = 'hold', offset = 0 }) {
   for (let frame = 0; frame < 1200; frame++) {
     const keys = braking ? { KeyS: true } : stopped ? {} : { KeyW: true };
     vehicle.update(DT, keys);
-    if (!braking && !stopped) vehicle.speed = speed;
+    if (!braking && !stopped && !(track && o.hit)) vehicle.speed = speed;
     simTime += DT;
 
     const speedBefore = vehicle.getSpeed();
     const pointsBefore = lm.getState().score?.points ?? null;
     const stateBefore = field.runnerStateOf(runner.k);
     lm.update(DT, simTime);
+    if (track) {
+      lm.pursuit.trackTaxiSpeed(DT);
+      if (lm.pursuit.sinceStumble === 0) o.stumbled = true;
+    }
 
     const dz = (runner.z - t.taxi.position.z) * runner.sign;
 
@@ -165,7 +175,8 @@ let failures = 0;
 const expect = (ok, what) => { if (!ok) failures++; report(`      ${ok ? 'OK  ' : 'FAIL'} ${what}`); };
 
 for (const level of [1, 3]) {
-  report(`\nLevel ${level}: ${LEVELS[level].runners.count} runners, taxi ${level === 1 ? '-z' : '+z'}\n`);
+  const minDistance = LEVELS[level].runners.minDistance;
+  report(`\nLevel ${level}: ${LEVELS[level].runners.count} runners, minDistance ${minDistance} m, taxi ${level === 1 ? '-z' : '+z'}\n`);
 
   let field = start(level);
   const runner = chooseRunner(field, level);
@@ -179,11 +190,35 @@ for (const level of [1, 3]) {
     field = start(level);
     const o = drive(level, runner, field, { speed });
     describe(`straight at ${speed} m/s`, o);
+    if (speed * (Math.abs(runner.x - runner.aim) / RUNNER.speed) < minDistance) {
+      // the runner starts at the minimum, earlier than its lead time: across the line before the taxi
+      expect(o.hit === null, `a straight line at ${speed} m/s misses (it started ${minDistance} m out, before its lead time)`);
+      continue;
+    }
     expect(o.hit !== null, `hits the runner at ${speed} m/s`);
     expect(o.hit && o.hit.speedAfter < o.hit.speedBefore, 'the taxi slows');
     if (level === 1) expect(o.hit && o.hit.pointsAfter === o.hit.pointsBefore - 50, '-50 points');
     else expect(o.hit && o.hit.pointsAfter === null, 'no points on Level 3');
     expect(o.done && o.done.scale === 0, 'the runner is gone');
+  }
+
+  // does the pursuit count the hit as a stumble? (28 and 31 m/s; 30% is the old loss)
+  for (const speed of [28, 31]) {
+    for (const loss of [null, 0.3]) {
+      const realApplyHit = vehicle.applyHit;
+      if (loss !== null) vehicle.applyHit = (hit) => realApplyHit.call(vehicle, { ...hit, speedLoss: loss });
+      field = start(level);
+      lm.pursuit.sinceStumble = Infinity;
+      lm.pursuit.clock = 0;
+      lm.pursuit.sampleCount = 0;
+      const o = drive(level, runner, field, { speed, track: true });
+      vehicle.applyHit = realApplyHit;
+      const drop = o.hit ? o.hit.speedBefore - o.hit.speedAfter : NaN;
+      const limit = lm.pursuit.config.stumbleSpeedDrop;
+      report(`    hit at ${speed} m/s, ${loss === null ? 'speedLoss 0.25 (now)' : 'speedLoss 0.3 (before)'}: drop ${drop.toFixed(2)} m/s (a stumble is more than ${limit}), pursuit saw a stumble: ${o.stumbled}`);
+      expect(o.hit !== null, 'hit');
+      expect(o.stumbled === (loss !== null), loss === null ? 'no stumble with the 25% loss' : 'a stumble with the old 30% loss');
+    }
   }
 
   // brake after it starts
@@ -206,7 +241,7 @@ for (const level of [1, 3]) {
   field = start(level);
   const crawl = drive(level, runner, field, { speed: 8 });
   describe('crawling at 8 m/s', crawl);
-  expect(crawl.start !== null && Math.abs(crawl.start.dz - RUNNER.minDistance) < 1, `still started at ${RUNNER.minDistance} m`);
+  expect(crawl.start !== null && Math.abs(crawl.start.dz - minDistance) < 1, `still started at ${minDistance} m`);
   expect(crawl.hit === null, 'no hit');
   expect(crawl.done !== null && crawl.done.frame < crawl.arrival.frame, 'across (removed) before the taxi arrives');
 

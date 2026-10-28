@@ -412,7 +412,7 @@ function aStandingPerson(field) {
   throw new Error('no standing person');
 }
 
-test('LevelManager: level 1 has the field; a hit applies { speedLoss 0.3, stress 2, kick 0.3 }, takes 50 points, calls back; no police effect', () => {
+test('LevelManager: level 1 has the field; a hit applies { speedLoss 0.25, stress 2, kick 0.3 }, takes 50 points, calls back; no police effect', () => {
   const e = makeLevel();
   e.lm.load(1);
   e.lm.skipCountdown();
@@ -448,9 +448,9 @@ test('LevelManager: level 1 has the field; a hit applies { speedLoss 0.3, stress
   assert.ok(Math.abs(e.hits[0].z - e.taxi.position.z) < 2.7, 'inside the taxi box when it happened');
   assert.equal(field.isHit(target.id), true);
   assert.equal(e.applied.length, 1);
-  assert.deepEqual({ ...e.applied[0], speedBefore: undefined }, { speedLoss: 0.3, stress: 2, kick: 0.3, speedBefore: undefined });
+  assert.deepEqual({ ...e.applied[0], speedBefore: undefined }, { speedLoss: 0.25, stress: 2, kick: 0.3, speedBefore: undefined });
   assert.equal(e.applied[0].speedBefore, 15);
-  assert.ok(Math.abs(e.getSpeed() - 10.5) < 1e-9, 'lost 30% of its speed');
+  assert.ok(Math.abs(e.getSpeed() - 11.25) < 1e-9, 'lost 25% of its speed');
 
   const score = e.lm.getState().score;
   assert.equal(score.points, before - 50);
@@ -578,7 +578,7 @@ test('runner: waits standing at its kerb until the taxi is lead * speed away, th
 });
 
 test('runner: a slow taxi sets it off at 35 m, and one already inside 33 m does not', () => {
-  // 8 m/s counts as 10: 1.88 * 10 = 18.8 m, so the 35 m minimum is the start
+  // 8 m/s counts as 10: 1.88 * 10 = 18.8 m, so the 35 m minimum (the default) is the start
   for (const speed of [8, 0.2, -8]) {
     const { field, z } = runnerField();
     field.update(DT, taxiAt(z, 40), speed, 0);
@@ -615,6 +615,24 @@ test('runner: the lead time, not the distance: a faster taxi starts it further o
   assert.ok(Math.abs(startDz(28) - 52.64) < 0.1);
   assert.ok(Math.abs(startDz(31) - 58.28) < 0.1);
   assert.ok(Math.abs(startDz(14) - 35) < 0.1, 'below 18.6 m/s the 35 m minimum is the start');
+});
+
+test('runner: a minDistance of its own (addRunner) replaces the default: 50 m starts a 20 m/s taxi earlier, and 35 m is no longer enough', () => {
+  const make = () => {
+    const mesh = makeMesh([{ x: 9.4, y: 0.1, z: -100, dx: -1, dz: 0, speed: 0, length: 18.8 }]);
+    const field = createPedestrianField({ clock: () => 0 });
+    field.addMesh(mesh);
+    field.addRunner(0, { z: -100, sign: -1, lead: 1.88, length: 18.8, minDistance: 50 });
+    return field;
+  };
+  const field = make();
+  field.update(DT, taxiAt(-100, 55), 20, 0);
+  assert.equal(field.runnerStateOf(0), 0, '55 m out');
+  field.update(DT, taxiAt(-100, 50), 20, 0);
+  assert.equal(field.runnerStateOf(0), 1, '50 m out (the default would wait for 37.6 m)');
+  const late = make();
+  late.update(DT, taxiAt(-100, 35), 8, 0);
+  assert.equal(late.runnerStateOf(0), 0, 'inside its 48 m: not set off');
 });
 
 test('runner: removed when it has crossed (not before), once; reset() puts it back waiting', () => {
@@ -719,7 +737,7 @@ function loadLevel(level) {
 }
 
 for (const level of [1, 3]) {
-  test(`level ${level}: every runner is hit by a taxi holding the route line at 24 m/s (-50 points on level 1 only)`, () => {
+  test(`level ${level}: every runner is hit by a taxi holding the route line at 28 m/s (-50 points on level 1 only)`, () => {
     const e = loadLevel(level);
     const field = e.lm.environment.pedestrians;
     const list = levelRunners(field);
@@ -730,8 +748,8 @@ for (const level of [1, 3]) {
       const lead = Math.abs(runner.x - aim) / 5;
       const penalties = () => e.scored.filter((s) => s.reason === 'pedestrian');
       const penaltiesBefore = penalties().length;
-      const result = runLevel(e, level, runner, 24);
-      assert.ok(Math.abs(result.startDz - Math.max(35, lead * 24)) < 24 * DT + 1e-6, `runner at z ${runner.z}: started ${result.startDz} m out`);
+      const result = runLevel(e, level, runner, 28);
+      assert.ok(Math.abs(result.startDz - Math.max(LEVELS[level].runners.minDistance, lead * 28)) < 28 * DT + 1e-6, `runner at z ${runner.z}: started ${result.startDz} m out`);
       assert.equal(result.hits, 1, `runner at z ${runner.z}, x ${runner.x}, line ${aim.toFixed(1)}`);
       assert.equal(field.scaleOf(runner.id), 0);
 
@@ -745,7 +763,7 @@ for (const level of [1, 3]) {
     }
   });
 
-  test(`level ${level}: braking after the runner starts, or holding the line 2.6 m to one side, misses; a crawling taxi sets it off at 35 m and it is across first`, () => {
+  test(`level ${level}: braking after the runner starts, or holding the line 2.6 m to one side, misses; a crawling taxi sets it off at the level's minDistance (50 m on Level 1, 35 m on Level 3) and it is across first`, () => {
     const e = loadLevel(level);
     const field = e.lm.environment.pedestrians;
     const runner = levelRunners(field)[1];
@@ -754,7 +772,7 @@ for (const level of [1, 3]) {
     // crawling: 8 m/s
     const crawl = runLevel(e, level, runner, 8);
     assert.equal(crawl.hits, 0);
-    assert.ok(Math.abs(crawl.startDz - 35) < 8 * DT + 1e-6, `${crawl.startDz}`);
+    assert.ok(Math.abs(crawl.startDz - LEVELS[level].runners.minDistance) < 8 * DT + 1e-6, `${crawl.startDz}`);
     assert.equal(crawl.doneBeforeArrival, true);
 
     // 2.6 m off the line either side (the taxi's reach is 1.7 m, the runner moves 5 m/s)
@@ -786,9 +804,21 @@ for (const level of [1, 3]) {
   });
 }
 
-test('runner placement: 6 on level 1 (z -130..-640), 8 on level 3 (z -540..240), clear of everything, from both kerbs', () => {
+test('runner minDistance per level: 50 m on Level 1, 35 m on Level 3, a 20 m/s straight line hits on Level 3 only', () => {
+  assert.equal(LEVELS[1].runners.minDistance, 50);
+  assert.equal(LEVELS[3].runners.minDistance, 35);
+  for (const [level, hits] of [[1, 0], [3, 1]]) {
+    const e = loadLevel(level);
+    const runner = levelRunners(e.lm.environment.pedestrians).find((r) => Math.abs(Math.abs(r.x - routeXAt(LEVELS[level].route, r.z)) / 5 - 1.88) < 0.01);
+    assert.ok(runner, `level ${level}: a runner with a 1.88 s lead`);
+    assert.equal(runLevel(e, level, runner, 20).hits, hits, `level ${level} at 20 m/s`);
+    assert.equal(runLevel(e, level, runner, 28).hits, 1, `level ${level} at 28 m/s`);
+  }
+});
+
+test('runner placement: 4 on level 1 (z -130..-640), 8 on level 3 (z -540..240), clear of everything, from both kerbs', () => {
   const checks = {
-    1: { count: 6, lo: -640, hi: -130 },
+    1: { count: 4, lo: -640, hi: -130 },
     3: { count: 8, lo: -540, hi: 240 }
   };
   const potholes = [5, -20, -50, -85, -10, 70];
