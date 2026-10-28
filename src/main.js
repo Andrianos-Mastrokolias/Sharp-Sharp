@@ -23,6 +23,7 @@ import { DustSystem } from './graphics/DustSystem.js';
 import { MaterialLibrary } from './graphics/MaterialLibrary.js';
 import { SkyManager } from './graphics/SkyManager.js';
 import { SkylineManager } from './graphics/SkylineManager.js';
+import { RearViewMirror } from './graphics/RearViewMirror.js';
 import { LevelManager, LEVELS } from './world/LevelManager.js';
 import {
   createBox,
@@ -230,6 +231,15 @@ const cameraSystem = new CameraSystem({
   taxi,
   renderer
 });
+
+// Optional real-time rear-view mirror.
+const rearViewMirror = new RearViewMirror({
+  scene,
+  renderer,
+  taxi
+});
+
+let rearViewRequested = true;
 
 // ============================================================
 // MOUSE DRIVE
@@ -1083,6 +1093,10 @@ window.addEventListener('keydown', event => {
       mouseDrive.toggle();
       break;
 
+    case 'KeyV':
+  rearViewRequested = !rearViewRequested;
+  break;
+
     // No Digit1 / Digit2 / Digit3 handlers.
     // Level progression is managed by the game.
   }
@@ -1225,7 +1239,18 @@ skylineManager.update(taxi.position);
   audio.setActive(phase === GamePhase.PLAYING && !document.hidden);
   audio.update(dt, vehicle.getSpeed(), objective.pursuit.state, keys.Space);
 
-  renderer.render(scene, camera);
+  // Show the mirror only during gameplay and at higher quality.
+rearViewMirror.setEnabled(
+  rearViewRequested &&
+  phase === GamePhase.PLAYING &&
+  preferences.quality !== 'low'
+);
+
+// Main camera renders normally.
+renderer.render(scene, camera);
+
+// Draw the live rear-facing view into the mirror.
+rearViewMirror.render();
 
   requestAnimationFrame(animate);
 }
