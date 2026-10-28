@@ -1,7 +1,10 @@
 const CUES = {
   menu: [440, 660, 0.08], cargo: [330, 110, 0.25], brake: [180, 70, 0.12],
   pursuit: [600, 900, 0.22], impact: [90, 30, 0.16],
-  delivery: [523, 1046, 0.4], failure: [220, 55, 0.5]
+  delivery: [523, 1046, 0.4], failure: [220, 55, 0.5],
+  countdown: [880, 880, 0.1], go: [1320, 1760, 0.35],
+  beaten: [660, 990, 0.18], firstOut: [523, 1568, 0.5],
+  pedestrianHit: [140, 45, 0.18]
 };
 
 const RECORDINGS = {
@@ -174,7 +177,7 @@ export class GameAudio {
     const now = this.context.currentTime;
     const voice = this.context.createOscillator();
     const gain = this.context.createGain();
-    voice.type = name === 'impact' ? 'sawtooth' : 'sine';
+    voice.type = ['impact', 'pedestrianHit'].includes(name) ? 'sawtooth' : 'sine';
     voice.frequency.setValueAtTime(start, now);
     voice.frequency.exponentialRampToValueAtTime(end, now + duration);
     gain.gain.setValueAtTime(0.0001, now);

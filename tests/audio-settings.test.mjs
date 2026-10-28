@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { GameAudio } from '../src/audio/GameAudio.js';
 import * as THREE from 'three';
 import { VehicleController } from '../src/vehicle/VehicleController.js';
@@ -121,6 +122,30 @@ test('a cue before the first gameplay frame is still stopped by an inactive tran
   audio.setActive(false);
   assert.equal(audio.voices.size, 0);
   assert.equal(voice.stops, 2);
+  audio.dispose();
+});
+
+test('every cue name main.js plays exists in CUES, and pedestrianHit thuds', async () => {
+  const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  const names = new Set();
+  for (const match of source.matchAll(/\b(?:playCue|audio\.cue)\??\.?\(\s*'([^']+)'/g)) names.add(match[1]);
+  const scoreCues = source.match(/SCORE_CUES\s*=\s*\{([^}]*)\}/);
+  assert.ok(scoreCues, 'SCORE_CUES not found in main.js');
+  for (const match of scoreCues[1].matchAll(/:\s*'([^']+)'/g)) names.add(match[1]);
+  for (const name of ['beaten', 'firstOut', 'pedestrianHit', 'cargo', 'impact']) {
+    assert.ok(names.has(name), `expected main.js to play ${name}`);
+  }
+  // main.js plays these through playCue(countdown.cue), so there is no literal to parse
+  names.add('countdown').add('go');
+  const context = audioContext();
+  const audio = new GameAudio(() => context);
+  await audio.unlock();
+  for (const name of names) {
+    assert.equal(audio.cue(name), true, `main.js plays '${name}' but CUES has no such cue`);
+    for (const voice of [...audio.voices]) voice.onended();
+  }
+  const types = context.nodes.slice(3).map(node => node.type);
+  assert.equal(types[[...names].indexOf('pedestrianHit')], 'sawtooth');
   audio.dispose();
 });
 
