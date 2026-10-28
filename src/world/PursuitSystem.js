@@ -1124,6 +1124,24 @@ export class PursuitSystem {
       return;
     }
 
+    // Level 3: give the player time to get ready at spawn.
+// If the taxi starts moving, the police can wake normally.
+if (this.config.spawnIdleGrace > 0) {
+  const dx = this.taxi.position.x - this.level.spawn.x;
+  const dz = this.taxi.position.z - this.level.spawn.z;
+
+  const nearSpawn = dx * dx + dz * dz < 64;
+  const stationary = Math.abs(this.vehicle.getSpeed()) < 1;
+
+  if (
+    nearSpawn &&
+    stationary &&
+    this.sinceStart < this.config.spawnIdleGrace
+  ) {
+    return;
+  }
+}
+
     // activateAfterDelay (option, no level uses it): wake on the
     // timer whatever the taxi's distance or lights. Otherwise the
     // taxi must be inside the detection radius.

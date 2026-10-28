@@ -8,6 +8,7 @@ import { TrafficSystem } from './TrafficSystem.js';
 import { RivalTaxiSystem } from './RivalTaxis.js';
 import { buildEnvironment } from './environments/index.js';
 import { ROADS, vehicleBounds } from './roads.js';
+import { buildHighwayRoadworks } from './RoadWorks.js';
 
 // ==================================================
 // LEVEL DEFINITIONS
@@ -28,6 +29,8 @@ import { ROADS, vehicleBounds } from './roads.js';
 // warnIfRouteOutOfBounds() flags any route that outgrows them.
 const L1_ROAD = ROADS[1];
 const L2_ROAD = ROADS[2];
+// Set to false to remove all Level 2 roadworks.
+const ENABLE_LEVEL2_ROADWORKS = true;
 const L3_ROAD = ROADS[3];
 
 // What running over a pedestrian does to the taxi (vehicle.applyHit): it
@@ -85,16 +88,16 @@ const L1_PURSUIT_PRESSURE_RISE_RATE = 0.3;       // per second, at a standstill
 // It follows onto the flyover too (ramp toe -> deck -> back down), a
 // bit slower on the ramp slope (RAMP_SPEED_FACTOR in PursuitSystem.js).
 const L2_PURSUIT_START_DELAY = 3;
-const L2_PURSUIT_SPAWN_DISTANCE = 30;      // behind the spawn
-const L2_PURSUIT_SPEED = 1.1;
+const L2_PURSUIT_SPAWN_DISTANCE = 35;      // behind the spawn
+const L2_PURSUIT_SPEED = 1.02;
 const L2_PURSUIT_DETECTION_RADIUS = 80;
 const L2_PURSUIT_LOSE_RANGE = 120;
 const L2_PURSUIT_LOSE_TIME = 3;
 const L2_PURSUIT_CAPTURE_DISTANCE = 6.4;
-const L2_PURSUIT_CAPTURE_TIME = 1.5;
+const L2_PURSUIT_CAPTURE_TIME = 2.0;
 const L2_PURSUIT_STUMBLE_SURGE_TIME = 1.25;      // s (see the Level 1 note above)
-const L2_PURSUIT_PRESSURE_SPEED_FRACTION = 0.8;
-const L2_PURSUIT_PRESSURE_RISE_RATE = 0.3;
+const L2_PURSUIT_PRESSURE_SPEED_FRACTION = 0.70;
+const L2_PURSUIT_PRESSURE_RISE_RATE = 0.20;
 const L2_PURSUIT_LANE_MIN_X = -9;
 const L2_PURSUIT_LANE_MAX_X = 2;           // ground lane; flyover starts at x 3
 
@@ -601,6 +604,7 @@ export const LEVELS = {
     // only up close (see L3_PURSUIT_* above). No activateAfterDelay.
     pursuit: {
       mode: 'immediate',
+      spawnIdleGrace: 5,
       startDelay: L3_PURSUIT_START_DELAY,
       spawnDistance: L3_PURSUIT_SPAWN_DISTANCE,
       speedFraction: L3_PURSUIT_SPEED,
@@ -685,6 +689,7 @@ export class LevelManager {
     // it no environment is built (headless tests of the rules).
     this.materials = materials;
     this.environment = null;
+    this.roadworks = null;
 
     this.scene = scene;
     this.vehicle = vehicle;
@@ -849,6 +854,13 @@ if (
     this.buildMarkers();
     this.buildElevated();
     this.buildHazards();
+    // Optional highway roadworks.
+    if (ENABLE_LEVEL2_ROADWORKS && levelId === 2) {
+      this.roadworks = buildHighwayRoadworks({
+       parent: this.group,
+       registerCollidable: mesh => this.registerCollidable(mesh)
+    });
+    }
     this.pursuit.configure(this.config);
     this.traffic.configure(this.config);
     this.configureRivals();
@@ -923,6 +935,7 @@ if (
     this.vehicle.reset(this.config.spawn);
     this.pursuit.reset();
     this.traffic.reset();
+    this.roadworks?.reset();
 
     this.resetRace();
 
@@ -1686,7 +1699,10 @@ if (
 
 
   clearMarkers() {
-
+    
+    // Remove roadwork meshes and free their resources.
+     this.roadworks?.dispose();
+     this.roadworks = null;
     this.disposeEnvironment();
 
     // Unregister in place: the vehicle holds this array

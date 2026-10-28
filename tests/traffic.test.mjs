@@ -304,7 +304,7 @@ test('L2: traffic stays clear of the flyover footprint, ramps, rails and pillars
   const { lm, collidables, scene } = make();
   lm.load(2);
   const s = LEVELS[2].elevated[0];
-  const others = collidables.filter((m) => !carMeshes(lm).includes(m));
+  const others = collidables.filter((m) => m.material === lm.concreteMaterial);
   assert.equal(others.length, 10, 'flyover rails (6) + pillars (4)');
   const otherBoxes = others.map((m) => new THREE.Box3().setFromObject(m));
   let maxX = -Infinity;
