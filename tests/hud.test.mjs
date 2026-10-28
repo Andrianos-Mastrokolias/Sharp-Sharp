@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import assert from 'node:assert/strict';
 import {
-  CLEAR_STATES, SPOTTED_STATE, tailText, scorePopupText, rivalsBeatenText
+  Hud, CLEAR_STATES, SPOTTED_STATE, tailText, scorePopupText, rivalsBeatenText
 } from '../src/ui/Hud.js';
 import { CountdownTracker, GO_TIME } from '../src/ui/countdown.js';
 import { formatPoints, scoreStats } from '../src/ui/screens.js';
@@ -54,6 +54,34 @@ test('score pop-ups: the three onScore reasons', () => {
 
 test('score pop-ups: an unknown reason still shows its points', () => {
   assert.equal(scorePopupText({ delta: 25, reason: 'bonus' }), '+25 bonus');
+});
+
+test('score pop-ups: a zero delta is just the label, no "+0"', () => {
+  assert.equal(scorePopupText({ delta: 0, reason: 'pedestrianHit', bad: true }), 'Pedestrian hit');
+});
+
+test('score pop-ups: negative class for a negative delta or bad: true', () => {
+  const classFor = (event) => {
+    const popup = { remove() {} };
+    const container = {
+      childElementCount: 0,
+      appendChild(el) { this.childElementCount++; el.attached = true; }
+    };
+    const hud = { fields: { popups: container }, popupTimers: new Set() };
+    const realDocument = globalThis.document;
+    globalThis.document = { createElement: () => popup };
+    try {
+      Hud.prototype.showScorePopup.call(hud, event);
+    } finally {
+      globalThis.document = realDocument;
+      for (const timer of hud.popupTimers) clearTimeout(timer);
+    }
+    return popup.className;
+  };
+
+  assert.match(classFor({ delta: -50, reason: 'pedestrian' }), /\bnegative\b/);
+  assert.match(classFor({ delta: 0, reason: 'pedestrianHit', bad: true }), /\bnegative\b/);
+  assert.match(classFor({ delta: 100, reason: 'beaten' }), /\bpositive\b/);
 });
 
 test('rivals beaten line', () => {

@@ -928,7 +928,15 @@ const levelManager = new LevelManager({
     }
   },
 
-  onPedestrianHit: () => playCue('pedestrianHit')
+  // Fires on every level; with no race there is no onScore, so show the
+  // message here (on Level 1 onScore already shows the -50)
+  onPedestrianHit: () => {
+    playCue('pedestrianHit');
+
+    if (levelManager.getState().score === null) {
+      hud.showScorePopup({ delta: 0, reason: 'pedestrianHit', bad: true });
+    }
+  }
 });
 
 // ============================================================

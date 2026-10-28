@@ -32,13 +32,18 @@ const MAX_POPUPS = 4;
 const SCORE_REASONS = {
   beaten: 'Rival beaten',
   firstOut: 'First out',
-  pedestrian: 'Pedestrian'
+  pedestrian: 'Pedestrian',
+  pedestrianHit: 'Pedestrian hit'
 };
 
 // levelManager's onScore event -> "+100 Rival beaten", "-50 Pedestrian"
+// (a zero delta is a message with no points: "Pedestrian hit")
 export function scorePopupText({ delta, reason }) {
+  const label = SCORE_REASONS[reason] ?? reason;
+  if (delta === 0) return label;
+
   const sign = delta < 0 ? '-' : '+';
-  return `${sign}${Math.abs(delta)} ${SCORE_REASONS[reason] ?? reason}`;
+  return `${sign}${Math.abs(delta)} ${label}`;
 }
 
 export function rivalsBeatenText(score) {
@@ -260,7 +265,7 @@ export class Hud {
   showScorePopup(event) {
 
     const popup = document.createElement('div');
-    popup.className = `hud-popup ${event.delta < 0 ? 'negative' : 'positive'}`;
+    popup.className = `hud-popup ${event.delta < 0 || event.bad ? 'negative' : 'positive'}`;
     popup.textContent = scorePopupText(event);
 
     const container = this.fields.popups;
