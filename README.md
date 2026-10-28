@@ -114,11 +114,7 @@ docs/             demo walkthroughs
 ## Tests and tools
 
 `npm test` runs the audio, budget, environment, pedestrian, traffic,
-pursuit, rank-race and HUD suites. The vehicle physics tests run with:
-
-```bash
-node --test tests/vehicle-physics.test.mjs tests/vehicle-hit.test.mjs tests/vehicle-moving-collision.test.mjs tests/level2-strap-pressure.test.mjs
-```
+pursuit, rank-race, HUD and vehicle physics suites.
 
 `tests/tools/` holds analysis tools: a headless rendering harness, a pursuit
 balance simulation, and scripted runs of the rank race, the pedestrians and
