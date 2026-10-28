@@ -59,15 +59,10 @@ let preferences = readPreferences(preferenceStorage);
 const audio = new GameAudio();
 audio.setVolume(preferences.muted ? 0 : preferences.volume);
 
-// TODO(Abdur-Rahman): GameAudio has no sounds for these cues yet. Add them
-// to CUES / RECORDINGS in src/audio/GameAudio.js under these names:
-//   'countdown'      beep on each of 3, 2, 1 (Level 1 rank race)
-//   'go'             GO! at the end of the countdown
-//   'beaten'         +100, a rival taxi beaten
-//   'firstOut'       +300, first car out of the rank
-//   'pedestrianHit'  -50, a pedestrian knocked down
-// GameAudio.cue() returns false for a name it doesn't know, so until then
-// these calls are silent no-ops.
+// Race and pedestrian sound cues. The cue names (countdown, go, beaten,
+// firstOut, pedestrianHit) live in the CUES table in
+// src/audio/GameAudio.js, and tests/audio-settings.test.mjs checks that
+// every name used here exists there.
 function playCue(name) {
   audio.cue?.(name);
 }
