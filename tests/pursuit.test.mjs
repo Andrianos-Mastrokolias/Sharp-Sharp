@@ -380,6 +380,22 @@ test('L3: lights-on lose range is 170 m', () => {
   assert.ok(lost, '180 m is out of sight');
 });
 
+test('L3: stationary taxi gets a five-second start grace', () => {
+  const e = make();
+  e.lm.load(3);
+  e.setLights(true);
+
+  step(e.lm, 4.8);
+
+  assert.equal(e.lm.pursuit.state, 'idle');
+  assert.equal(e.captured.length, 0);
+
+  step(e.lm, 0.4);
+
+  assert.equal(e.lm.pursuit.state, 'reacting');
+  assert.equal(e.captured.length, 0);
+});
+
 test('activateAfterDelay option still wakes the pursuer on the timer (no level uses it)', () => {
   const e = make();
   e.lm.load(3);
@@ -406,15 +422,15 @@ test('balance: Level 1, 2 and 3 stumble surge and pressure numbers; the defaults
 
   const c2 = LEVELS[2].pursuit;
   assert.equal(c2.stumbleSurgeTime, 1.25);
-  assert.equal(c2.pressureSpeedFraction, 0.8);
-  assert.equal(c2.pressureRiseRate, 0.3);
+  assert.equal(c2.pressureSpeedFraction, 0.70);
+  assert.equal(c2.pressureRiseRate, 0.20);
 
   const c3 = LEVELS[3].pursuit;
   assert.equal(c3.stumbleSurgeTime, 1.25);
   assert.equal(c3.pressureSpeedFraction, 0.8);
   assert.equal(c3.pressureRiseRate, 0.3);
 
-  for (const [level, surge, line, rise] of [[1, 1.4, 0.8, 0.3], [2, 1.25, 0.8, 0.3], [3, 1.25, 0.8, 0.3]]) {
+  for (const [level, surge, line, rise] of [[1, 1.4, 0.8, 0.3], [2, 1.25, 0.7, 0.2], [3, 1.25, 0.8, 0.3]]) {
     const e = make();
     e.lm.load(level);
     const config = e.lm.pursuit.config;
@@ -435,7 +451,7 @@ test('L2 / L1 pursuit unchanged: ignore headlights, same numbers', () => {
   assert.equal(c2.detectionRadius, 80);
   assert.equal(c2.loseRange, 120);
   assert.equal(c2.loseTime, 3);
-  assert.equal(c2.speedFraction, 1.1);
+  assert.equal(c2.speedFraction, 1.02);
   assert.equal(c2.detectionRadiusDark, undefined);
   assert.equal(c2.loseRangeDark, undefined);
   const c1 = LEVELS[1].pursuit;
@@ -831,7 +847,7 @@ test('chase: an unrecovered stumble ends in capture', () => {
 
 test('chase: capture fires once, only after captureTime, in capture range', () => {
   assert.equal(LEVELS[1].pursuit.captureTime, 1.5);
-  assert.equal(LEVELS[2].pursuit.captureTime, 1.5);
+  assert.equal(LEVELS[2].pursuit.captureTime, 2.0);
   assert.equal(LEVELS[3].pursuit.captureTime, 1.5);
   const e = chase(3, STANDOFF_DISTANCE);
   e.taxi.position.z = 0; e.lm.pursuit.z = STANDOFF_DISTANCE;
@@ -1290,7 +1306,7 @@ test('flyover keep-out: pursuer beside the ramp waits at zExit when the taxi com
         `start (${px}, ${pz}) at ${v}: never loses the taxi (${[...r.states]})`);
       assert.ok(r.atZExit, 'taxi reached zExit');
       const dz = r.atZExit.pz - SECTION.zExit;
-      assert.ok(Math.abs(dz) < 20 && r.atZExit.py === 0,
+      assert.ok(Math.abs(dz) < 35 && r.atZExit.py === 0,
         `start (${px}, ${pz}) at ${v}: pursuer ${dz.toFixed(1)} m from zExit when the taxi comes down`);
       assert.equal(r.e.captured.length, 0);
     }

@@ -102,9 +102,9 @@ export class VehicleController {
       maxSuspensionMovement: 0.38,
 
       // Level 2 sustained-speed pressure.
-      level2SpeedThreshold: 22,
+      level2SpeedThreshold: 26,
       level2GraceTime: 3,
-      level2StressRate: 1.2,
+      level2StressRate: 2.0,
 
       // Visual polish.
       cornerRollAmount: 0.09,
@@ -649,9 +649,39 @@ applyRoadHazardSlowdown(baseLoss) {
       .applyMatrix4(this.taxi.matrixWorld);
 
     for (const object of this.collidableObjects) {
+      // A cone that has fallen over is no longer an obstacle.
+    if (object.userData?.roadworkConeHit) {
+         continue;
+     }  
       this.obstacleBox.setFromObject(object);
 
       if (this.taxiBox.intersectsBox(this.obstacleBox)) {
+        
+// --------------------------------------------------
+// Soft collision with roadwork cones
+// --------------------------------------------------
+if (object.userData?.roadworkCone) {
+  const direction =
+    object.position.x >= this.taxi.position.x ? 1 : -1;
+
+  // Knock the cone sideways.
+  object.rotation.z = -direction * Math.PI / 2;
+  object.position.x += direction * 0.8;
+  object.position.y = 0.25;
+
+  // Prevent repeated collisions with the fallen cone.
+  object.userData.roadworkConeHit = true;
+
+  // Small speed penalty, no sudden reversal.
+  this.speed *= 0.93;
+
+  // Very minor cargo stress.
+  this.cargoSystem.applyStress(0.5);
+
+  // Continue driving after knocking over the cone.
+  return false;
+}
+
         this.taxi.position.copy(previousPosition);
 
         

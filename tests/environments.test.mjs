@@ -156,8 +156,8 @@ function checkMotorway(step, lm, scene, collidables) {
   // 20 for the original 7 cars, 15 before traffic.
   assert.equal(env.collidables.length, 2, `step ${step}: motorway collidables`);
   assert.ok(env.collidables.every((m) => m.name === 'motorway-barrier'));
-  assert.equal(collidables.length, 2 + 6 + 4 + 16, `step ${step}: level 2 collidables`);
-  assert.ok(collidables.length <= 28, `step ${step}: level 2 collidable budget (${collidables.length})`);
+  assert.equal(collidables.length, 2 + 6 + 4 + 16 + 36, `step ${step}: level 2 collidables`);
+  assert.ok(collidables.length <= 64, `step ${step}: level 2 collidable budget (${collidables.length})`);
 
   // Barriers sit at |x| ~ 10.3 on both sides and clear every flyover collidable
   const barriers = named('motorway-barrier');

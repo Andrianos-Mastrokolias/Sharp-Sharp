@@ -20,6 +20,9 @@ export class CargoSystem {
     this.shiftZ = 0;
     this.velocityX = 0;
     this.velocityZ = 0;
+    // Track sustained steering separately from quick lane changes.
+    this.steeringHoldTime = 0;
+    this.previousSteeringDirection = 0;
     this.groundHeightProvider = null;
 
     this.items = cargoItems.map((cargo) => ({
@@ -202,8 +205,15 @@ export class CargoSystem {
     this.shiftZ += this.velocityZ * dt;
 
     // Continuous driving stress.
+    
+    // --------------------------------------------------
+    // Balanced driving stress
+    // Quick lane changes are safe; sustained hard turns
+    // and high-speed drifting are still dangerous.
+    // --------------------------------------------------
+
     const absSpeed = Math.abs(speed);
-    const steeringAmount = Math.abs(steeringInput);
+    const steeringAmount = Math.min(Math.abs(steeringInput), 1);
 
     const corneringSpeed = THREE.MathUtils.clamp(
       (absSpeed - 9) / 15,
@@ -211,64 +221,66 @@ export class CargoSystem {
       1.5
     );
 
-    // --------------------------------------------------
-// Balanced driving stress
-// --------------------------------------------------
+    // Track how long the driver holds the same direction.
+    // Releasing or changing direction starts a new turn.
+    const steeringDirection = Math.sign(steeringInput);
 
-let turningStressRate = 5.5;
+    if (
+      steeringDirection === 0 ||
+      steeringDirection !== this.previousSteeringDirection
+    ) {
+      this.steeringHoldTime = 0;
+    }
 
-if (level === 2) {
-  turningStressRate = 6;
-}
+    if (steeringDirection !== 0) {
+      this.steeringHoldTime = Math.min(
+        this.steeringHoldTime + dt,
+        3
+      );
+    }
 
-if (level === 3) {
-  turningStressRate = 7;
-}
+    this.previousSteeringDirection = steeringDirection;
 
+    // Short lane corrections cause minimal stress.
+    // Continuous steering gradually reaches full stress.
+    const sustainedTurn = THREE.MathUtils.smoothstep(
+      this.steeringHoldTime,
+      0.35,
+      1.5
+    );
 
-// Turning stress
-const turningStress =
-  Math.pow(
-    steeringAmount,
-    1.7
-  ) *
-  Math.pow(
-    corneringSpeed,
-    1.7
-  ) *
-  turningStressRate;
+    let turningStressRate = 5.5;
 
+    if (level === 2) turningStressRate = 6;
+    if (level === 3) turningStressRate = 7;
 
-// Acceleration / braking stress
-const accelerationStress =
-  Math.max(
-    0,
-    Math.abs(acceleration) - 11
-  ) *
-  0.3;
+    const turnFactor = handbrake
+      ? 0.65 + 0.35 * sustainedTurn
+      : 0.08 + 0.92 * sustainedTurn;
 
+    const turningStress =
+      Math.pow(steeringAmount, 1.7) *
+      Math.pow(corneringSpeed, 1.7) *
+      turningStressRate *
+      turnFactor;
 
-// Sliding / handbrake stress
-const slipStress =
-  Math.max(
-    0,
-    Math.abs(lateralVelocity) - 3.2
-  ) *
-  (
-    handbrake
-      ? 0.25
-      : 0.12
-  );
+    // Hard braking and acceleration still cause damage.
+    const accelerationStress =
+      Math.max(0, Math.abs(acceleration) - 11) * 0.3;
 
+    // Sliding and handbrake use still cause damage.
+    const slipStress =
+      Math.max(0, Math.abs(lateralVelocity) - 3.2) *
+      (handbrake ? 0.25 : 0.12);
 
-this.applyStress(
-  (
-    turningStress +
-    accelerationStress +
-    slipStress
-  ) *
-  dt
-);
+    this.applyStress(
+      (
+        turningStress +
+        accelerationStress +
+        slipStress
+      ) * dt
+    );
+
     // Cargo visual wobble.
     const bumpWobble = THREE.MathUtils.clamp(
       suspensionVelocity * 0.035,
@@ -424,6 +436,8 @@ this.applyStress(
     this.shiftZ = 0;
     this.velocityX = 0;
     this.velocityZ = 0;
+    this.steeringHoldTime = 0;
+    this.previousSteeringDirection = 0;
 
     for (const item of this.items) {
       if (item.mesh.parent !== this.chassis) {
