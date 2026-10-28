@@ -653,7 +653,7 @@ export function createPersonMaterial() {
             gFwd = aDir * pSign;
 
             float pAngle =
-              sin(pStep * pSpeed * 1.5 * 6.2831853) *
+              sin(pStep * min(pSpeed * 1.5, 3.2) * 6.2831853) *
               0.6 * pMoving * aSwing.x;
 
             float pCos = cos(pAngle);

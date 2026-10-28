@@ -392,9 +392,9 @@ test('activateAfterDelay option still wakes the pursuer on the timer (no level u
 
 // Pursuit balance (tests/tools/pursuit-balance.mjs): a stumble held the police
 // tight for 2 s and capture needed 1.5 s, so one mistake was fatal. Levels 1 and
-// 2 have a shorter surge and a lower, slower pressure; Level 3 and
-// PursuitSystem.js's own defaults are as they were.
-test('balance: Level 1 and 2 stumble surge and pressure numbers; Level 3 and the defaults untouched', () => {
+// 2 have a shorter surge and a lower, slower pressure, and Level 3 now sets
+// its own too (1.25 s, 0.8, 0.3); PursuitSystem.js's own defaults are as they were.
+test('balance: Level 1, 2 and 3 stumble surge and pressure numbers; the defaults untouched', () => {
   assert.equal(STUMBLE_SURGE_TIME, 2);
   assert.equal(PRESSURE_SPEED_FRACTION, 0.9);
   assert.equal(PRESSURE_RISE_RATE, 0.5);
@@ -409,12 +409,12 @@ test('balance: Level 1 and 2 stumble surge and pressure numbers; Level 3 and the
   assert.equal(c2.pressureSpeedFraction, 0.8);
   assert.equal(c2.pressureRiseRate, 0.3);
 
-  // Level 3 sets none of them: it runs on the defaults
-  for (const key of ['stumbleSurgeTime', 'pressureSpeedFraction', 'pressureRiseRate']) {
-    assert.equal(LEVELS[3].pursuit[key], undefined, `level 3 ${key}`);
-  }
+  const c3 = LEVELS[3].pursuit;
+  assert.equal(c3.stumbleSurgeTime, 1.25);
+  assert.equal(c3.pressureSpeedFraction, 0.8);
+  assert.equal(c3.pressureRiseRate, 0.3);
 
-  for (const [level, surge, line, rise] of [[1, 1.4, 0.8, 0.3], [2, 1.25, 0.8, 0.3], [3, 2, 0.9, 0.5]]) {
+  for (const [level, surge, line, rise] of [[1, 1.4, 0.8, 0.3], [2, 1.25, 0.8, 0.3], [3, 1.25, 0.8, 0.3]]) {
     const e = make();
     e.lm.load(level);
     const config = e.lm.pursuit.config;
@@ -423,9 +423,10 @@ test('balance: Level 1 and 2 stumble surge and pressure numbers; Level 3 and the
     assert.equal(config.pressureRiseRate, rise, `level ${level} rise`);
   }
 
-  // A stumble no longer outlasts the capture timer on Level 1 (it is equal), nor on Level 2
+  // A stumble no longer outlasts the capture timer on Level 1 (it is equal), nor on Level 2 or 3
   assert.ok(c1.stumbleSurgeTime <= c1.captureTime);
   assert.ok(c2.stumbleSurgeTime < c2.captureTime);
+  assert.ok(c3.stumbleSurgeTime < c3.captureTime);
 });
 
 test('L2 / L1 pursuit unchanged: ignore headlights, same numbers', () => {

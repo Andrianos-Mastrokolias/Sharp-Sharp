@@ -19,6 +19,13 @@ import {
 } from '../roads.js';
 
 import {
+  createPedestrianField,
+  createRunners,
+  planRunnerZs,
+  routeXAt
+} from './life.js';
+
+import {
   createRandom,
   createLaneDashes,
   createRoadPatches,
@@ -119,7 +126,11 @@ function pick(
 
 export function createTownship({
   materials,
-  road: roadExtent = DEFAULT_ROAD
+  road: roadExtent = DEFAULT_ROAD,
+
+  // the level's runners (LEVELS[3].runners) and route, if it has any
+  runners = null,
+  route = null
 }) {
 
   const ROAD_Z_MIN =
@@ -1420,13 +1431,74 @@ export function createTownship({
   );
 
 
+  // ----------------------------------------------
+  // RUNNERS (people who dash across when the taxi is about to arrive)
+  // ----------------------------------------------
+  // They wait on the shoulder (|x| 9.4) and cross the whole road, so each
+  // crosses 4.5 m clear of every wreck, bin and lamp (the shoulder props) and
+  // of every pothole. No lights: only the headlights show them.
+
+  const pedestrians =
+    createPedestrianField();
+
+  group.add(
+    pedestrians.object
+  );
+
+  if (
+    runners
+  ) {
+
+    const avoid =
+      [
+        ...taken.map(
+          (spot) => spot.z
+        ),
+        ...stations.map(
+          (station) => station.z
+        ),
+        ...MAIN_POTHOLES.map(
+          (pothole) => pothole.z
+        ),
+        ...(runners.avoidZ ?? [])
+      ];
+
+    createRunners({
+      group,
+      field: pedestrians,
+      zs:
+        planRunnerZs({
+          ...runners,
+
+          accept: (z) =>
+            avoid.every(
+              (a) => Math.abs(a - z) >= 4.5
+            )
+        }),
+      sign: runners.sign,
+      aimX:
+        route
+          ? (z) => routeXAt(route, z)
+          : 0,
+      y: 0,
+      minDistance: runners.minDistance,
+      seed: runners.seed
+    });
+  }
+
+
   return {
 
     group,
 
     collidables,
 
+    // The runners, for pedestrian hits (see life.js)
+    pedestrians,
+
     dispose() {
+
+      pedestrians.dispose();
 
       disposeObjectTree(
         group,

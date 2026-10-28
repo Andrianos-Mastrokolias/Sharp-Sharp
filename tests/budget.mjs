@@ -163,7 +163,8 @@ function makeCamera({ at, to }, far) {
 const report = {};
 
 for (const level of [1, 2, 3]) {
-  const env = buildEnvironment(level, { materials: makeLibrary() });
+  // as LevelManager builds it: with the level's runners (Levels 1 and 3)
+  const env = buildEnvironment(level, { materials: makeLibrary(), runners: LEVELS[level].runners, route: LEVELS[level].route });
   const views = {};
   const total = { draws: 0, tris: 0 };
 
