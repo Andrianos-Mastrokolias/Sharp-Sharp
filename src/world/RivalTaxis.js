@@ -40,7 +40,7 @@ export class RivalTaxiSystem {
     this.ownedMaterials = [];
   }
 
-  configure({ rivals = [], road, direction = -1 }) {
+  configure({ rivals = [], road, direction = -1,  playerStartZ = null }) {
     this.dispose();
 
     if (!road || !(road.halfWidth > 0)) {
@@ -53,6 +53,7 @@ export class RivalTaxiSystem {
 
     this.road = road;
     this.direction = direction;
+    this.playerStartZ = playerStartZ;
 
     const model = createTrafficCar('minibus', this.materialCache);
     this.geometry = model.geometry;
@@ -347,23 +348,47 @@ update(dt, player = null) {
 
     // Count only genuine overtakes.
     // A rival must first be ahead of the player.
+    
+    // Count rivals beaten through genuine overtaking OR
+    // by pulling clearly ahead after the race has started.
     if (player && !car.beaten) {
       const relative =
         this.direction * (player.z - car.z);
 
+      // Remember if this rival was ever ahead of us.
       if (relative < -3) {
         car.seenBehind = true;
       }
 
-      // The player's taxi must fully clear the rival.
+      // The player must completely clear the rival.
       const clearance = (car.length + 4.6) / 2;
 
-      if (car.seenBehind && relative > clearance) {
+      // Distance travelled forward from the starting grid.
+      const playerProgress =
+        this.playerStartZ === null
+          ? 0
+          : this.direction * (player.z - this.playerStartZ);
+
+      // Rivals that began alongside or behind the player
+      // can be beaten once the player establishes a lead.
+      const startedAlongsideOrBehind =
+        this.playerStartZ !== null &&
+        this.direction * (car.initialZ - this.playerStartZ) <= 0;
+
+      const genuinelyOvertaken = car.seenBehind;
+
+      const pulledAheadFromStart =
+        startedAlongsideOrBehind &&
+        playerProgress >= 25;
+
+      if (
+        relative > clearance &&
+        (genuinelyOvertaken || pulledAheadFromStart)
+      ) {
         car.beaten = true;
         this.onBeaten?.(car.index);
       }
     }
-
   }
 }
 
