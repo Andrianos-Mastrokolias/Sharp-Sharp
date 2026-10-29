@@ -33,7 +33,8 @@ const SCORE_REASONS = {
   beaten: 'Rival beaten',
   firstOut: 'First out',
   pedestrian: 'Pedestrian',
-  pedestrianHit: 'Pedestrian hit'
+  pedestrianHit: 'Pedestrian hit',
+  cargoLost: 'Cargo lost'
 };
 
 // levelManager's onScore event -> "+100 Rival beaten", "-50 Pedestrian"
@@ -206,7 +207,10 @@ export class Hud {
 
     if (scored) {
       this.setText('points', score.points);
-      this.setText('beaten', rivalsBeatenText(score));
+      // Rivals beaten is Level 1 only (beaten is null on Levels 2 and 3)
+      const showBeaten = score.beaten != null;
+      this.setText('beaten', showBeaten ? rivalsBeatenText(score) : '');
+      this.fields.beaten.hidden = !showBeaten;
     }
 
     // ---------- Race countdown (3, 2, 1, GO!) ----------

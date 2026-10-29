@@ -209,7 +209,8 @@ test('countdown: skipCountdown() ends it at once; levels 2 and 3 start with a 3 
     const s = e.lm.getState();
     assert.equal(e.lm.inputLocked, true);
     assert.deepEqual(s.race, { phase: 'countdown', countdown: 3 });
-    assert.equal(s.score, null);
+    assert.equal(s.score.points, 500, 'the cargo score, not the rank race');
+    assert.equal(s.score.beaten, null);
     assert.equal(e.lm.rivals.rivals.length, 0);
   }
 });
