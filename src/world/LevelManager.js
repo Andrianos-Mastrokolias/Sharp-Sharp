@@ -908,7 +908,8 @@ if (
         zMin: road.zMin,
         zMax: road.zMax
       },
-      direction: -1
+      direction: -1,
+      playerStartZ: this.config.spawn.z
     });
   }
 

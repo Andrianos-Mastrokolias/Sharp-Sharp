@@ -567,6 +567,34 @@ test('rear-centre rival overtakes stationary player', () => {
 });
 
 
+test('points: pulling ahead counts rivals from every starting row', () => {
+  const e = make();
+  e.lm.load(1);
+  e.lm.skipCountdown();
+
+  // Start stationary. No free points.
+  step(e.lm, 0.1);
+
+  assert.equal(e.lm.getState().score.beaten, 0);
+  assert.equal(e.lm.getState().score.points, 0);
+
+  // Simulate the player gaining a substantial lead
+  // over the entire starting grid.
+  e.taxi.position.z = L1.spawn.z - 35;
+  step(e.lm, DT);
+
+  const score = e.lm.getState().score;
+
+  assert.equal(score.beaten, 8);
+  assert.equal(score.points, 800);
+
+  // Rivals cannot award the same points twice.
+  step(e.lm, 0.1);
+  assert.equal(e.lm.getState().score.points, 800);
+});
+
+
+
 
 
 
