@@ -141,7 +141,27 @@ to the Node version, so use Node 24.
 | Andrianos Mastrokolias | Graphics, lighting, shaders, cameras, the taxi model and the rank scenery |
 | Abdur-Rahman Perin | Audio and settings |
 | Leah Ramdeen | Levels, environments, pursuit AI, traffic and pedestrians |
-| Suhail Seedat | Interface, HUD, game flow, build and hosting |
+| Suhail Seedat | Interface, HUD, game flow and scoring |
+
+What each of us built:
+
+- **Kayura Govindsammy:** vehicle and cargo physics, the vehicle level API and
+  collision bounds, rival taxi AI with overtaking, the rival taxi scoring fix,
+  the Level 2 roadworks, and the Level 3 police balance.
+- **Leah Ramdeen:** level design and integration. The longer levels, the
+  Level 1 taxi rank race (start grid, countdown, scoring and head start), the
+  environments, police pursuit design and balancing, traffic on all three
+  levels, pedestrians (hitting them and the runners), the story text, and the
+  level demo docs and test tools.
+- **Andrianos Mastrokolias:** the first driving prototype, the three camera
+  modes, lighting, shaders, shadows and textures, the fix for the texture
+  loading warnings, the taxi rank scenery, the rear-view mirror and its V
+  toggle, height-map terrain and glass refraction, and the CI build check.
+- **Abdur-Rahman Perin:** the audio system (recorded engine, siren and music)
+  and the audio and graphics settings.
+- **Suhail Seedat:** menus and game state, the HUD and scoring, the Level 1
+  score and countdown overlay, mouse drive, the audio hookup, credits, and the
+  HUD and countdown tests.
 
 Parts of the code and tests were written with AI coding assistants (Claude
 Code and Codex). AI co-authors are recorded in the commit history.
