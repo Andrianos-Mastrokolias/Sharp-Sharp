@@ -59,7 +59,7 @@ export function createHeadlightBeamMaterial() {
 
         // Dissipates gradually before the far end.
         float farFade =
-          1.0 - smoothstep(0.08, 1.0, vUv.y);
+          1.0 - smoothstep(0.25, 1.0, vUv.y);
 
         // Very slight atmospheric variation.
         float atmosphere =
@@ -73,7 +73,7 @@ export function createHeadlightBeamMaterial() {
           nearFade *
           farFade *
           atmosphere *
-          0.035 *
+          0.16 *
           clamp(uIntensity, 0.0, 1.2);
 
         gl_FragColor = vec4(

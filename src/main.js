@@ -985,6 +985,9 @@ function loadLevel(level, { showIntro = true } = {}) {
     showMainMenu();
     return;
   }
+  // Always start each level in CHASE camera mode.
+// Also applies when retrying the current level.
+cameraSystem.reset();
 
   vehicle.setEnabled(false);
 
