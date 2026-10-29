@@ -538,7 +538,8 @@ test('LevelManager: level 2 has no pedestrians and level 3 only its 8 runners; b
   e.setSpeed(20);
   e.lm.pedestrianHit(1, 2);
   assert.equal(e.applied.length, 1);
-  assert.equal(e.lm.getState().score, null);
+  // Level 2 has no pedestrians, but the hook still scores from its cargoScore
+  assert.equal(e.lm.getState().score.points, 450);
   assert.equal(e.hits.length, 1);
 });
 
@@ -760,8 +761,8 @@ for (const level of [1, 3]) {
         assert.equal(penalties().length, penaltiesBefore + 1, 'one penalty');
         assert.equal(penalties().at(-1).delta, -50, '-50 points');
       } else {
-        assert.equal(e.lm.getState().score, null, 'no points on level 3');
-        assert.equal(penalties().length, 0);
+        assert.equal(penalties().length, penaltiesBefore + 1, 'one penalty');
+        assert.equal(penalties().at(-1).delta, -50, '-50 points on level 3');
       }
     }
   });

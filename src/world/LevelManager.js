@@ -268,6 +268,11 @@ const L3_TRAFFIC_PER_LANE = 6;
 const L3_TRAFFIC_MAX_CARS = 12;
 
 
+// Levels 2 and 3 score: the start is 5 roof items x 100; each item lost costs
+// 100 and each pedestrian hit 50 (only Level 3 has pedestrians). Floored at 0.
+const CARGO_SCORE = { start: 500, cargoLost: -100, pedestrian: -50 };
+
+
 // Spawn bay / destination ring / beam are unlit (MeshBasicMaterial), so
 // at night they are the brightest things on the road. A level scales
 // their opacity with `markerBrightness` (1 = as authored; missing = 1).
@@ -387,6 +392,8 @@ export const LEVELS = {
     name: 'The Highway',
 
     road: L2_ROAD,
+
+    cargoScore: CARGO_SCORE,
 
     // Midday visuals/speed tuning are applied elsewhere
     // (applyLevelVisuals / vehicle.setLevel).
@@ -537,6 +544,8 @@ export const LEVELS = {
 
   3: {
     name: 'Load Shedding',
+
+    cargoScore: CARGO_SCORE,
 
     // Night visuals (fog, sun, HDRI) come from the graphics
     // managers via applyLevelVisuals(3).
@@ -764,7 +773,7 @@ export class LevelManager {
 
     this.score = {
       points: 0,
-      beaten: 0,
+      beaten: 0,       // Level 1 only (null in getState on Levels 2 and 3)
       firstOut: null,       // null | 'player' | 'rival': first car over the exit line
       pedestriansHit: 0
     };
@@ -983,7 +992,7 @@ if (
     const seconds = race ? race.countdown : this.config.countdown ?? 0;
     const counting = Boolean(race) || seconds > 0;
 
-    this.score.points = 0;
+    this.score.points = this.config.cargoScore?.start ?? 0;
     this.score.beaten = 0;
     this.score.firstOut = null;
     this.score.pedestriansHit = 0;
@@ -1038,6 +1047,11 @@ if (
 
     this.score.points += delta;
 
+    // Levels 2 and 3 never go below 0 (Level 1 is unchanged)
+    if (this.config.cargoScore) {
+      this.score.points = Math.max(0, this.score.points);
+    }
+
     this.onScore?.({
       delta,
       reason,
@@ -1055,15 +1069,40 @@ if (
   }
 
 
-  // Hook for the pedestrian hits (not implemented yet): -50 each
+  // True on a level with points: Level 1 (rank race) and Levels 2 and 3
+  // (cargoScore)
+  get scoring() {
+    return this.race.active || Boolean(this.config?.cargoScore);
+  }
+
+
+  // A cargo item came off the roof (main.js calls it from onCargoLost):
+  // -100 on Levels 2 and 3, nothing on Level 1
+  registerCargoLoss() {
+
+    const { cargoScore } = this.config ?? {};
+
+    if (!cargoScore || this.status !== 'driving') {
+      return;
+    }
+
+    this.award(cargoScore.cargoLost, 'cargoLost');
+  }
+
+
+  // The pedestrian hits: -50 each (Level 1 from its race points, Level 3
+  // from its cargoScore)
   registerPedestrianHit() {
 
-    if (!this.race.active || this.status !== 'driving') {
+    if (!this.scoring || this.status !== 'driving') {
       return;
     }
 
     this.score.pedestriansHit++;
-    this.award(this.config.race.points.pedestrian, 'pedestrian');
+    this.award(
+      this.config.race?.points.pedestrian ?? this.config.cargoScore.pedestrian,
+      'pedestrian'
+    );
   }
 
 
@@ -1397,12 +1436,13 @@ if (
       //   pressure 0-1 }
       pursuit: this.pursuit.getState(),
 
-      // The rank race (null score and phase 'none' on the other levels)
-      score: this.race.active
+      // The score: Level 1's rank race, or the cargo score of Levels 2 and 3
+      // (beaten and rivalsTotal are null there). Null with no score.
+      score: this.scoring
         ? {
             points: this.score.points,
-            beaten: this.score.beaten,
-            rivalsTotal: this.rivals.rivals.length,
+            beaten: this.race.active ? this.score.beaten : null,
+            rivalsTotal: this.race.active ? this.rivals.rivals.length : null,
             firstOut: this.score.firstOut,
             pedestriansHit: this.score.pedestriansHit
           }

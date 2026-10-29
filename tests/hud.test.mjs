@@ -233,7 +233,7 @@ test('countdown + LevelManager: Level 1 plays 3, 2, 1, GO!; retry and level 2 re
   for (const level of [2, 3]) {
     lm.load(level);
     tracker.reset();
-    assert.equal(lm.getState().score, null);
+    assert.equal(lm.getState().score.points, 500, 'the cargo score, no rank race');
     assert.equal(lm.getState().race.phase, 'countdown');
     assert.deepEqual(play(lm, tracker, 3 + GO_TIME + 0.5), ['3', '2', '1', 'GO!']);
     assert.equal(tracker.text, '');

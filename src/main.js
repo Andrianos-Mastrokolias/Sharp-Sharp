@@ -186,7 +186,10 @@ const cargoSystem = new CargoSystem({
   gravity: -22,
 
   onCargoLost: event => {
-    if (phase === GamePhase.PLAYING) audio.cue('cargo');
+    if (phase === GamePhase.PLAYING) {
+      audio.cue('cargo');
+      levelManager.registerCargoLoss();
+    }
     // Don't trigger a second failure after the level has ended.
     if (
       phase === GamePhase.PLAYING &&

@@ -107,7 +107,7 @@ for (const level of [2, 3]) {
 
     assert.equal(e.lm.inputLocked, true);
     assert.deepEqual(e.lm.getState().race, { phase: 'countdown', countdown: 3 });
-    assert.equal(e.lm.getState().score, null, 'no points here (Phase 2)');
+    assert.equal(e.lm.getState().score.points, 500, 'the cargo score (tests/score.test.mjs)');
   });
 
   test(`L${level}: locked for 3.00 s, then GO unlocks; phase is 'playing', never the L1 phases`, () => {
