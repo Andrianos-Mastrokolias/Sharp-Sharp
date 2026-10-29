@@ -197,7 +197,7 @@ test('countdown: 3 s, the taxi (inputLocked), rivals, traffic, pursuit and the c
   assert.ok(e.lm.getState().time > 0.9 && e.lm.getState().time < 1.2, 'the clock starts at GO');
 });
 
-test('countdown: skipCountdown() ends it at once; levels 2 and 3 have none', () => {
+test('countdown: skipCountdown() ends it at once; levels 2 and 3 start with a 3 s countdown and the taxi locked', () => {
   const e = make();
   e.lm.load(1);
   e.lm.skipCountdown();
@@ -207,8 +207,8 @@ test('countdown: skipCountdown() ends it at once; levels 2 and 3 have none', () 
   for (const level of [2, 3]) {
     e.lm.load(level);
     const s = e.lm.getState();
-    assert.equal(e.lm.inputLocked, false);
-    assert.deepEqual(s.race, { phase: 'none', countdown: 0 });
+    assert.equal(e.lm.inputLocked, true);
+    assert.deepEqual(s.race, { phase: 'countdown', countdown: 3 });
     assert.equal(s.score, null);
     assert.equal(e.lm.rivals.rivals.length, 0);
   }
