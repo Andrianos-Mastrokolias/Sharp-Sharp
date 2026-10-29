@@ -478,6 +478,10 @@ export const LEVELS = {
       maxDeliverSpeed: 4
     },
 
+    // The 3-2-1-GO countdown (s): the taxi, traffic and pursuit are held
+    // until GO. Level 1 has its own inside its rank race (L1_RACE).
+    countdown: 3,
+
     // Ground-lane pursuer that also follows up the flyover (it gets
     // its height from getElevationAt()). Not collidable.
     pursuit: {
@@ -599,6 +603,11 @@ export const LEVELS = {
       radius: 8,
       maxDeliverSpeed: 4
     },
+
+    // The 3-2-1-GO countdown (s): the taxi, traffic and pursuit are held
+    // until GO (spawnIdleGrace below counts from GO). Level 1 has its own
+    // inside its rank race (L1_RACE).
+    countdown: 3,
 
     // Headlight stealth: lights on = seen from far away, lights off =
     // only up close (see L3_PURSUIT_* above). No activateAfterDelay.
@@ -746,8 +755,11 @@ export class LevelManager {
       onBeaten: () => this.rivalBeaten()
     });
 
-    // The rank race. phase: 'none' (a level without one) | 'countdown' |
-    // 'racing' | 'cbd' | 'chase'; countdown in seconds left
+    // The countdown and the rank race. active: the level has a rank race
+    // (Level 1: rivals, exit line, head start). phase: 'none' (no countdown
+    // and no race) | 'countdown' (any level with one) | 'playing' (Levels 2
+    // and 3 after GO) | 'racing' | 'cbd' | 'chase' (the rank race after GO);
+    // countdown in seconds left
     this.race = { active: false, phase: 'none', countdown: 0 };
 
     this.score = {
@@ -960,12 +972,16 @@ if (
 
 
   // --------------------------------------------------
-  // The rank race (Level 1)
+  // The countdown (every level that has one) and the rank race (Level 1)
   // --------------------------------------------------
 
   resetRace() {
 
     const { race } = this.config;
+
+    // Level 1's countdown is part of its race; Levels 2 and 3 have their own
+    const seconds = race ? race.countdown : this.config.countdown ?? 0;
+    const counting = Boolean(race) || seconds > 0;
 
     this.score.points = 0;
     this.score.beaten = 0;
@@ -976,8 +992,8 @@ if (
     this.rivalsReleased = false;
 
     this.race.active = Boolean(race);
-    this.race.phase = race ? 'countdown' : 'none';
-    this.race.countdown = race ? race.countdown : 0;
+    this.race.phase = counting ? 'countdown' : 'none';
+    this.race.countdown = counting ? seconds : 0;
 
     if (race) {
       this.rivals.reset();
@@ -989,25 +1005,32 @@ if (
   // True while the countdown holds the taxi: main.js passes the vehicle
   // no keys then (it stays enabled, so its physics keeps settling)
   get inputLocked() {
-    return this.race.active && this.race.phase === 'countdown';
+    return this.race.phase === 'countdown';
   }
 
 
   // Ends the countdown now (tests; the game lets it run)
   skipCountdown() {
 
-    if (this.race.active && this.race.phase === 'countdown') {
+    if (this.race.phase === 'countdown') {
       this.race.countdown = 0;
       this.startRace();
     }
   }
 
 
+  // GO. Only a level with a rank race has rivals to launch; updateRace
+  // moves its phase on from 'racing'
   startRace() {
 
-    this.race.phase = 'racing';
     this.race.countdown = 0;
-    this.rivals.launch();
+
+    if (this.config.race) {
+      this.race.phase = 'racing';
+      this.rivals.launch();
+    } else {
+      this.race.phase = 'playing';
+    }
   }
 
 

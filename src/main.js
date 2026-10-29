@@ -1019,7 +1019,7 @@ function retryCurrentLevel() {
 
 const keys = {};
 
-// What the vehicle is given while the Level 1 countdown holds the taxi
+// What the vehicle is given while the countdown holds the taxi (every level)
 const NO_KEYS = Object.freeze({});
 
 function clearKeys() {

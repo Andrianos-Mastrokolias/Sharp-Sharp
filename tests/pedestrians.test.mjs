@@ -515,10 +515,12 @@ test('LevelManager: a reload (load, reset) brings everyone back and they can be 
 test('LevelManager: level 2 has no pedestrians and level 3 only its 8 runners; both run fine; a hit there would cost no points', () => {
   const l2 = makeLevel();
   l2.lm.load(2);
+  l2.lm.skipCountdown();
   assert.equal(l2.lm.environment.pedestrians, undefined, 'level 2');
 
   const l3 = makeLevel();
   l3.lm.load(3);
+  l3.lm.skipCountdown();
   assert.equal(l3.lm.environment.pedestrians.count, 8, 'level 3: only the runners');
   assert.equal(l3.lm.environment.pedestrians.runnerCount, 8);
 
@@ -532,6 +534,7 @@ test('LevelManager: level 2 has no pedestrians and level 3 only its 8 runners; b
   // the hook on a level without a race: the speed loss, no points, no throw
   const e = makeLevel();
   e.lm.load(2);
+  e.lm.skipCountdown();
   e.setSpeed(20);
   e.lm.pedestrianHit(1, 2);
   assert.equal(e.applied.length, 1);
