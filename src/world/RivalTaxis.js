@@ -123,6 +123,7 @@ export class RivalTaxiSystem {
         targetX: initialX,
         laneDirection: i % 2 ? 1 : -1,
         nextLaneChange: 1.2 + (i % 4) * 0.3,
+        seenBehind: false,
         beaten: false,
         released: false
       };
@@ -228,16 +229,39 @@ update(dt, player = null) {
     let targetX = car.initialX;
 
     switch (car.personality) {
-      case 'weaver':
-        if (this.time >= car.nextLaneChange) {
-          car.laneDirection *= -1;
-          car.nextLaneChange =
-            this.time + 1.2 + (i % 4) * 0.25;
+      
+      case 'weaver': {
+        // Positive means the player is ahead of this rival.
+        const gapToPlayer = player
+          ? this.direction * (player.z - car.z)
+          : Infinity;
+
+        const sameLane = player &&
+          Math.abs(player.x - car.initialX) < 2.5;
+
+        // Commit to a wider lane change when passing the player.
+        // Keep the manoeuvre until the rival is safely ahead.
+        if (
+          sameLane &&
+          gapToPlayer > -12 &&
+          gapToPlayer < 28
+        ) {
+          targetX = player.x + car.laneDirection * 4.2;
+        } else {
+          // Normal weaving when not overtaking the player.
+          if (this.time >= car.nextLaneChange) {
+            car.laneDirection *= -1;
+            car.nextLaneChange =
+              this.time + 1.2 + (i % 4) * 0.25;
+          }
+
+          targetX =
+            car.initialX + car.laneDirection * 2.7;
         }
 
-        targetX =
-          car.initialX + car.laneDirection * 2.7;
         break;
+      }
+
 
       case 'brake-checker':
         if (this.someoneBehind(car, player)) {
@@ -318,18 +342,28 @@ update(dt, player = null) {
 
     // Every rival is eligible to be beaten after launch,
     // regardless of its original starting position.
+    // Every rival is eligible to be beaten after launch,
+// regardless of its original starting position.
+
+    // Count only genuine overtakes.
+    // A rival must first be ahead of the player.
     if (player && !car.beaten) {
       const relative =
         this.direction * (player.z - car.z);
 
-      // The player must be at least 3 metres ahead.
-      if (relative >= 3) {
-        car.beaten = true;
+      if (relative < -3) {
+        car.seenBehind = true;
+      }
 
-        // Award points only once for this rival.
+      // The player's taxi must fully clear the rival.
+      const clearance = (car.length + 4.6) / 2;
+
+      if (car.seenBehind && relative > clearance) {
+        car.beaten = true;
         this.onBeaten?.(car.index);
       }
     }
+
   }
 }
 
@@ -372,6 +406,7 @@ update(dt, player = null) {
       car.targetX = car.initialX;
       car.nextLaneChange = 1.2 + (car.index % 4) * 0.3;
       car.laneDirection = car.index % 2 ? 1 : -1;
+      car.seenBehind = false;
       car.beaten = false;
       car.released = false;
 

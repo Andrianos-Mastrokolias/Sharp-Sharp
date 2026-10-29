@@ -310,7 +310,7 @@ test('points: the pedestrian hook takes 50 off (not called by anything yet)', ()
 
 // ---- Releasing the rivals ---------------------------------------------------
 
-test('release: past z -140 a rival goes once it is 25 m behind the taxi; all go when the taxi passes z -250', () => {
+test('release: past z -140 a rival goes once it is 25 m behind the taxi; all go when the taxi passes z -680', () => {
   const e = make();
   e.lm.load(1);
   e.lm.skipCountdown();
@@ -345,10 +345,13 @@ test('release: past z -140 a rival goes once it is 25 m behind the taxi; all go 
   assert.equal(rivals[2].released, false);
 
   // past z -250 the rest go, whatever their place
-  e.taxi.position.set(0, 0, -251);
-  step(e.lm, DT);
-  assert.ok(rivals.every((r) => r.released), 'all released past z -250');
-  assert.ok(meshes.every((m) => !e.collidables.includes(m) && !m.visible));
+  // Past z -680 the remaining rivals are released.
+e.taxi.position.set(0, 0, -681);
+step(e.lm, DT);
+assert.ok(
+  rivals.every((r) => r.released),
+  'all released past z -680'
+);
 });
 
 // ---- The police head start --------------------------------------------------
@@ -425,8 +428,11 @@ test('head start: a rival beaten after z -140 (not yet released) still counts, a
   rivals.forEach((r) => { r.z = -600; r.x = 0; });
  
 rivals[0].z = -190;
+rivals[0].seenBehind = true;
+
 rivals[1].z = -190;
 rivals[1].x = 5;
+rivals[1].seenBehind = true;
 
   e.lm.rivals.launched = true;
   step(e.lm, DT);
@@ -508,92 +514,58 @@ test('events: onScore carries { delta, reason, points } and the same objects are
   assert.notEqual(e.events[0], e.events[1]);
 });
 
-test('points: rivals beside or behind the player are beatable after launch', () => {
+
+test('points: stationary player cannot beat rivals', () => {
   const e = make();
   e.lm.load(1);
+  e.lm.skipCountdown();
 
-  const rear = e.lm.rivals.rivals.filter(
-    (r) => r.initialZ > L1.spawn.z
-  );
-
-  const alongside = e.lm.rivals.rivals.filter(
-    (r) => r.initialZ === L1.spawn.z
-  );
-
-  assert.ok(
-    rear.length > 0 && alongside.length > 0,
-    'grid must include rear and beside rows'
-  );
-
-  // No scoring during the countdown.
-  step(e.lm, 0.1);
+  // Player stays stationary while rivals drive away.
+  step(e.lm, 10);
 
   assert.equal(
     e.lm.getState().score.beaten,
     0,
-    'do not score during countdown'
-  );
-
-  // Start the race.
-  e.lm.skipCountdown();
-  step(e.lm, DT);
-
-  // Rivals behind the player should count as beaten.
-  assert.ok(
-    rear.every((r) => r.beaten),
-    'rear row can count without ever leading'
-  );
-
-  // Rivals alongside should not count yet.
-  assert.ok(
-    alongside.every((r) => !r.beaten),
-    'side row has not been passed yet'
+    'stationary player must not beat rivals'
   );
 
   assert.equal(
-    e.lm.getState().score.beaten,
-    rear.length
-  );
-
-  // Move less than 3 metres ahead.
-  e.taxi.position.z = L1.spawn.z - 2.5;
-  step(e.lm, DT);
-
-  assert.ok(
-    alongside.every((r) => !r.beaten),
-    'less than 3 m ahead is not enough'
-  );
-
-  // Move more than 3 metres ahead.
-  e.taxi.position.z = L1.spawn.z - 3.5;
-  step(e.lm, DT);
-
-  assert.ok(
-    alongside.every((r) => r.beaten),
-    'beside row becomes beatable at 3 m ahead'
-  );
-
-  const expected = rear.length + alongside.length;
-
-  assert.equal(
-    e.lm.getState().score.beaten,
-    expected
+    e.lm.getState().score.points,
+    0,
+    'stationary player must earn no points'
   );
 
   assert.equal(
-    e.events.filter((ev) => ev.reason === 'beaten').length,
-    expected
-  );
-
-  // Make sure rivals cannot award points twice.
-  step(e.lm, 0.3);
-
-  assert.equal(
-    e.events.filter((ev) => ev.reason === 'beaten').length,
-    expected,
-    'each rival awards points only once'
+    e.events.filter(ev => ev.reason === 'beaten').length,
+    0
   );
 });
+
+
+test('rear-centre rival overtakes stationary player', () => {
+  const e = make();
+  e.lm.load(1);
+  e.lm.skipCountdown();
+
+  const rearCentre = e.lm.rivals.rivals.find(
+    r => r.initialX === 0 && r.initialZ > L1.spawn.z
+  );
+
+  assert.ok(rearCentre, 'rear-centre rival exists');
+
+  // Leave the player stationary while rivals drive.
+  step(e.lm, 12);
+
+  assert.ok(
+    rearCentre.z < e.taxi.position.z - 8,
+    'rear-centre rival should get ahead of the player'
+  );
+
+  assert.equal(e.lm.getState().score.beaten, 0);
+  assert.equal(e.lm.getState().score.points, 0);
+});
+
+
 
 
 

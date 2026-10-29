@@ -5,9 +5,14 @@ import * as THREE from 'three';
 // The narrower gap lets ordinary traffic pass, but the
 // wider player taxi needs to use the open lane.
 export const ROADWORK_SECTIONS = [
-  { z: -250, blockedX: 0, openX: -3.6 },
-  { z: -475, blockedX: -3.6, openX: 0 },
-  { z: -700, blockedX: 0, openX: -3.6 }
+  // First roadworks: outer-right lane
+  { z: -250, blockedX: 6.1, openX: 0 },
+
+  // Second roadworks: outer-right lane
+  { z: -475, blockedX: 6.1, openX: 0 },
+
+  // Third roadworks: centre lane
+  { z: -700, blockedX: 6.1, openX: 0 }
 ];
 
 export function buildHighwayRoadworks({
@@ -94,7 +99,7 @@ function cone(x, z) {
 
 
   function warningSign(section) {
-    const x = section.blockedX === 0 ? 7.5 : -7.5;
+    const x = section.blockedX === 0 ? -8.7 : 8.7;
     const z = section.z + 62;
 
     // Post and black sign backing.
@@ -159,20 +164,31 @@ function cone(x, z) {
       stripe.rotation.z = -Math.PI / 6;
     }
 
-    // Cones indicate the restriction beforehand.
-    for (const ahead of [9, 16, 23, 30]) {
-      cone(x, z + ahead);
+    
+  }
+
+  
+for (const section of ROADWORK_SECTIONS) {
+  warningSign(section);
+
+  // Keep the existing solid barriers.
+  barrier(section.blockedX - 1.6, section.z);
+  barrier(section.blockedX + 1.6, section.z);
+
+  // Wider cone layout across the blocked lane.
+  const coneOffsets = [-1.8, 0, 1.8];
+
+  // Four rows approaching the barriers.
+  for (const ahead of [9, 16, 23, 30]) {
+    for (const offset of coneOffsets) {
+      cone(
+        section.blockedX + offset,
+        section.z + ahead
+      );
     }
   }
+}
 
-  for (const section of ROADWORK_SECTIONS) {
-    warningSign(section);
-
-    // The 2.4 m gap is wide enough for the game's
-    // normal traffic, but narrower than the 2.7 m taxi.
-    barrier(section.blockedX - 1.6, section.z);
-    barrier(section.blockedX + 1.6, section.z);
-  }
 
   
 return {

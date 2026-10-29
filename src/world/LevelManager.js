@@ -216,7 +216,7 @@ const L1_RACE = {
   // After the exit line, each rival is released (removed) once it is at
   // least gap m behind the taxi and the taxi is past z; all the rest are
   // released when the taxi passes allZ
-  release: { z: -140, allZ: -250, gap: 25 },
+  release: { z: -140, allZ: -680, gap: 25 },
 
   points: { beaten: 100, firstOut: 300, pedestrian: -50 },
 
