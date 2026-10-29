@@ -122,6 +122,32 @@ export class CameraSystem {
   // SWITCH CAMERA MODE
   // ==================================================
 
+
+  // ==================================================
+  // RESET CAMERA — LEVEL START / RESTART
+  // ==================================================
+
+  reset() {
+    // CHASE is the first camera mode.
+    this.currentModeIndex = 0;
+
+    // Reset chase camera rotation and zoom.
+    this.cameraAngle = 0;
+    this.chaseDistance = 10.5;
+    this.chaseHeight = 4.8;
+
+    // Release any camera drag state.
+    this.dragging = false;
+
+    // Restore chase-camera field of view.
+    this.camera.fov = 68;
+    this.camera.updateProjectionMatrix();
+
+    // Position the camera immediately after a level change.
+    this.update(0);
+  }
+
+
   nextMode() {
 
     this.currentModeIndex =

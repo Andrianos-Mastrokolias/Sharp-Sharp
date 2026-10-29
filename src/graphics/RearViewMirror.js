@@ -17,7 +17,7 @@ export class RearViewMirror {
     );
 
     // Reusable vectors avoid allocations each frame.
-    this.offset = new THREE.Vector3(0, 2.9, 0.8);
+    this.offset = new THREE.Vector3(0, 2.75, 3.8);
     this.backward = new THREE.Vector3(0, 0, 1);
     this.position = new THREE.Vector3();
     this.direction = new THREE.Vector3();
