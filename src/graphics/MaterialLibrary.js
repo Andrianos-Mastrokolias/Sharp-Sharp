@@ -12,6 +12,10 @@ export class MaterialLibrary {
     this.loader =
       new THREE.TextureLoader();
 
+    // Keep track of textures waiting for image data.
+// WeakMap avoids storing texture references in userData.
+this.pendingTextureClones = new WeakMap();
+
 
     this.maxAnisotropy =
       Math.min(
@@ -186,80 +190,107 @@ export class MaterialLibrary {
   // LOAD TEXTURE
   // ==================================================
 
-  loadTexture(
+  
+
+loadTexture(path, colorTexture) {
+  const texture = this.loader.load(
     path,
-    colorTexture
-  ) {
 
-    const texture =
-      this.loader.load(
-        path
+    // Called when the image has finished loading.
+    loadedTexture => {
+      const pending =
+        this.pendingTextureClones.get(loadedTexture);
+
+      if (!pending) return;
+
+      // Give every waiting texture the loaded image.
+      for (const map of pending) {
+        map.source = loadedTexture.source;
+
+        // Only upload after image data exists.
+        map.needsUpdate = true;
+      }
+
+      // No longer need to track these textures.
+      this.pendingTextureClones.delete(loadedTexture);
+    },
+
+    undefined,
+
+    error => {
+      console.error(
+        `[MaterialLibrary] Failed to load texture: ${path}`,
+        error
       );
-
-
-    texture.wrapS =
-      THREE.RepeatWrapping;
-
-
-    texture.wrapT =
-      THREE.RepeatWrapping;
-
-
-    texture.anisotropy =
-      this.maxAnisotropy;
-
-
-    if (
-      colorTexture
-    ) {
-
-      texture.colorSpace =
-        THREE.SRGBColorSpace;
     }
+  );
 
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = this.maxAnisotropy;
 
-    return texture;
+  if (colorTexture) {
+    texture.colorSpace = THREE.SRGBColorSpace;
   }
+
+  return texture;
+}
+
+
 
 
   // ==================================================
   // MAP CLONE
   // ==================================================
 
-  cloneMap(
-    texture,
-    repeatX,
-    repeatY
-  ) {
+ 
 
-    const map =
-      texture.clone();
+cloneMap(texture, repeatX, repeatY) {
+  // Create a fresh texture without calling clone().
+  // A fresh texture has not been marked for GPU upload.
+  const map = new THREE.Texture();
 
+  // Preserve the original texture configuration.
+  map.mapping = texture.mapping;
+  map.channel = texture.channel;
 
-    map.wrapS =
-      THREE.RepeatWrapping;
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
 
+  map.repeat.set(repeatX, repeatY);
 
-    map.wrapT =
-      THREE.RepeatWrapping;
+  map.magFilter = texture.magFilter;
+  map.minFilter = texture.minFilter;
+  map.format = texture.format;
+  map.type = texture.type;
 
+  map.colorSpace = texture.colorSpace;
+  map.flipY = texture.flipY;
+  map.generateMipmaps = texture.generateMipmaps;
+  map.anisotropy = this.maxAnisotropy;
 
-    map.repeat.set(
-      repeatX,
-      repeatY
-    );
+  if (texture.source?.data) {
+    // The image is already loaded.
+    map.source = texture.source;
+    map.needsUpdate = true;
+  } else {
+    // The image is not loaded yet.
+    // Keep the texture at version 0 until it is ready.
+    let pending =
+      this.pendingTextureClones.get(texture);
 
+    if (!pending) {
+      pending = [];
+      this.pendingTextureClones.set(texture, pending);
+    }
 
-    map.anisotropy =
-      this.maxAnisotropy;
-
-
-    map.needsUpdate =
-      true;
-
-
-    return map;
+    pending.push(map);
   }
+
+  return map;
+}
+
+
 
 
   // ==================================================

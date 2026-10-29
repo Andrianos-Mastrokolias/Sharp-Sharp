@@ -34,6 +34,7 @@ Hitting a pedestrian slows the taxi and, on Level 1, costs 50 points.
 | A / D | Steer |
 | Space | Handbrake |
 | C | Change camera (chase, bumper, interior) |
+| V | Toggle rear-view mirror (not available on Low graphics quality) |
 | L | Headlights |
 | R | Retry the level |
 | Esc / P | Pause |
@@ -60,6 +61,9 @@ Hitting a pedestrian slows the taxi and, on Level 1, costs 50 points.
   race cues.
 - **Performance:** merged and instanced meshes, nothing allocated per frame,
   and draw-call budgets checked by tests.
+  - **Additional CGV effects:** a toggleable live rear-view mirror,
+  procedurally generated height-map terrain in Level 1,
+  and physically based glass refraction at the taxi marshal's booth.
 
 ## Run it locally
 

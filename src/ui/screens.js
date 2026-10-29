@@ -150,6 +150,7 @@ const CONTROLS = [
   ['A / D', 'Steer'],
   ['Space', 'Handbrake'],
   ['C', 'Camera'],
+  ['V', 'Toggle rear-view mirror (Medium/High quality)'],
   ['L', 'Lights'],
   ['R', 'Retry'],
   ['Esc / P', 'Pause'],
