@@ -268,6 +268,11 @@ const L3_TRAFFIC_PER_LANE = 6;
 const L3_TRAFFIC_MAX_CARS = 12;
 
 
+// Levels 2 and 3 score: the start is 5 roof items x 100; each item lost costs
+// 100 and each pedestrian hit 50 (only Level 3 has pedestrians). Floored at 0.
+const CARGO_SCORE = { start: 500, cargoLost: -100, pedestrian: -50 };
+
+
 // Spawn bay / destination ring / beam are unlit (MeshBasicMaterial), so
 // at night they are the brightest things on the road. A level scales
 // their opacity with `markerBrightness` (1 = as authored; missing = 1).
@@ -388,6 +393,8 @@ export const LEVELS = {
 
     road: L2_ROAD,
 
+    cargoScore: CARGO_SCORE,
+
     // Midday visuals/speed tuning are applied elsewhere
     // (applyLevelVisuals / vehicle.setLevel).
 
@@ -478,6 +485,10 @@ export const LEVELS = {
       maxDeliverSpeed: 4
     },
 
+    // The 3-2-1-GO countdown (s): the taxi, traffic and pursuit are held
+    // until GO. Level 1 has its own inside its rank race (L1_RACE).
+    countdown: 3,
+
     // Ground-lane pursuer that also follows up the flyover (it gets
     // its height from getElevationAt()). Not collidable.
     pursuit: {
@@ -533,6 +544,8 @@ export const LEVELS = {
 
   3: {
     name: 'Load Shedding',
+
+    cargoScore: CARGO_SCORE,
 
     // Night visuals (fog, sun, HDRI) come from the graphics
     // managers via applyLevelVisuals(3).
@@ -599,6 +612,11 @@ export const LEVELS = {
       radius: 8,
       maxDeliverSpeed: 4
     },
+
+    // The 3-2-1-GO countdown (s): the taxi, traffic and pursuit are held
+    // until GO (spawnIdleGrace below counts from GO). Level 1 has its own
+    // inside its rank race (L1_RACE).
+    countdown: 3,
 
     // Headlight stealth: lights on = seen from far away, lights off =
     // only up close (see L3_PURSUIT_* above). No activateAfterDelay.
@@ -746,13 +764,16 @@ export class LevelManager {
       onBeaten: () => this.rivalBeaten()
     });
 
-    // The rank race. phase: 'none' (a level without one) | 'countdown' |
-    // 'racing' | 'cbd' | 'chase'; countdown in seconds left
+    // The countdown and the rank race. active: the level has a rank race
+    // (Level 1: rivals, exit line, head start). phase: 'none' (no countdown
+    // and no race) | 'countdown' (any level with one) | 'playing' (Levels 2
+    // and 3 after GO) | 'racing' | 'cbd' | 'chase' (the rank race after GO);
+    // countdown in seconds left
     this.race = { active: false, phase: 'none', countdown: 0 };
 
     this.score = {
       points: 0,
-      beaten: 0,
+      beaten: 0,       // Level 1 only (null in getState on Levels 2 and 3)
       firstOut: null,       // null | 'player' | 'rival': first car over the exit line
       pedestriansHit: 0
     };
@@ -887,7 +908,8 @@ if (
         zMin: road.zMin,
         zMax: road.zMax
       },
-      direction: -1
+      direction: -1,
+      playerStartZ: this.config.spawn.z
     });
   }
 
@@ -960,14 +982,18 @@ if (
 
 
   // --------------------------------------------------
-  // The rank race (Level 1)
+  // The countdown (every level that has one) and the rank race (Level 1)
   // --------------------------------------------------
 
   resetRace() {
 
     const { race } = this.config;
 
-    this.score.points = 0;
+    // Level 1's countdown is part of its race; Levels 2 and 3 have their own
+    const seconds = race ? race.countdown : this.config.countdown ?? 0;
+    const counting = Boolean(race) || seconds > 0;
+
+    this.score.points = this.config.cargoScore?.start ?? 0;
     this.score.beaten = 0;
     this.score.firstOut = null;
     this.score.pedestriansHit = 0;
@@ -976,8 +1002,8 @@ if (
     this.rivalsReleased = false;
 
     this.race.active = Boolean(race);
-    this.race.phase = race ? 'countdown' : 'none';
-    this.race.countdown = race ? race.countdown : 0;
+    this.race.phase = counting ? 'countdown' : 'none';
+    this.race.countdown = counting ? seconds : 0;
 
     if (race) {
       this.rivals.reset();
@@ -989,31 +1015,43 @@ if (
   // True while the countdown holds the taxi: main.js passes the vehicle
   // no keys then (it stays enabled, so its physics keeps settling)
   get inputLocked() {
-    return this.race.active && this.race.phase === 'countdown';
+    return this.race.phase === 'countdown';
   }
 
 
   // Ends the countdown now (tests; the game lets it run)
   skipCountdown() {
 
-    if (this.race.active && this.race.phase === 'countdown') {
+    if (this.race.phase === 'countdown') {
       this.race.countdown = 0;
       this.startRace();
     }
   }
 
 
+  // GO. Only a level with a rank race has rivals to launch; updateRace
+  // moves its phase on from 'racing'
   startRace() {
 
-    this.race.phase = 'racing';
     this.race.countdown = 0;
-    this.rivals.launch();
+
+    if (this.config.race) {
+      this.race.phase = 'racing';
+      this.rivals.launch();
+    } else {
+      this.race.phase = 'playing';
+    }
   }
 
 
   award(delta, reason) {
 
     this.score.points += delta;
+
+    // Levels 2 and 3 never go below 0 (Level 1 is unchanged)
+    if (this.config.cargoScore) {
+      this.score.points = Math.max(0, this.score.points);
+    }
 
     this.onScore?.({
       delta,
@@ -1032,15 +1070,40 @@ if (
   }
 
 
-  // Hook for the pedestrian hits (not implemented yet): -50 each
+  // True on a level with points: Level 1 (rank race) and Levels 2 and 3
+  // (cargoScore)
+  get scoring() {
+    return this.race.active || Boolean(this.config?.cargoScore);
+  }
+
+
+  // A cargo item came off the roof (main.js calls it from onCargoLost):
+  // -100 on Levels 2 and 3, nothing on Level 1
+  registerCargoLoss() {
+
+    const { cargoScore } = this.config ?? {};
+
+    if (!cargoScore || this.status !== 'driving') {
+      return;
+    }
+
+    this.award(cargoScore.cargoLost, 'cargoLost');
+  }
+
+
+  // The pedestrian hits: -50 each (Level 1 from its race points, Level 3
+  // from its cargoScore)
   registerPedestrianHit() {
 
-    if (!this.race.active || this.status !== 'driving') {
+    if (!this.scoring || this.status !== 'driving') {
       return;
     }
 
     this.score.pedestriansHit++;
-    this.award(this.config.race.points.pedestrian, 'pedestrian');
+    this.award(
+      this.config.race?.points.pedestrian ?? this.config.cargoScore.pedestrian,
+      'pedestrian'
+    );
   }
 
 
@@ -1374,12 +1437,13 @@ if (
       //   pressure 0-1 }
       pursuit: this.pursuit.getState(),
 
-      // The rank race (null score and phase 'none' on the other levels)
-      score: this.race.active
+      // The score: Level 1's rank race, or the cargo score of Levels 2 and 3
+      // (beaten and rivalsTotal are null there). Null with no score.
+      score: this.scoring
         ? {
             points: this.score.points,
-            beaten: this.score.beaten,
-            rivalsTotal: this.rivals.rivals.length,
+            beaten: this.race.active ? this.score.beaten : null,
+            rivalsTotal: this.race.active ? this.rivals.rivals.length : null,
             firstOut: this.score.firstOut,
             pedestriansHit: this.score.pedestriansHit
           }

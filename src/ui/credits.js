@@ -10,14 +10,24 @@ const POLY_HAVEN = 'Poly Haven (polyhaven.com) — CC0';
 const POLY_HAVEN_HDRI = 'Poly Haven (polyhaven.com) — CC0 1.0';
 
 export const CREDITS = [
-  {
-    heading: 'Sound & music',
-    entries: [{
-      name: 'Abdur-Rahman Perin — procedural audio integration',
-      detail: 'Original Web Audio synthesis and procedural music prepared for Sharp-Sharp with Codex assistance; no sampled recordings or third-party music.',
+  
+{
+  heading: 'Sound & music',
+  entries: [
+    {
+      name: 'Abdur-Rahman Perin — audio system and integration',
+      detail:
+        'Original Web Audio synthesis, procedural sound effects, ' +
+        'audio playback and mixing implemented for Sharp-Sharp ' +
+        'with Codex assistance. The game also uses CC0-licensed ' +
+        'recorded sound effects and music, credited individually below. ' +
+        'Procedural audio provides fallback sounds when recordings ' +
+        'are unavailable.',
       files: ['src/audio/GameAudio.js']
-    }]
-  },
+    }
+  ]
+},
+
   {
     heading: 'Recorded audio (CC0)',
     entries: [
@@ -54,7 +64,7 @@ export const CREDITS = [
     ]
   },
   {
-    heading: 'Team EagleStack',
+    heading: 'EagleStack',
     entries: [
       { name: 'Kayura Govindsammy' },
       { name: 'Andrianos Mastrokolias' },
@@ -184,6 +194,17 @@ export const CREDITS = [
   },
 
   {
+    heading: 'Character art',
+    entries: [
+      {
+        name: 'Bra Sipho character art',
+        detail: 'Generated with Gemini Nano Banana from a team-written prompt, edited by the team.',
+        files: ['ui/sipho-wave.webp', 'ui/sipho-portrait.webp']
+      }
+    ]
+  },
+
+  {
     heading: 'Adapted code',
     entries: [
       {
@@ -218,7 +239,8 @@ export const CREDITS = [
           '(widely used; popularised by The Book of Shaders)',
         files: [
           'src/shaders/HeadlightBeamShader.js',
-          'src/shaders/HeatHazeShader.js'
+          'src/shaders/HeatHazeShader.js',
+          'src/shaders/SpeedLinesShader.js'
         ]
       }
     ]

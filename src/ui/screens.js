@@ -141,7 +141,10 @@ export function scoreStats(score) {
 
   return (
     signStat('Points', formatPoints(score.points)) +
-    signStat('Rivals beaten', `${score.beaten} / ${score.rivalsTotal}`)
+    // Level 1 only (beaten is null on Levels 2 and 3)
+    (score.beaten != null
+      ? signStat('Rivals beaten', `${score.beaten} / ${score.rivalsTotal}`)
+      : '')
   );
 }
 

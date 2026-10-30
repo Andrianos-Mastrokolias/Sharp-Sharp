@@ -228,13 +228,22 @@ test('countdown + LevelManager: Level 1 plays 3, 2, 1, GO!; retry and level 2 re
   tracker.reset();
   assert.deepEqual(play(lm, tracker, 0.1), ['3']);
 
-  // Level 2: no race, no score, no overlay
-  lm.load(2);
-  tracker.reset();
-  assert.equal(lm.getState().score, null);
-  assert.equal(lm.getState().race.phase, 'none');
-  assert.deepEqual(play(lm, tracker, 2), []);
-  assert.equal(tracker.text, '');
+  // Levels 2 and 3: no race and no score, but the same 3, 2, 1, GO! overlay
+  // (their phase after GO is 'playing', not a rank-race phase)
+  for (const level of [2, 3]) {
+    lm.load(level);
+    tracker.reset();
+    assert.equal(lm.getState().score.points, 500, 'the cargo score, no rank race');
+    assert.equal(lm.getState().race.phase, 'countdown');
+    assert.deepEqual(play(lm, tracker, 3 + GO_TIME + 0.5), ['3', '2', '1', 'GO!']);
+    assert.equal(tracker.text, '');
+    assert.equal(lm.getState().race.phase, 'playing');
+
+    // Retry mid-countdown starts it again
+    lm.load(level);
+    tracker.reset();
+    assert.deepEqual(play(lm, tracker, 1.5), ['3', '2']);
+  }
 });
 
 // ---------- Audio cues ----------

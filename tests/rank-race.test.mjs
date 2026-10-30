@@ -197,7 +197,7 @@ test('countdown: 3 s, the taxi (inputLocked), rivals, traffic, pursuit and the c
   assert.ok(e.lm.getState().time > 0.9 && e.lm.getState().time < 1.2, 'the clock starts at GO');
 });
 
-test('countdown: skipCountdown() ends it at once; levels 2 and 3 have none', () => {
+test('countdown: skipCountdown() ends it at once; levels 2 and 3 start with a 3 s countdown and the taxi locked', () => {
   const e = make();
   e.lm.load(1);
   e.lm.skipCountdown();
@@ -207,9 +207,10 @@ test('countdown: skipCountdown() ends it at once; levels 2 and 3 have none', () 
   for (const level of [2, 3]) {
     e.lm.load(level);
     const s = e.lm.getState();
-    assert.equal(e.lm.inputLocked, false);
-    assert.deepEqual(s.race, { phase: 'none', countdown: 0 });
-    assert.equal(s.score, null);
+    assert.equal(e.lm.inputLocked, true);
+    assert.deepEqual(s.race, { phase: 'countdown', countdown: 3 });
+    assert.equal(s.score.points, 500, 'the cargo score, not the rank race');
+    assert.equal(s.score.beaten, null);
     assert.equal(e.lm.rivals.rivals.length, 0);
   }
 });
@@ -564,6 +565,34 @@ test('rear-centre rival overtakes stationary player', () => {
   assert.equal(e.lm.getState().score.beaten, 0);
   assert.equal(e.lm.getState().score.points, 0);
 });
+
+
+test('points: pulling ahead counts rivals from every starting row', () => {
+  const e = make();
+  e.lm.load(1);
+  e.lm.skipCountdown();
+
+  // Start stationary. No free points.
+  step(e.lm, 0.1);
+
+  assert.equal(e.lm.getState().score.beaten, 0);
+  assert.equal(e.lm.getState().score.points, 0);
+
+  // Simulate the player gaining a substantial lead
+  // over the entire starting grid.
+  e.taxi.position.z = L1.spawn.z - 35;
+  step(e.lm, DT);
+
+  const score = e.lm.getState().score;
+
+  assert.equal(score.beaten, 8);
+  assert.equal(score.points, 800);
+
+  // Rivals cannot award the same points twice.
+  step(e.lm, 0.1);
+  assert.equal(e.lm.getState().score.points, 800);
+});
+
 
 
 

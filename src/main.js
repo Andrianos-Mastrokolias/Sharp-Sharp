@@ -24,6 +24,7 @@ import { MaterialLibrary } from './graphics/MaterialLibrary.js';
 import { SkyManager } from './graphics/SkyManager.js';
 import { SkylineManager } from './graphics/SkylineManager.js';
 import { RearViewMirror } from './graphics/RearViewMirror.js';
+import { createSpeedLinesMaterial } from './shaders/SpeedLinesShader.js';
 import { LevelManager, LEVELS } from './world/LevelManager.js';
 import {
   createBox,
@@ -47,9 +48,11 @@ import {
   creditsHTML
 } from './ui/screens.js';
 
-import { Hud } from './ui/Hud.js';
+import { Hud, CLEAR_STATES, SPOTTED_STATE } from './ui/Hud.js';
 import { CountdownTracker } from './ui/countdown.js';
 import { CREDITS } from './ui/credits.js';
+import { STORY } from './ui/story.js';
+import { MenuNarrator, narratorDialogueHTML } from './ui/narrator.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { readPreferences, savePreferences, applyQuality } from './game/preferences.js';
 import { settingsHTML } from './ui/settings.js';
@@ -75,6 +78,12 @@ const SCORE_CUES = { beaten: 'beaten', firstOut: 'firstOut' };
 // ============================================================
 // GAME CONFIGURATION
 // ============================================================
+
+// Speed-lines shader overlay (src/shaders/SpeedLinesShader.js).
+// Set to false to turn it off.
+const SPEED_LINES = true;
+// Police siren glow at the screen edges while chased (same overlay).
+const SIREN_EDGES = true;
 
 const FIRST_LEVEL = 1;
 const LAST_LEVEL = 3;
@@ -120,6 +129,8 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   1000
 );
+// Main gameplay camera renders normal scenery and dust.
+camera.layers.enable(1);
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -186,7 +197,10 @@ const cargoSystem = new CargoSystem({
   gravity: -22,
 
   onCargoLost: event => {
-    if (phase === GamePhase.PLAYING) audio.cue('cargo');
+    if (phase === GamePhase.PLAYING) {
+      audio.cue('cargo');
+      levelManager.registerCargoLoss();
+    }
     // Don't trigger a second failure after the level has ended.
     if (
       phase === GamePhase.PLAYING &&
@@ -240,6 +254,120 @@ const rearViewMirror = new RearViewMirror({
 });
 
 let rearViewRequested = true;
+
+// ============================================================
+// SPEED LINES
+// ============================================================
+
+// A quad parented to the camera, just past its near plane, that
+// fills the view; SpeedLinesShader draws the streaks and the siren
+// edge glow on it. It is on its own layer, so the rear-view mirror
+// camera never sees it.
+const SPEED_LINES_LAYER = 1;
+const SPEED_LINES_MIN_KMH = 40;   // no lines below this
+const SPEED_LINES_FULL_KMH = 140; // full strength from here
+const SPEED_LINES_EASE = 4;       // how fast uSpeed follows (per second)
+const SIREN_EASE = 6;             // how fast uPursuit follows (per second)
+
+let speedLines = null;
+let speedLinesFit = '';
+
+// One quad for both effects; either switch can turn its part off.
+if (SPEED_LINES || SIREN_EDGES) {
+  speedLines = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    createSpeedLinesMaterial()
+  );
+  speedLines.renderOrder = 1000;
+  speedLines.frustumCulled = false;
+  speedLines.visible = false;
+  speedLines.layers.set(SPEED_LINES_LAYER);
+
+  camera.layers.enable(SPEED_LINES_LAYER);
+  camera.add(speedLines);
+  // A camera's children are only drawn when the camera is in the scene.
+  scene.add(camera);
+}
+
+// Size the quad to the view at 1.5x the near distance. Runs again
+// whenever the fov, aspect or near plane changed (resize, camera switch).
+function fitSpeedLines() {
+  const fit = `${camera.fov}|${camera.aspect}|${camera.near}`;
+  if (fit === speedLinesFit) return;
+  speedLinesFit = fit;
+
+  const distance = camera.near * 1.5;
+  const height =
+    2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+
+  speedLines.position.set(0, 0, -distance);
+  speedLines.scale.set(height * camera.aspect, height, 1);
+}
+
+// Level load and retry: no lines until the taxi is fast again.
+function resetSpeedLines() {
+  if (!speedLines) return;
+
+  speedLines.material.uniforms.uTime.value = 0;
+  speedLines.material.uniforms.uSpeed.value = 0;
+  speedLines.material.uniforms.uPursuit.value = 0;
+  speedLines.visible = false;
+}
+
+// Siren strength from the pursuit, read the way the HUD's "on your
+// tail" meter reads it (Hud.js): 0 when clear, the pressure (0..1)
+// while chasing, and 1 when SPOTTED so the edges flash.
+function sirenTarget(pursuit) {
+  const state = pursuit ? pursuit.state : 'none';
+
+  if (CLEAR_STATES.includes(state)) return 0;
+  if (state === SPOTTED_STATE) return 1;
+
+  return Math.min(Math.max(pursuit.pressure ?? 0, 0), 1);
+}
+
+// Every frame; only shown while playing (hidden on menus, pause, results),
+// and then only while the speed lines or the siren have something to show.
+// Console test: window.__sirenDebug = true forces the siren on.
+function updateSpeedLines(dt, objective) {
+  if (!speedLines) return;
+
+  if (phase !== GamePhase.PLAYING) {
+    speedLines.visible = false;
+    return;
+  }
+
+  const uniforms = speedLines.material.uniforms;
+  const speedKmh = Math.abs(vehicle.getSpeed()) * 3.6;
+  const target = SPEED_LINES
+    ? THREE.MathUtils.clamp(
+      (speedKmh - SPEED_LINES_MIN_KMH) / (SPEED_LINES_FULL_KMH - SPEED_LINES_MIN_KMH),
+      0,
+      1
+    )
+    : 0;
+  const pursuitTarget = !SIREN_EDGES ? 0
+    : window.__sirenDebug ? 1
+      : sirenTarget(objective.pursuit);
+
+  uniforms.uTime.value += dt;
+  uniforms.uSpeed.value +=
+    (target - uniforms.uSpeed.value) * Math.min(1, dt * SPEED_LINES_EASE);
+  uniforms.uPursuit.value +=
+    (pursuitTarget - uniforms.uPursuit.value) * Math.min(1, dt * SIREN_EASE);
+
+  speedLines.visible =
+    uniforms.uSpeed.value > 0.001 || uniforms.uPursuit.value > 0.001;
+
+  fitSpeedLines();
+}
+
+function disposeSpeedLines() {
+  if (!speedLines) return;
+
+  speedLines.geometry.dispose();
+  speedLines.material.dispose();
+}
 
 // ============================================================
 // MOUSE DRIVE
@@ -322,6 +450,14 @@ panel.className = 'ss-panel';
 
 screen.appendChild(panel);
 document.body.appendChild(screen);
+
+// Bra Sipho on the main menu; hidden again by every
+// showScreen / hideScreen, which clears his timer and element.
+const menuNarrator = new MenuNarrator({
+  host: screen,
+  lines: STORY.menu,
+  getObstacles: () => panel.querySelectorAll('button, summary, .sign, .controls')
+});
 
 const screenActions = {
   startGame: () => {
@@ -436,6 +572,7 @@ applyGraphicsQuality();
 });
 
 function showScreen(html, variant = 'scrim') {
+  menuNarrator.hide();
   audio.setActive(false);
   panel.innerHTML = html;
   panel.scrollTop = 0;
@@ -445,6 +582,7 @@ function showScreen(html, variant = 'scrim') {
 }
 
 function hideScreen() {
+  menuNarrator.hide();
   screen.classList.remove('visible');
 }
 
@@ -457,6 +595,7 @@ function showMainMenu() {
     mainMenuHTML(LEVELS),
     'menu'
   );
+  menuNarrator.show();
 }
 
 // ============================================================
@@ -469,6 +608,8 @@ function showLevelIntro(level) {
 
   showScreen(`
     <div class="ss-column">
+      ${narratorDialogueHTML(STORY.intro[level])}
+
       <div class="sign">
         <div class="sign-head">
           LEVEL ${level} OF ${LAST_LEVEL}
@@ -572,6 +713,8 @@ function completeLevel(event) {
         ]
       ])}
 
+      ${narratorDialogueHTML(STORY.win)}
+
       <div class="sign">
         <div class="sign-head">
           LEVEL ${currentLevel} COMPLETE
@@ -640,6 +783,8 @@ function failLevel(reason, flavour = 'eish') {
       ]])}
 
       <p class="ss-reason">${reason}</p>
+
+      ${narratorDialogueHTML(STORY.lose)}
 
       <div class="sign">
         <div class="sign-head">
@@ -779,6 +924,8 @@ function finishGame() {
           ]
         ])}
 
+        ${narratorDialogueHTML(STORY.win)}
+
         <div class="sign">
           <div class="sign-head">
             LEVEL ${LAST_LEVEL} COMPLETE
@@ -865,6 +1012,8 @@ function finishGame() {
       <p class="ss-reason">
         Sharp-sharp, driver. Every load delivered.
       </p>
+
+      ${narratorDialogueHTML(STORY.win)}
 
       <div class="sign">
         <div class="sign-head">
@@ -964,6 +1113,7 @@ function loadLevel(level, { showIntro = true } = {}) {
   clearKeys();
   hud.clearScorePopups();
   countdown.reset();
+  resetSpeedLines();
 
   currentLevel = level;
 
@@ -985,6 +1135,9 @@ function loadLevel(level, { showIntro = true } = {}) {
     showMainMenu();
     return;
   }
+  // Always start each level in CHASE camera mode.
+// Also applies when retrying the current level.
+cameraSystem.reset();
 
   vehicle.setEnabled(false);
 
@@ -1016,7 +1169,7 @@ function retryCurrentLevel() {
 
 const keys = {};
 
-// What the vehicle is given while the Level 1 countdown holds the taxi
+// What the vehicle is given while the countdown holds the taxi (every level)
 const NO_KEYS = Object.freeze({});
 
 function clearKeys() {
@@ -1111,6 +1264,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) pauseGame();
 });
 window.addEventListener('pagehide', () => audio.dispose());
+window.addEventListener('pagehide', () => disposeSpeedLines());
 
 // ============================================================
 // HUD
@@ -1246,6 +1400,9 @@ rearViewMirror.setEnabled(
   preferences.quality !== 'low'
 );
 
+// Speed lines follow the camera's final fov for this frame.
+updateSpeedLines(dt, objective);
+
 // Main camera renders normally.
 renderer.render(scene, camera);
 
@@ -1265,6 +1422,7 @@ window.addEventListener('resize', () => {
     window.innerWidth / window.innerHeight;
 
   camera.updateProjectionMatrix();
+  if (speedLines) fitSpeedLines();
 
   renderer.setSize(
     window.innerWidth,
