@@ -7,6 +7,8 @@ export class RearViewMirror {
     this.renderer = renderer;
     this.taxi = taxi;
     this.enabled = false;
+    // The mirror renders everything except objects on layer 1.
+this.cameraDustLayer = 1;
 
     // Independent camera looking toward the rear (+Z).
     this.camera = new THREE.PerspectiveCamera(
@@ -15,6 +17,8 @@ export class RearViewMirror {
       0.1,
       350
     );
+    // Mirror only renders the default scene layer.
+this.camera.layers.set(0);
 
     // Reusable vectors avoid allocations each frame.
     this.offset = new THREE.Vector3(0, 2.75, 3.8);

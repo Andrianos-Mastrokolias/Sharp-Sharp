@@ -161,13 +161,14 @@ this.enabled = true;
       );
 
 
-    this.points.frustumCulled =
-      false;
+    
+this.points.frustumCulled = false;
 
+// Put dust on layer 1 so the rear-view mirror cannot see it.
+this.points.layers.set(1);
 
-    this.scene.add(
-      this.points
-    );
+this.scene.add(this.points);
+
 
 
     // ==================================================
