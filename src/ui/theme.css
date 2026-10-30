@@ -1229,8 +1229,8 @@ summary.label:focus-visible {
 }
 
 /* Tail: an ink triangle with a cream one on top */
-.sipho-bubble::before,
-.sipho-bubble::after {
+.sipho-bubble-right::before,
+.sipho-bubble-right::after {
   content: '';
   position: absolute;
   border: solid transparent;
@@ -1251,25 +1251,12 @@ summary.label:focus-visible {
   border-left-color: var(--cream);
 }
 
-/* Tail underneath, pointing down at him (small version) */
-.sipho-bubble-down::before {
-  top: 100%;
-  right: 30%;
-  border-width: 18px 12px 0 12px;
-  border-top-color: var(--ink);
-}
-
-.sipho-bubble-down::after {
-  top: calc(100% - 6px);
-  right: calc(30% + 6px);
-  border-width: 11px 6px 0 6px;
-  border-top-color: var(--cream);
-}
-
 /* ---------- Main menu: bottom-right corner of the screen ---------- */
 
+/* narrator.js sets --sipho-size in px: 58% of the viewport height
+   (360-640 px), shrunk step by step if he would cover a button */
 .sipho-menu {
-  --sipho-size: min(34vh, 24vw);
+  --sipho-size: clamp(360px, 58vh, 640px);
 
   position: absolute;
   right: 0;
@@ -1298,9 +1285,10 @@ summary.label:focus-visible {
 
 .sipho-say {
   position: absolute;
-  right: 96%;
-  bottom: 42%;
-  width: min(19rem, 30vw);
+  /* In the empty space above his arm, tail pointing at him */
+  right: 68%;
+  bottom: 62%;
+  width: clamp(15rem, calc(var(--sipho-size) * 0.8), 26rem);
 
   display: flex;
   flex-direction: column;
@@ -1324,29 +1312,69 @@ summary.label:focus-visible {
 .sipho-menu.is-tucked { visibility: hidden; }
 
 .sipho-menu .sipho-bubble {
-  display: block;
   width: 100%;
-  min-height: 44px;
+  padding: 0.85rem 1.1rem 0.7rem;
+
+  /* Text grows with him */
+  font-size: clamp(1rem, calc(var(--sipho-size) * 0.042), 1.5rem);
   cursor: pointer;
 }
 
-.sipho-menu .sipho-bubble:hover,
-.sipho-menu .sipho-bubble:focus-visible,
+.sipho-line {
+  margin: 0;
+}
+
+.sipho-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.sipho-count {
+  color: var(--maroon);
+  font-size: 0.7em;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+/* Next: a small game button (ink border, mustard, hard shadow) */
+.sipho-next {
+  min-width: 2.2em;
+  min-height: 2.2em;
+  padding: 0 0.5em;
+
+  background: var(--mustard);
+  border: 3px solid var(--ink);
+  border-radius: 8px;
+  box-shadow: 3px 3px 0 var(--ink);
+
+  color: var(--ink);
+  font-family: var(--font-sign);
+  font-size: 0.9em;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sipho-next:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+
+.sipho-next:hover,
+.sipho-next:focus-visible,
 .sipho-skip:hover,
 .sipho-skip:focus-visible {
   outline: 3px solid var(--mustard);
   outline-offset: 3px;
 }
 
-.sipho-count {
-  display: block;
-  margin-top: 0.35rem;
-
-  color: var(--maroon);
-  font-size: 0.8rem;
-  font-weight: 800;
-  letter-spacing: 1px;
-  text-align: right;
+/* Mustard on mustard would vanish */
+.sipho-next:hover,
+.sipho-next:focus-visible {
+  outline-color: var(--ink);
 }
 
 .sipho-skip {
@@ -1366,59 +1394,94 @@ summary.label:focus-visible {
   cursor: pointer;
 }
 
-/* ---------- Small version beside an in-game screen ---------- */
+/* ---------- Dialogue box on the intro and results cards ---------- */
 
-.sipho-row {
+/* Docked to the top of the .sign card that follows it: same
+   width (the -3px covers the sign's ink ring), no gap, and the
+   sign loses its rounded top corners. */
+.sipho-dialogue {
+  --avatar: 104px;
+  --avatar-out: 22px;
+
+  position: relative;
+  margin: 0 -3px -1.1rem;
+}
+
+.sipho-dialogue + .sign > :first-child {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* Round portrait over the bubble's left edge */
+.sipho-avatar {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--avatar-out));
+  z-index: 2;
+
   box-sizing: border-box;
-  min-height: 100%;
-  padding: 2rem 1rem;
+  width: var(--avatar);
+  height: var(--avatar);
 
+  background: var(--cream);
+  border: 4px solid var(--ink);
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px var(--mustard), 0 0 0 7px var(--ink);
+}
+
+/* Name plate, painted like the route sign */
+.sipho-plate {
+  position: relative;
+  z-index: 1;
+
+  width: fit-content;
+  margin: 0 0 -4px calc(var(--avatar) - var(--avatar-out) + 0.8rem);
+  padding: 0.3rem 0.75rem 0.2rem;
+
+  background: var(--sign-green);
+  border: 3px solid var(--sign-white);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 0 0 3px var(--ink);
+
+  color: var(--cream);
+  font-family: var(--font-title);
+  font-size: 0.95rem;
+  letter-spacing: 1px;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+/* The speech: square bottom, sitting on the card */
+.sipho-says {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 1.5rem 2.5rem;
-}
 
-.sipho-row > .ss-column {
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-}
+  min-height: calc(var(--avatar) - 1.2rem);
+  padding: 0.8rem 1rem 0.9rem calc(var(--avatar) - var(--avatar-out) + 0.8rem);
 
-.sipho-card {
-  flex: 0 0 15rem;
-
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-}
-
-.sipho-portrait {
-  width: 13rem;
-  height: 13rem;
-  object-fit: contain;
-  object-position: center bottom;
+  border-radius: 16px 16px 0 0;
+  font-size: 1.1rem;
 }
 
 /* ---------- Narrow screens and reduced motion ---------- */
 
 @media (max-width: 900px) {
-  .sipho-menu,
-  .sipho-portrait {
+  .sipho-menu {
     display: none;
   }
 
-  /* Keep his line, as a plain bubble above the screen */
-  .sipho-card {
-    order: -1;
-    flex-basis: min(34rem, calc(100vw - 2rem));
+  .sipho-dialogue {
+    --avatar: 64px;
+    --avatar-out: 0px;
   }
 
-  .sipho-card .sipho-bubble::before,
-  .sipho-card .sipho-bubble::after {
-    display: none;
+  .sipho-plate {
+    font-size: 0.85rem;
+  }
+
+  .sipho-says {
+    font-size: 1rem;
   }
 }
 

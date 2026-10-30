@@ -9,16 +9,30 @@
 //   corner of the main menu, with a speech bubble that steps
 //   through the menu lines. main.js hides it on every screen
 //   change, which clears its timer, listeners and element.
-// - withNarrator(): a small static version (no timers) beside
-//   the level intro card and the results screens.
+// - narratorDialogueHTML(): a static dialogue box (round
+//   portrait, name plate, speech bubble; no timers) docked to
+//   the top of the level intro card and the results cards.
 
 import { STORY } from './story.js';
 
-// Relative, so it also works from the department server's subfolder
-const IMAGE_SRC = './assets/ui/sipho-wave.webp';
+// Relative, so they also work from the department server's subfolder
+const WAVE_SRC = './assets/ui/sipho-wave.webp';
+const PORTRAIT_SRC = './assets/ui/sipho-portrait.webp';
 
 // How long each menu line stays up before the next one
 const ADVANCE_MS = 5000;
+
+// Main menu figure size: 58% of the viewport height, clamped.
+// If he would cover a menu button he shrinks by SIZE_STEP until
+// he fits, and below MIN_SIZE he is hidden instead.
+const MAX_SIZE = 640;
+const BASE_SIZE = 360;
+const MIN_SIZE = 240;
+const SIZE_STEP = 0.9;
+
+function menuSize() {
+  return Math.min(MAX_SIZE, Math.max(BASE_SIZE, window.innerHeight * 0.58));
+}
 
 function escapeHTML(text) {
   return String(text)
@@ -28,28 +42,26 @@ function escapeHTML(text) {
     .replace(/"/g, '&quot;');
 }
 
-function portrait(className) {
-  // alt="" because the bubble carries the meaning; a missing
-  // image then leaves an empty space instead of a broken icon.
-  return `<img class="${className}" src="${IMAGE_SRC}" alt="" width="800" height="800" decoding="async" draggable="false">`;
+// alt="" because the bubble and name plate carry the meaning; a
+// missing image then leaves an empty space, not a broken icon.
+function image(className, src, size) {
+  return `<img class="${className}" src="${src}" alt="" width="${size}" height="${size}" decoding="async" draggable="false">`;
 }
 
 // ============================================================
-// SMALL VERSION (level intro, results)
+// DIALOGUE BOX (level intro, results)
 // ============================================================
 
-export function narratorCardHTML(line) {
+// Put it straight before the screen's .sign card: it docks to
+// the card's top edge at the same width (theme.css).
+export function narratorDialogueHTML(line) {
   return `
-    <aside class="sipho-card" aria-label="${escapeHTML(STORY.narrator)}">
-      <p class="sipho-bubble sipho-bubble-down">${escapeHTML(line)}</p>
-      ${portrait('sipho-portrait')}
-    </aside>
+    <div class="sipho-dialogue">
+      ${image('sipho-avatar', PORTRAIT_SRC, 320)}
+      <p class="sipho-plate">${escapeHTML(STORY.narrator)}</p>
+      <p class="sipho-bubble sipho-says">${escapeHTML(line)}</p>
+    </div>
   `;
-}
-
-// Puts Bra Sipho beside an in-game screen column.
-export function withNarrator(columnHTML, line) {
-  return `<div class="sipho-row">${columnHTML}${narratorCardHTML(line)}</div>`;
 }
 
 // ============================================================
@@ -76,7 +88,7 @@ function overlaps(a, b) {
 export class MenuNarrator {
   // host: the overlay element to draw in (anchored bottom-right).
   // getObstacles: elements he must never cover (the menu buttons
-  // and route sign); if he would, he is hidden instead.
+  // and route sign); if he would, he shrinks, or hides when too small.
   constructor({ host, lines = STORY.menu, getObstacles = () => [] }) {
     this.host = host;
     this.lines = lines;
@@ -98,12 +110,15 @@ export class MenuNarrator {
     const root = document.createElement('div');
     root.className = 'sipho-menu';
     root.innerHTML = `
-      ${portrait('sipho-figure')}
+      ${image('sipho-figure', WAVE_SRC, 800)}
       <div class="sipho-say" role="group" aria-label="${escapeHTML(STORY.narrator)}">
-        <button type="button" class="sipho-bubble sipho-bubble-right" aria-live="polite">
-          <span class="sipho-line"></span>
-          <span class="sipho-count" aria-hidden="true"></span>
-        </button>
+        <div class="sipho-bubble sipho-bubble-right">
+          <p class="sipho-line" aria-live="polite"></p>
+          <div class="sipho-foot">
+            <span class="sipho-count" aria-hidden="true"></span>
+            <button type="button" class="sipho-next" aria-label="Next line">›</button>
+          </div>
+        </div>
         <button type="button" class="sipho-skip">skip</button>
       </div>
     `;
@@ -113,6 +128,8 @@ export class MenuNarrator {
     this.listeners = new AbortController();
     const { signal } = this.listeners;
 
+    // Clicking anywhere on the bubble advances; the Next button is
+    // inside it, so its clicks (and Enter / Space) land here too.
     root.querySelector('.sipho-bubble').addEventListener('click', () => this.next(), { signal });
     root.querySelector('.sipho-skip').addEventListener('click', () => this.skip(), { signal });
     window.addEventListener('resize', () => this.fit(), { signal });
@@ -151,9 +168,15 @@ export class MenuNarrator {
   }
 
   render() {
+    const last = this.index >= this.lines.length - 1;
+
     this.root.querySelector('.sipho-line').textContent = this.lines[this.index];
     this.root.querySelector('.sipho-count').textContent =
       `${this.index + 1} / ${this.lines.length}`;
+    // On the last line the button closes the bubble
+    const button = this.root.querySelector('.sipho-next');
+    button.textContent = last ? '✓' : '›';
+    button.setAttribute('aria-label', last ? 'Close' : 'Next line');
   }
 
   schedule() {
@@ -192,13 +215,9 @@ export class MenuNarrator {
     this.fit();
   }
 
-  // Hide him if he or his bubble would cover a menu button.
-  fit() {
+  // True if he or his bubble covers a menu button or the sign.
+  covers(obstacles) {
     const root = this.root;
-    if (!root) return;
-
-    root.classList.remove('is-tucked');
-
     const parts = [root.querySelector('.sipho-figure')];
     if (!root.classList.contains('is-quiet')) {
       parts.push(root.querySelector('.sipho-say'));
@@ -209,12 +228,33 @@ export class MenuNarrator {
       .filter(el => el.offsetWidth > 0)
       .map(el => layoutRect(el, root));
 
-    const covered = [...this.getObstacles()].some(el => {
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) return false;
-      return boxes.some(box => overlaps(box, r));
-    });
+    return obstacles.some(r => boxes.some(box => overlaps(box, r)));
+  }
 
-    root.classList.toggle('is-tucked', covered);
+  // Start at the full size and shrink step by step until he
+  // covers nothing; hide him if that would take him below MIN_SIZE.
+  fit() {
+    const root = this.root;
+    if (!root) return;
+
+    root.classList.remove('is-tucked');
+
+    const obstacles = [...this.getObstacles()]
+      .map(el => el.getBoundingClientRect())
+      .filter(r => r.width > 0 && r.height > 0);
+
+    let size = menuSize();
+    root.style.setProperty('--sipho-size', `${Math.round(size)}px`);
+
+    while (this.covers(obstacles)) {
+      size *= SIZE_STEP;
+
+      if (size < MIN_SIZE) {
+        root.classList.add('is-tucked');
+        return;
+      }
+
+      root.style.setProperty('--sipho-size', `${Math.round(size)}px`);
+    }
   }
 }

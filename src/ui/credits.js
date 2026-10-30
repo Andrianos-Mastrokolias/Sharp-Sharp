@@ -199,7 +199,7 @@ export const CREDITS = [
       {
         name: 'Bra Sipho character art',
         detail: 'Generated with Gemini Nano Banana from a team-written prompt, edited by the team.',
-        files: ['ui/sipho-wave.webp']
+        files: ['ui/sipho-wave.webp', 'ui/sipho-portrait.webp']
       }
     ]
   },
