@@ -74,6 +74,8 @@ vehicle-model authenticity.
 - The angle is cut into 120 slices; a hash picks which slices carry a streak, and the centre (radius < 0.28) always stays clear.
 - `uTime` (uniform): seconds of driving; the dash pattern `fract(radius * 4.0 - uTime * 3.0)` scrolls the streaks outward.
 - `uSpeed` (uniform): 0..1, eased each frame from the taxi's speed, 0 below 40 km/h and 1 from 140 km/h; it scales the streaks' opacity (at most 0.35).
+- `uPursuit` (uniform): 0..1, eased each frame from the same pursuit state the HUD's "on your tail" meter shows: 0 when clear, the pressure while chasing, 1 when SPOTTED (switched off with `SIREN_EDGES = false`).
+- The siren glow uses the same centred radius (0 in the middle, 1 at the edges), red on the left half and blue on the right, swapping sides twice a second with `step(0.5, fract(uTime * 2.0))`; its alpha (at most 0.35) is added to the speed lines in the same draw call.
 
 ## Assets and attribution
 
