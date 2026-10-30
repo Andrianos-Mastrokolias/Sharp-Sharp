@@ -47,7 +47,14 @@ Hitting a pedestrian slows the taxi and, on Level 1, costs 50 points.
   handbrake, a spring suspension, gravity, collisions, and a cargo model with
   straps and loads that can fly off.
 - **Custom shaders:** a headlight beam, a heat haze, a procedural sky dome
-  and a vertex shader that animates the pedestrians.
+  and a vertex shader that animates the pedestrians. A screen overlay shader
+  (`src/shaders/SpeedLinesShader.js`), drawn on one quad attached to the
+  camera, adds speed lines and a police siren glow in a single draw call. The
+  speed lines turn `vUv` into polar coordinates, cut the circle into slices,
+  light a random set of them with a hash, and scroll the streaks outward with
+  `uTime`; their strength follows `uSpeed`. The siren glows red on the left
+  edge and blue on the right, swapping sides with `uTime`, and its strength
+  follows `uPursuit`, the police pressure.
 - **Lighting and effects:** a lighting preset for each level, HDRI lighting
   and reflections, soft shadows, fog, dust, and a skyline backdrop.
 - **Police pursuit AI:** patrol, spot, react, chase and capture, tuned per
@@ -55,8 +62,11 @@ Hitting a pedestrian slows the taxi and, on Level 1, costs 50 points.
 - **A living world:** moving traffic, rival taxis with different driving
   personalities, hundreds of pedestrians, and runners.
 - **Three cameras:** chase, bumper and interior.
-- **Interface:** a loading screen, menus, level select, HUD with score and
-  countdown, pause, settings (volume, mute, graphics resolution) and credits.
+- **Interface:** a loading screen, menus, level select, HUD with score, a
+  3-2-1 start countdown, score pop-ups, pause, settings (volume, mute,
+  graphics resolution), credits, and restarting without reloading the page.
+  Bra Sipho, the narrator character, introduces the game on the menu, briefs
+  you before each level and reacts to your results.
 - **Audio:** recorded engine, siren and impact sounds, plus synthesised
   race cues.
 - **Performance:** merged and instanced meshes, nothing allocated per frame,
@@ -104,7 +114,7 @@ src/
   vehicle/        taxi, vehicle physics and cargo
   world/          levels, pursuit AI, traffic, rival taxis, environments
   graphics/       lighting, sky, materials, effects, skyline, dust
-  shaders/        headlight beam and heat haze shaders
+  shaders/        headlight beam, heat haze, and speed-lines/siren overlay shaders
   cameras/        the three camera modes
   audio/          sound, volume and the race cues
   input/          optional mouse driving
@@ -140,8 +150,8 @@ to the Node version, so use Node 24.
 | Kayura Govindsammy | Vehicle physics, cargo and rival taxis |
 | Andrianos Mastrokolias | Graphics, lighting, shaders, cameras, the taxi model and the rank scenery |
 | Abdur-Rahman Perin | Audio and settings |
-| Leah Ramdeen | Levels, environments, pursuit AI, traffic and pedestrians |
-| Suhail Seedat | Interface, HUD, game flow and scoring |
+| Leah Ramdeen | Levels, environments, pursuit AI, traffic, pedestrians, build and hosting |
+| Suhail Seedat | Interface, HUD, game state machine and restart, countdown and score pop-ups, Bra Sipho narrator, speed-lines and siren shader |
 
 What each of us built:
 
@@ -164,13 +174,17 @@ What each of us built:
   HUD and countdown tests.
 
 Parts of the code and tests were written with AI coding assistants (Claude
-Code and Codex). AI co-authors are recorded in the commit history.
+Code and Codex). AI co-authors are recorded in the commit history. Bra
+Sipho's character art was generated with Gemini, using freely available
+online images as inspiration.
 
 ## Credits
 
 Everything we did not make ourselves is listed, with its source and licence,
 on the in-game Credits screen. In short: three.js and Vite; the Bungee, Alfa
 Slab One, Rye and Barlow fonts (SIL Open Font Licence, through Fontsource);
-Poly Haven textures and HDRIs (CC0); recorded sounds from Freesound (CC0); and
-the taxi model by googlenaut on SketchUp 3D Warehouse. The police car, traffic
+Poly Haven textures and HDRIs (CC0); recorded sounds from Freesound (CC0);
+the taxi model by googlenaut on SketchUp 3D Warehouse; and Bra Sipho's
+character art, generated with Gemini (Nano Banana) from a team-written prompt
+and edited by the team. The police car, traffic
 cars, pedestrians and street props are built in code.
