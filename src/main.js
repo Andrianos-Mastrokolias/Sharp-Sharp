@@ -51,6 +51,8 @@ import {
 import { Hud } from './ui/Hud.js';
 import { CountdownTracker } from './ui/countdown.js';
 import { CREDITS } from './ui/credits.js';
+import { STORY } from './ui/story.js';
+import { MenuNarrator, narratorDialogueHTML } from './ui/narrator.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { readPreferences, savePreferences, applyQuality } from './game/preferences.js';
 import { settingsHTML } from './ui/settings.js';
@@ -415,6 +417,14 @@ panel.className = 'ss-panel';
 screen.appendChild(panel);
 document.body.appendChild(screen);
 
+// Bra Sipho on the main menu; hidden again by every
+// showScreen / hideScreen, which clears his timer and element.
+const menuNarrator = new MenuNarrator({
+  host: screen,
+  lines: STORY.menu,
+  getObstacles: () => panel.querySelectorAll('button, summary, .sign, .controls')
+});
+
 const screenActions = {
   startGame: () => {
     results.length = 0;
@@ -528,6 +538,7 @@ applyGraphicsQuality();
 });
 
 function showScreen(html, variant = 'scrim') {
+  menuNarrator.hide();
   audio.setActive(false);
   panel.innerHTML = html;
   panel.scrollTop = 0;
@@ -537,6 +548,7 @@ function showScreen(html, variant = 'scrim') {
 }
 
 function hideScreen() {
+  menuNarrator.hide();
   screen.classList.remove('visible');
 }
 
@@ -549,6 +561,7 @@ function showMainMenu() {
     mainMenuHTML(LEVELS),
     'menu'
   );
+  menuNarrator.show();
 }
 
 // ============================================================
@@ -561,6 +574,8 @@ function showLevelIntro(level) {
 
   showScreen(`
     <div class="ss-column">
+      ${narratorDialogueHTML(STORY.intro[level])}
+
       <div class="sign">
         <div class="sign-head">
           LEVEL ${level} OF ${LAST_LEVEL}
@@ -664,6 +679,8 @@ function completeLevel(event) {
         ]
       ])}
 
+      ${narratorDialogueHTML(STORY.win)}
+
       <div class="sign">
         <div class="sign-head">
           LEVEL ${currentLevel} COMPLETE
@@ -732,6 +749,8 @@ function failLevel(reason, flavour = 'eish') {
       ]])}
 
       <p class="ss-reason">${reason}</p>
+
+      ${narratorDialogueHTML(STORY.lose)}
 
       <div class="sign">
         <div class="sign-head">
@@ -871,6 +890,8 @@ function finishGame() {
           ]
         ])}
 
+        ${narratorDialogueHTML(STORY.win)}
+
         <div class="sign">
           <div class="sign-head">
             LEVEL ${LAST_LEVEL} COMPLETE
@@ -957,6 +978,8 @@ function finishGame() {
       <p class="ss-reason">
         Sharp-sharp, driver. Every load delivered.
       </p>
+
+      ${narratorDialogueHTML(STORY.win)}
 
       <div class="sign">
         <div class="sign-head">
