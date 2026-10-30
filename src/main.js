@@ -51,7 +51,7 @@ import { Hud } from './ui/Hud.js';
 import { CountdownTracker } from './ui/countdown.js';
 import { CREDITS } from './ui/credits.js';
 import { STORY } from './ui/story.js';
-import { MenuNarrator, withNarrator } from './ui/narrator.js';
+import { MenuNarrator, narratorDialogueHTML } from './ui/narrator.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { readPreferences, savePreferences, applyQuality } from './game/preferences.js';
 import { settingsHTML } from './ui/settings.js';
@@ -483,8 +483,10 @@ function showLevelIntro(level) {
   const config = LEVELS[level];
   const route = ROUTES[level];
 
-  showScreen(withNarrator(`
+  showScreen(`
     <div class="ss-column">
+      ${narratorDialogueHTML(STORY.intro[level])}
+
       <div class="sign">
         <div class="sign-head">
           LEVEL ${level} OF ${LAST_LEVEL}
@@ -517,7 +519,7 @@ function showLevelIntro(level) {
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
-  `, STORY.intro[level]));
+  `);
 }
 
 // ============================================================
@@ -569,7 +571,7 @@ function completeLevel(event) {
     return;
   }
 
-  showScreen(withNarrator(`
+  showScreen(`
     <div class="ss-column">
       ${lockup([
         [
@@ -587,6 +589,8 @@ function completeLevel(event) {
           }
         ]
       ])}
+
+      ${narratorDialogueHTML(STORY.win)}
 
       <div class="sign">
         <div class="sign-head">
@@ -620,7 +624,7 @@ function completeLevel(event) {
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
-  `, STORY.win));
+  `);
 }
 
 // ============================================================
@@ -640,7 +644,7 @@ function failLevel(reason, flavour = 'eish') {
 
   const cargo = cargoSystem.getState();
 
-  showScreen(withNarrator(`
+  showScreen(`
     <div class="ss-column">
       ${lockup([[
         {
@@ -656,6 +660,8 @@ function failLevel(reason, flavour = 'eish') {
       ]])}
 
       <p class="ss-reason">${reason}</p>
+
+      ${narratorDialogueHTML(STORY.lose)}
 
       <div class="sign">
         <div class="sign-head">
@@ -681,7 +687,7 @@ function failLevel(reason, flavour = 'eish') {
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
-  `, STORY.lose));
+  `);
 }
 
 // ============================================================
@@ -776,7 +782,7 @@ function finishGame() {
       item => item.level === LAST_LEVEL
     );
 
-    showScreen(withNarrator(`
+    showScreen(`
       <div class="ss-column">
         ${lockup([
           [
@@ -794,6 +800,8 @@ function finishGame() {
             }
           ]
         ])}
+
+        ${narratorDialogueHTML(STORY.win)}
 
         <div class="sign">
           <div class="sign-head">
@@ -828,7 +836,7 @@ function finishGame() {
           labelButton('mainMenu', 'MAIN MENU')
         )}
       </div>
-    `, STORY.win));
+    `);
 
     return;
   }
@@ -859,7 +867,7 @@ function finishGame() {
     )
     .join('');
 
-  showScreen(withNarrator(`
+  showScreen(`
     <div class="ss-column">
       ${lockup([
         [
@@ -881,6 +889,8 @@ function finishGame() {
       <p class="ss-reason">
         Sharp-sharp, driver. Every load delivered.
       </p>
+
+      ${narratorDialogueHTML(STORY.win)}
 
       <div class="sign">
         <div class="sign-head">
@@ -911,7 +921,7 @@ function finishGame() {
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
-  `, STORY.win));
+  `);
 }
 
 // ============================================================

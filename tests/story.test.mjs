@@ -1,12 +1,12 @@
 // Story test: node --test tests/story.test.mjs
 // Bra Sipho's lines (src/ui/story.js): the menu lines, one intro line for every
-// level, a win and a lose line, and no empty strings anywhere. Plus the small
-// narrator card puts a line on screen as text, not HTML.
+// level, a win and a lose line, and no empty strings anywhere. Plus the dialogue
+// box puts a line on screen as text, not HTML.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { STORY } from '../src/ui/story.js';
 import { LEVELS } from '../src/world/LevelManager.js';
-import { narratorCardHTML, withNarrator } from '../src/ui/narrator.js';
+import { narratorDialogueHTML } from '../src/ui/narrator.js';
 
 const isLine = value => typeof value === 'string' && value.trim().length > 0;
 
@@ -59,12 +59,11 @@ test('no empty strings anywhere', () => {
   }
 });
 
-test('the narrator card shows a line as text', () => {
-  const html = narratorCardHTML('Eish <b>"cops"</b> & co');
+test('the dialogue box shows a line as text, with his name and portrait', () => {
+  const html = narratorDialogueHTML('Eish <b>"cops"</b> & co');
   assert.match(html, /Eish &lt;b&gt;&quot;cops&quot;&lt;\/b&gt; &amp; co/);
-  assert.match(html, /\.\/assets\/ui\/sipho-wave\.webp/);
-
-  const screen = withNarrator('<div class="ss-column">X</div>', STORY.win);
-  assert.ok(screen.startsWith('<div class="sipho-row"><div class="ss-column">X</div>'));
-  assert.ok(screen.includes(STORY.win));
+  assert.match(html, /class="sipho-plate">Bra Sipho</);
+  // Relative path, so it works from the department server's subfolder
+  assert.match(html, /src="\.\/assets\/ui\/sipho-portrait\.webp"/);
+  assert.ok(narratorDialogueHTML(STORY.win).includes(STORY.win));
 });
