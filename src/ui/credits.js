@@ -198,7 +198,7 @@ export const CREDITS = [
     entries: [
       {
         name: 'Bra Sipho character art',
-        detail: 'Generated with [TOOL NAME] from a team-written prompt, edited by the team.',
+        detail: 'Generated with Gemini Nano Banana from a team-written prompt, edited by the team.',
         files: ['ui/sipho-wave.webp']
       }
     ]
