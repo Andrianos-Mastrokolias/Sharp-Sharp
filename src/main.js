@@ -129,6 +129,8 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   1000
 );
+// Main gameplay camera renders normal scenery and dust.
+camera.layers.enable(1);
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
