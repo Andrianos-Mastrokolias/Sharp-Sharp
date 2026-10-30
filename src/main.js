@@ -50,6 +50,8 @@ import {
 import { Hud } from './ui/Hud.js';
 import { CountdownTracker } from './ui/countdown.js';
 import { CREDITS } from './ui/credits.js';
+import { STORY } from './ui/story.js';
+import { MenuNarrator, withNarrator } from './ui/narrator.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { readPreferences, savePreferences, applyQuality } from './game/preferences.js';
 import { settingsHTML } from './ui/settings.js';
@@ -326,6 +328,14 @@ panel.className = 'ss-panel';
 screen.appendChild(panel);
 document.body.appendChild(screen);
 
+// Bra Sipho on the main menu; hidden again by every
+// showScreen / hideScreen, which clears his timer and element.
+const menuNarrator = new MenuNarrator({
+  host: screen,
+  lines: STORY.menu,
+  getObstacles: () => panel.querySelectorAll('button, summary, .sign, .controls')
+});
+
 const screenActions = {
   startGame: () => {
     results.length = 0;
@@ -439,6 +449,7 @@ applyGraphicsQuality();
 });
 
 function showScreen(html, variant = 'scrim') {
+  menuNarrator.hide();
   audio.setActive(false);
   panel.innerHTML = html;
   panel.scrollTop = 0;
@@ -448,6 +459,7 @@ function showScreen(html, variant = 'scrim') {
 }
 
 function hideScreen() {
+  menuNarrator.hide();
   screen.classList.remove('visible');
 }
 
@@ -460,6 +472,7 @@ function showMainMenu() {
     mainMenuHTML(LEVELS),
     'menu'
   );
+  menuNarrator.show();
 }
 
 // ============================================================
@@ -470,7 +483,7 @@ function showLevelIntro(level) {
   const config = LEVELS[level];
   const route = ROUTES[level];
 
-  showScreen(`
+  showScreen(withNarrator(`
     <div class="ss-column">
       <div class="sign">
         <div class="sign-head">
@@ -504,7 +517,7 @@ function showLevelIntro(level) {
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
-  `);
+  `, STORY.intro[level]));
 }
 
 // ============================================================
@@ -556,7 +569,7 @@ function completeLevel(event) {
     return;
   }
 
-  showScreen(`
+  showScreen(withNarrator(`
     <div class="ss-column">
       ${lockup([
         [
@@ -607,7 +620,7 @@ function completeLevel(event) {
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
-  `);
+  `, STORY.win));
 }
 
 // ============================================================
@@ -627,7 +640,7 @@ function failLevel(reason, flavour = 'eish') {
 
   const cargo = cargoSystem.getState();
 
-  showScreen(`
+  showScreen(withNarrator(`
     <div class="ss-column">
       ${lockup([[
         {
@@ -668,7 +681,7 @@ function failLevel(reason, flavour = 'eish') {
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
-  `);
+  `, STORY.lose));
 }
 
 // ============================================================
@@ -763,7 +776,7 @@ function finishGame() {
       item => item.level === LAST_LEVEL
     );
 
-    showScreen(`
+    showScreen(withNarrator(`
       <div class="ss-column">
         ${lockup([
           [
@@ -815,7 +828,7 @@ function finishGame() {
           labelButton('mainMenu', 'MAIN MENU')
         )}
       </div>
-    `);
+    `, STORY.win));
 
     return;
   }
@@ -846,7 +859,7 @@ function finishGame() {
     )
     .join('');
 
-  showScreen(`
+  showScreen(withNarrator(`
     <div class="ss-column">
       ${lockup([
         [
@@ -898,7 +911,7 @@ function finishGame() {
         labelButton('mainMenu', 'MAIN MENU')
       )}
     </div>
-  `);
+  `, STORY.win));
 }
 
 // ============================================================

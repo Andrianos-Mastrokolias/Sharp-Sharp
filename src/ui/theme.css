@@ -1203,3 +1203,228 @@ summary.label:focus-visible {
   bottom: 1rem;
   transform: translateX(-50%);
 }
+
+/* ============================================================
+   NARRATOR: BRA SIPHO (narrator.js, lines in story.js)
+   ============================================================ */
+
+/* Speech bubble: cream card, ink border, chunky shadow */
+.sipho-bubble {
+  position: relative;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.7rem 0.95rem;
+
+  background: var(--cream);
+  border: 4px solid var(--ink);
+  border-radius: 16px;
+  box-shadow: 5px 5px 0 var(--ink);
+
+  color: var(--ink);
+  font-family: var(--font-sign);
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: left;
+}
+
+/* Tail: an ink triangle with a cream one on top */
+.sipho-bubble::before,
+.sipho-bubble::after {
+  content: '';
+  position: absolute;
+  border: solid transparent;
+}
+
+/* Tail on the right, pointing at him (main menu) */
+.sipho-bubble-right::before {
+  top: 55%;
+  left: 100%;
+  border-width: 12px 0 12px 18px;
+  border-left-color: var(--ink);
+}
+
+.sipho-bubble-right::after {
+  top: calc(55% + 6px);
+  left: calc(100% - 6px);
+  border-width: 6px 0 6px 11px;
+  border-left-color: var(--cream);
+}
+
+/* Tail underneath, pointing down at him (small version) */
+.sipho-bubble-down::before {
+  top: 100%;
+  right: 30%;
+  border-width: 18px 12px 0 12px;
+  border-top-color: var(--ink);
+}
+
+.sipho-bubble-down::after {
+  top: calc(100% - 6px);
+  right: calc(30% + 6px);
+  border-width: 11px 6px 0 6px;
+  border-top-color: var(--cream);
+}
+
+/* ---------- Main menu: bottom-right corner of the screen ---------- */
+
+.sipho-menu {
+  --sipho-size: min(34vh, 24vw);
+
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+
+  width: var(--sipho-size);
+  height: var(--sipho-size);
+
+  pointer-events: none;
+}
+
+/* The art is cropped at its right and bottom edges, so it sits
+   flush in the corner */
+.sipho-figure {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: right bottom;
+
+  transform: translate(105%, 20%);
+  transition: transform 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+
+.sipho-say {
+  position: absolute;
+  right: 96%;
+  bottom: 42%;
+  width: min(19rem, 30vw);
+
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.45rem;
+
+  pointer-events: auto;
+
+  opacity: 0;
+  transform: translateY(0.6rem);
+  transition: opacity 0.25s ease 0.45s, transform 0.25s ease 0.45s;
+}
+
+.sipho-menu.is-in .sipho-figure { transform: none; }
+.sipho-menu.is-in .sipho-say { opacity: 1; transform: none; }
+
+/* Bubble closed (last line read, or skipped) */
+.sipho-menu.is-quiet .sipho-say { display: none; }
+
+/* He would cover a menu button: step aside */
+.sipho-menu.is-tucked { visibility: hidden; }
+
+.sipho-menu .sipho-bubble {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.sipho-menu .sipho-bubble:hover,
+.sipho-menu .sipho-bubble:focus-visible,
+.sipho-skip:hover,
+.sipho-skip:focus-visible {
+  outline: 3px solid var(--mustard);
+  outline-offset: 3px;
+}
+
+.sipho-count {
+  display: block;
+  margin-top: 0.35rem;
+
+  color: var(--maroon);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-align: right;
+}
+
+.sipho-skip {
+  min-height: 32px;
+  padding: 0.3rem 0.75rem;
+
+  background: var(--ink);
+  border: 0;
+  border-radius: 6px;
+
+  color: var(--cream);
+  font-family: var(--font-sign);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* ---------- Small version beside an in-game screen ---------- */
+
+.sipho-row {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 2rem 1rem;
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem 2.5rem;
+}
+
+.sipho-row > .ss-column {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.sipho-card {
+  flex: 0 0 15rem;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.sipho-portrait {
+  width: 13rem;
+  height: 13rem;
+  object-fit: contain;
+  object-position: center bottom;
+}
+
+/* ---------- Narrow screens and reduced motion ---------- */
+
+@media (max-width: 900px) {
+  .sipho-menu,
+  .sipho-portrait {
+    display: none;
+  }
+
+  /* Keep his line, as a plain bubble above the screen */
+  .sipho-card {
+    order: -1;
+    flex-basis: min(34rem, calc(100vw - 2rem));
+  }
+
+  .sipho-card .sipho-bubble::before,
+  .sipho-card .sipho-bubble::after {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sipho-figure,
+  .sipho-say {
+    transition: none;
+  }
+}

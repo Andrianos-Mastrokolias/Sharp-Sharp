@@ -194,6 +194,17 @@ export const CREDITS = [
   },
 
   {
+    heading: 'Character art',
+    entries: [
+      {
+        name: 'Bra Sipho character art',
+        detail: 'Generated with [TOOL NAME] from a team-written prompt, edited by the team.',
+        files: ['ui/sipho-wave.webp']
+      }
+    ]
+  },
+
+  {
     heading: 'Adapted code',
     entries: [
       {
