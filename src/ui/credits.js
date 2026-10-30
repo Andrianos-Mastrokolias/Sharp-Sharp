@@ -228,7 +228,8 @@ export const CREDITS = [
           '(widely used; popularised by The Book of Shaders)',
         files: [
           'src/shaders/HeadlightBeamShader.js',
-          'src/shaders/HeatHazeShader.js'
+          'src/shaders/HeatHazeShader.js',
+          'src/shaders/SpeedLinesShader.js'
         ]
       }
     ]
