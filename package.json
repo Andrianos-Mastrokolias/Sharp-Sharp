@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+<<<<<<< HEAD
     "test": "node --test tests/audio-settings.test.mjs && node --test tests/story.test.mjs && node tests/budget.mjs && node tests/environments.test.mjs && node tests/people.test.mjs && node tests/traffic.test.mjs && node tests/pursuit.test.mjs && node tests/rank-race.test.mjs && node tests/pedestrians.test.mjs && node tests/hud.test.mjs && node tests/countdown.test.mjs && node tests/score.test.mjs && node --test tests/vehicle-physics.test.mjs tests/vehicle-hit.test.mjs tests/vehicle-moving-collision.test.mjs tests/level2-strap-pressure.test.mjs",
+=======
+    "test": "node --test tests/audio-settings.test.mjs && node --test tests/speed-lines.test.mjs && node tests/budget.mjs && node tests/environments.test.mjs && node tests/people.test.mjs && node tests/traffic.test.mjs && node tests/pursuit.test.mjs && node tests/rank-race.test.mjs && node tests/pedestrians.test.mjs && node tests/hud.test.mjs && node tests/countdown.test.mjs && node tests/score.test.mjs && node --test tests/vehicle-physics.test.mjs tests/vehicle-hit.test.mjs tests/vehicle-moving-collision.test.mjs tests/level2-strap-pressure.test.mjs",
+>>>>>>> origin/main
     "test:audio": "node --test tests/audio-settings.test.mjs",
     "test:audio:smoke": "node tests/tools/audio-settings-smoke.mjs"
   },

@@ -24,6 +24,7 @@ import { MaterialLibrary } from './graphics/MaterialLibrary.js';
 import { SkyManager } from './graphics/SkyManager.js';
 import { SkylineManager } from './graphics/SkylineManager.js';
 import { RearViewMirror } from './graphics/RearViewMirror.js';
+import { createSpeedLinesMaterial } from './shaders/SpeedLinesShader.js';
 import { LevelManager, LEVELS } from './world/LevelManager.js';
 import {
   createBox,
@@ -77,6 +78,10 @@ const SCORE_CUES = { beaten: 'beaten', firstOut: 'firstOut' };
 // ============================================================
 // GAME CONFIGURATION
 // ============================================================
+
+// Speed-lines shader overlay (src/shaders/SpeedLinesShader.js).
+// Set to false to turn it off.
+const SPEED_LINES = true;
 
 const FIRST_LEVEL = 1;
 const LAST_LEVEL = 3;
@@ -245,6 +250,90 @@ const rearViewMirror = new RearViewMirror({
 });
 
 let rearViewRequested = true;
+
+// ============================================================
+// SPEED LINES
+// ============================================================
+
+// A quad parented to the camera, just past its near plane, that
+// fills the view; SpeedLinesShader draws the streaks on it. It is
+// on its own layer, so the rear-view mirror camera never sees it.
+const SPEED_LINES_LAYER = 1;
+const SPEED_LINES_MIN_KMH = 40;   // no lines below this
+const SPEED_LINES_FULL_KMH = 140; // full strength from here
+const SPEED_LINES_EASE = 4;       // how fast uSpeed follows (per second)
+
+let speedLines = null;
+let speedLinesFit = '';
+
+if (SPEED_LINES) {
+  speedLines = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    createSpeedLinesMaterial()
+  );
+  speedLines.renderOrder = 1000;
+  speedLines.frustumCulled = false;
+  speedLines.visible = false;
+  speedLines.layers.set(SPEED_LINES_LAYER);
+
+  camera.layers.enable(SPEED_LINES_LAYER);
+  camera.add(speedLines);
+  // A camera's children are only drawn when the camera is in the scene.
+  scene.add(camera);
+}
+
+// Size the quad to the view at 1.5x the near distance. Runs again
+// whenever the fov, aspect or near plane changed (resize, camera switch).
+function fitSpeedLines() {
+  const fit = `${camera.fov}|${camera.aspect}|${camera.near}`;
+  if (fit === speedLinesFit) return;
+  speedLinesFit = fit;
+
+  const distance = camera.near * 1.5;
+  const height =
+    2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+
+  speedLines.position.set(0, 0, -distance);
+  speedLines.scale.set(height * camera.aspect, height, 1);
+}
+
+// Level load and retry: no lines until the taxi is fast again.
+function resetSpeedLines() {
+  if (!speedLines) return;
+
+  speedLines.material.uniforms.uTime.value = 0;
+  speedLines.material.uniforms.uSpeed.value = 0;
+  speedLines.visible = false;
+}
+
+// Every frame; only shown while playing (hidden on menus, pause, results).
+function updateSpeedLines(dt) {
+  if (!speedLines) return;
+
+  speedLines.visible = phase === GamePhase.PLAYING;
+  if (!speedLines.visible) return;
+
+  const uniforms = speedLines.material.uniforms;
+  const speedKmh = Math.abs(vehicle.getSpeed()) * 3.6;
+  const target = THREE.MathUtils.clamp(
+    (speedKmh - SPEED_LINES_MIN_KMH) / (SPEED_LINES_FULL_KMH - SPEED_LINES_MIN_KMH),
+    0,
+    1
+  );
+
+  uniforms.uTime.value += dt;
+  uniforms.uSpeed.value +=
+    (target - uniforms.uSpeed.value) * Math.min(1, dt * SPEED_LINES_EASE);
+
+  fitSpeedLines();
+}
+
+function disposeSpeedLines() {
+  if (!speedLines) return;
+
+  speedLines.geometry.dispose();
+  speedLines.material.dispose();
+}
 
 // ============================================================
 // MOUSE DRIVE
@@ -990,6 +1079,7 @@ function loadLevel(level, { showIntro = true } = {}) {
   clearKeys();
   hud.clearScorePopups();
   countdown.reset();
+  resetSpeedLines();
 
   currentLevel = level;
 
@@ -1140,6 +1230,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) pauseGame();
 });
 window.addEventListener('pagehide', () => audio.dispose());
+window.addEventListener('pagehide', () => disposeSpeedLines());
 
 // ============================================================
 // HUD
@@ -1275,6 +1366,9 @@ rearViewMirror.setEnabled(
   preferences.quality !== 'low'
 );
 
+// Speed lines follow the camera's final fov for this frame.
+updateSpeedLines(dt);
+
 // Main camera renders normally.
 renderer.render(scene, camera);
 
@@ -1294,6 +1388,7 @@ window.addEventListener('resize', () => {
     window.innerWidth / window.innerHeight;
 
   camera.updateProjectionMatrix();
+  if (speedLines) fitSpeedLines();
 
   renderer.setSize(
     window.innerWidth,
