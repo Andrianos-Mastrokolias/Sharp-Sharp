@@ -48,7 +48,7 @@ import {
   creditsHTML
 } from './ui/screens.js';
 
-import { Hud } from './ui/Hud.js';
+import { Hud, CLEAR_STATES, SPOTTED_STATE } from './ui/Hud.js';
 import { CountdownTracker } from './ui/countdown.js';
 import { CREDITS } from './ui/credits.js';
 import { STORY } from './ui/story.js';
@@ -82,6 +82,8 @@ const SCORE_CUES = { beaten: 'beaten', firstOut: 'firstOut' };
 // Speed-lines shader overlay (src/shaders/SpeedLinesShader.js).
 // Set to false to turn it off.
 const SPEED_LINES = true;
+// Police siren glow at the screen edges while chased (same overlay).
+const SIREN_EDGES = true;
 
 const FIRST_LEVEL = 1;
 const LAST_LEVEL = 3;
@@ -256,17 +258,20 @@ let rearViewRequested = true;
 // ============================================================
 
 // A quad parented to the camera, just past its near plane, that
-// fills the view; SpeedLinesShader draws the streaks on it. It is
-// on its own layer, so the rear-view mirror camera never sees it.
+// fills the view; SpeedLinesShader draws the streaks and the siren
+// edge glow on it. It is on its own layer, so the rear-view mirror
+// camera never sees it.
 const SPEED_LINES_LAYER = 1;
 const SPEED_LINES_MIN_KMH = 40;   // no lines below this
 const SPEED_LINES_FULL_KMH = 140; // full strength from here
 const SPEED_LINES_EASE = 4;       // how fast uSpeed follows (per second)
+const SIREN_EASE = 6;             // how fast uPursuit follows (per second)
 
 let speedLines = null;
 let speedLinesFit = '';
 
-if (SPEED_LINES) {
+// One quad for both effects; either switch can turn its part off.
+if (SPEED_LINES || SIREN_EDGES) {
   speedLines = new THREE.Mesh(
     new THREE.PlaneGeometry(1, 1),
     createSpeedLinesMaterial()
@@ -303,27 +308,54 @@ function resetSpeedLines() {
 
   speedLines.material.uniforms.uTime.value = 0;
   speedLines.material.uniforms.uSpeed.value = 0;
+  speedLines.material.uniforms.uPursuit.value = 0;
   speedLines.visible = false;
 }
 
-// Every frame; only shown while playing (hidden on menus, pause, results).
-function updateSpeedLines(dt) {
+// Siren strength from the pursuit, read the way the HUD's "on your
+// tail" meter reads it (Hud.js): 0 when clear, the pressure (0..1)
+// while chasing, and 1 when SPOTTED so the edges flash.
+function sirenTarget(pursuit) {
+  const state = pursuit ? pursuit.state : 'none';
+
+  if (CLEAR_STATES.includes(state)) return 0;
+  if (state === SPOTTED_STATE) return 1;
+
+  return Math.min(Math.max(pursuit.pressure ?? 0, 0), 1);
+}
+
+// Every frame; only shown while playing (hidden on menus, pause, results),
+// and then only while the speed lines or the siren have something to show.
+// Console test: window.__sirenDebug = true forces the siren on.
+function updateSpeedLines(dt, objective) {
   if (!speedLines) return;
 
-  speedLines.visible = phase === GamePhase.PLAYING;
-  if (!speedLines.visible) return;
+  if (phase !== GamePhase.PLAYING) {
+    speedLines.visible = false;
+    return;
+  }
 
   const uniforms = speedLines.material.uniforms;
   const speedKmh = Math.abs(vehicle.getSpeed()) * 3.6;
-  const target = THREE.MathUtils.clamp(
-    (speedKmh - SPEED_LINES_MIN_KMH) / (SPEED_LINES_FULL_KMH - SPEED_LINES_MIN_KMH),
-    0,
-    1
-  );
+  const target = SPEED_LINES
+    ? THREE.MathUtils.clamp(
+      (speedKmh - SPEED_LINES_MIN_KMH) / (SPEED_LINES_FULL_KMH - SPEED_LINES_MIN_KMH),
+      0,
+      1
+    )
+    : 0;
+  const pursuitTarget = !SIREN_EDGES ? 0
+    : window.__sirenDebug ? 1
+      : sirenTarget(objective.pursuit);
 
   uniforms.uTime.value += dt;
   uniforms.uSpeed.value +=
     (target - uniforms.uSpeed.value) * Math.min(1, dt * SPEED_LINES_EASE);
+  uniforms.uPursuit.value +=
+    (pursuitTarget - uniforms.uPursuit.value) * Math.min(1, dt * SIREN_EASE);
+
+  speedLines.visible =
+    uniforms.uSpeed.value > 0.001 || uniforms.uPursuit.value > 0.001;
 
   fitSpeedLines();
 }
@@ -1367,7 +1399,7 @@ rearViewMirror.setEnabled(
 );
 
 // Speed lines follow the camera's final fov for this frame.
-updateSpeedLines(dt);
+updateSpeedLines(dt, objective);
 
 // Main camera renders normally.
 renderer.render(scene, camera);
